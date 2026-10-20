@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "RetroPlay — Retro Gaming PWA",
+  "short_name": "RetroPlay",
+  "description": "Kişisel retro oyun kütüphanesi",
+  "lang": "tr-TR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0f19",
+  "theme_color": "#0a0f19",
+  "icons": [
+    { "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
