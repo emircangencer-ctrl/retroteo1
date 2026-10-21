@@ -10,5 +10,7 @@ test('rejects files shorter than the header',()=>assert.equal(inspectNesRom(new 
 test('rejects incorrect magic',()=>{const b=ines();b[0]=0;assert.equal(inspectNesRom(b).valid,false);});
 test('rejects zero PRG size',()=>assert.equal(inspectNesRom(ines({prg:0})).valid,false));
 test('rejects truncated PRG/CHR payload',()=>{const b=ines();assert.equal(inspectNesRom(b.slice(0,100)).valid,false);});
+test('validates a header prefix using the original file size for large ROMs',()=>{const b=ines({prg:8,chr:1,mapper:4});const header=b.slice(0,64*1024);const r=inspectNesRom(header,{totalSize:b.length});assert.equal(r.valid,true);assert.equal(r.mapper,4);assert.equal(r.prgBytes,8*16384);});
+test('still rejects a truncated ROM when original size is supplied',()=>{const b=ines({prg:8,chr:1});const header=b.slice(0,16);assert.equal(inspectNesRom(header,{totalSize:header.length}).valid,false);});
 test('accounts for optional trainer',()=>{const b=ines({trainer:true});assert.equal(inspectNesRom(b).valid,true);assert.equal(inspectNesRom(b).trainerBytes,512);});
 test('recognizes NES 2.0 conservatively',()=>{const b=ines();b[7]=(b[7]&0xf3)|0x08;const r=inspectNesRom(b);assert.equal(r.valid,true);assert.equal(r.format,'NES 2.0');assert.equal(r.sizeVerified,false);});
