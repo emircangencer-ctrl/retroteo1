@@ -93,7 +93,7 @@ async function handleFiles(fileList){
       let romValidation=null;
       if(ext==='nes'){
         const header=await file.slice(0,Math.min(file.size,64*1024)).arrayBuffer();
-        romValidation=inspectNesRom(header);
+        romValidation=inspectNesRom(header,{totalSize:file.size});
         if(!romValidation.valid){skipped++;$('#import-results').textContent+=`Atlandı: ${file.name} — NES doğrulaması başarısız: ${romValidation.reason}\n`;continue;}
       }
       const hash=await sha256File(file);
