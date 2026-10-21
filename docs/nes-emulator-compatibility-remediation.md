@@ -25,6 +25,13 @@ Run a small integration spike for a more accurate browser-compatible core, prior
 
 The libretro Nestopia core is GPL-2.0. Before distributing its compiled core with RetroPlay, review and satisfy the applicable license/source-notice obligations. Keep the core and its license notices identifiable. Do not download a third-party binary from an untrusted source. If the distribution/licensing implications are unsuitable, compare another legally compatible core before choosing.
 
+## Current branch changes (not yet a confirmed full fix)
+
+- The dependency remains pinned to `jsnes@2.1.0`. A guarded `postinstall` patch now corrects the MMC3 R0/R1 2 KB CHR-bank alignment rule: register bit 0 is ignored and the following 1 KB bank is selected from the aligned even bank. The patch is idempotent and fails the install if the upstream source no longer matches the expected pinned version, rather than silently editing different code.
+- The player canvas no longer applies an independent CSS maximum height that could scale its width and height inconsistently. It refits on viewport resize.
+- These are concrete correctness improvements, not evidence that every reported visual symptom is resolved. The actual ROM screenshot must still be inspected in-browser and compared with known gameplay. In particular, the reported Batman Returns frame's green diagonal wall and repeated brick/window tiles resemble published gameplay imagery; that one frame alone does not prove a rendering fault.
+- CI can validate the patching logic, syntax, and build. It cannot substitute for visual validation of commercial ROMs, which must stay local and must not be committed to the repository.
+
 ## Migration constraints
 
 - Do not overwrite or migrate existing IndexedDB ROM blobs merely to change emulator engines.
