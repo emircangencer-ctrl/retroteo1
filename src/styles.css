@@ -19,7 +19,7 @@
 .player-header p{margin:0;color:#9eacc2;font-size:13px}
 .player-screen-frame{background:#05080d;border:1px solid #28364b;border-radius:12px;padding:clamp(6px,2vw,14px);overflow:hidden}
 .player-screen{width:100%;min-height:140px;display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;background:#030508;overflow:hidden}
-.player-screen canvas{display:block;max-width:100%;image-rendering:pixelated}
+.player-screen canvas{display:block;max-width:100%;max-height:min(65vh,560px);image-rendering:pixelated}
 .player-error{color:#ff9a9a;white-space:pre-wrap;font-size:13px;margin:10px 0 0}
 .player-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;color:#9eacc2;font-size:12px}
 .player-toolbar>div{display:flex;gap:8px;flex-wrap:wrap}

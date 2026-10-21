@@ -32,6 +32,13 @@ The libretro Nestopia core is GPL-2.0. Before distributing its compiled core wit
 - These are concrete correctness improvements, not evidence that every reported visual symptom is resolved. The actual ROM screenshot must still be inspected in-browser and compared with known gameplay. In particular, the reported Batman Returns frame's green diagonal wall and repeated brick/window tiles resemble published gameplay imagery; that one frame alone does not prove a rendering fault.
 - CI can validate the patching logic, syntax, and build. It cannot substitute for visual validation of commercial ROMs, which must stay local and must not be committed to the repository.
 
+## Second core path added for comparison
+
+- The default player now uses the framework-agnostic `@nesjs/core@2.7.0` API, which supports a substantially broader published mapper set and contains an MMC3 implementation that aligns R0/R1 2 KB CHR bank indices. The existing JSNES engine remains available with `?nescore=jsnes` for side-by-side comparison in the same deploy preview.
+- The new core gets a dedicated Canvas RGBA renderer, scoped keyboard/touch/gamepad input, a requestAnimationFrame timing loop, and a self-hosted AudioWorklet. It does not call a third-party CDN at runtime. The worklet is cached by the existing same-origin service worker after it is fetched.
+- A synthetic mapper-4 smoke test now verifies ROM loading and one rendered 256×240 RGBA frame without storing or publishing a commercial ROM.
+- This is an integration candidate, **not a claim of cycle-accurate emulation or proof that all games are fixed**. The core's own PPU/mapper accuracy still needs real-game visual validation. Keep this PR in draft until the Batman Returns frame and unrelated games are checked in the preview on desktop and mobile.
+
 ## Migration constraints
 
 - Do not overwrite or migrate existing IndexedDB ROM blobs merely to change emulator engines.

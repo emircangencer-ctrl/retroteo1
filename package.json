@@ -8,10 +8,11 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/app.js && node --check src/nes-rom.js && node --check src/zip-rom.js && node --check scripts/patch-jsnes-mapper4.mjs",
+    "check": "node --check src/app.js && node --check src/nes-rom.js && node --check src/zip-rom.js && node --check scripts/patch-jsnes-mapper4.mjs && node --check src/nes-core-player.js && node --check public/nes-audio-processor.js",
     "postinstall": "node scripts/patch-jsnes-mapper4.mjs"
   },
   "dependencies": {
+    "@nesjs/core": "2.7.0",
     "jsnes": "2.1.0"
   },
   "devDependencies": {

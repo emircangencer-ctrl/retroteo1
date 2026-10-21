@@ -1,6 +1,7 @@
 import { inspectNesRom } from './nes-rom.js';
 import { extractRomFilesFromZip } from './zip-rom.js';
 import { Browser as NesBrowser, Controller as NesController } from 'jsnes';
+import { BrowserNesPlayer } from './nes-core-player.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -114,24 +115,155 @@ async function handleFiles(fileList){
   showToast(`${success} ROM dosyası içe aktarıldı. Bu sürümde oynatma desteği yalnızca NES .nes dosyaları içindir.`,success?'success':'error');setView('library');
 }
 
-async function startGame(id){
-  const game=games.find(g=>g.id===id&&!g.demo);
-  if(!game||game.platform!=='NES'||!(game.blob instanceof Blob)){showToast('Bu kayıt için oynatılabilir bir NES dosyası bulunamadı.','error');return;}
-  if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}
-  activeGameId=game.id;emulatorPaused=false;
-  $('#player-title').textContent=game.title;$('#player-status').textContent='ROM yükleniyor…';$('#player-error').textContent='';$('#player-modal').classList.remove('hidden');$('#player-screen').replaceChildren();$('#pause-game').textContent='Ⅱ Duraklat';$('#pause-game').disabled=true;
-  try{
-    const bytes=new Uint8Array(await game.blob.arrayBuffer());
-    if(!inspectNesRom(bytes).valid)throw new Error('ROM başlığı veya dosya uzunluğu geçersiz.');
-    activeEmulator=new NesBrowser({container:$('#player-screen'),onError:error=>{const msg=error?.message||String(error||'Bilinmeyen emülatör hatası');$('#player-error').textContent=`Oyun motoru hatası: ${msg}`;$('#player-status').textContent='Oturum durduruldu';}});
-    activeEmulator.loadROM(bytes);
-    $('#player-status').textContent='Çalışıyor · NES';$('#pause-game').disabled=false;
-    game.lastPlayed=Date.now();await saveGame(game);await refreshGames();
-  }catch(error){if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}$('#player-status').textContent='Başlatılamadı';$('#player-error').textContent=`Bu ROM çalıştırılamadı: ${error?.message||error}. Bazı mapper veya özel ROM biçimleri desteklenmeyebilir.`;showToast('NES oyunu başlatılamadı. Ayrıntı oynatıcı penceresinde.','error');}
+function requestedNesCore() {
+  return new URLSearchParams(window.location.search).get('nescore') === 'jsnes'
+    ? 'jsnes'
+    : 'nesjs';
 }
-function closePlayer(){if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}activeGameId=null;emulatorPaused=false;$('#player-modal').classList.add('hidden');$('#player-screen').replaceChildren();}
-function togglePause(){if(!activeEmulator)return;try{if(emulatorPaused){activeEmulator.start();emulatorPaused=false;$('#pause-game').textContent='Ⅱ Duraklat';$('#player-status').textContent='Çalışıyor · NES';}else{activeEmulator.stop();emulatorPaused=true;$('#pause-game').textContent='▶ Devam et';$('#player-status').textContent='Duraklatıldı';}}catch(error){$('#player-error').textContent=`Duraklatma hatası: ${error.message||error}`;}}
-function wireTouchControls(){const root=$('#touch-controls');root.addEventListener('pointerdown',event=>{const button=event.target.closest('[data-nes-button]');if(!button||!activeEmulator?.nes)return;event.preventDefault();button.setPointerCapture?.(event.pointerId);const key=NesController[button.dataset.nesButton];if(key!==undefined)activeEmulator.nes.buttonDown(1,key);button.classList.add('pressed');});const release=event=>{const button=event.target.closest('[data-nes-button]');if(!button||!activeEmulator?.nes)return;const key=NesController[button.dataset.nesButton];if(key!==undefined)activeEmulator.nes.buttonUp(1,key);button.classList.remove('pressed');};root.addEventListener('pointerup',release);root.addEventListener('pointercancel',release);root.addEventListener('lostpointercapture',release);}
+function playerStatus(label) {
+  const engine = activeEmulator?.engineName || 'NES';
+  const mapper = Number.isInteger(activeEmulator?.romInfo?.mapper)
+    ? ` · Mapper ${activeEmulator.romInfo.mapper}`
+    : Number.isInteger(activeEmulator?.romInfo?.mapperNumber)
+      ? ` · Mapper ${activeEmulator.romInfo.mapperNumber}`
+      : '';
+  return `${label} · ${engine}${mapper}`;
+}
+async function startGame(id) {
+  const game = games.find(g => g.id === id && !g.demo);
+  if (!game || game.platform !== 'NES' || !(game.blob instanceof Blob)) {
+    showToast('Bu kayıt için oynatılabilir bir NES dosyası bulunamadı.', 'error');
+    return;
+  }
+  if (activeEmulator) {
+    try { activeEmulator.destroy(); } catch {}
+    activeEmulator = null;
+  }
+
+  activeGameId = game.id;
+  emulatorPaused = false;
+  $('#player-title').textContent = game.title;
+  $('#player-status').textContent = 'ROM yükleniyor…';
+  $('#player-error').textContent = '';
+  $('#player-modal').classList.remove('hidden');
+  $('#player-screen').replaceChildren();
+  $('#pause-game').textContent = 'Ⅱ Duraklat';
+  $('#pause-game').disabled = true;
+
+  try {
+    const bytes = new Uint8Array(await game.blob.arrayBuffer());
+    const validation = inspectNesRom(bytes);
+    if (!validation.valid) {
+      throw new Error(validation.reason || 'ROM başlığı veya dosya uzunluğu geçersiz.');
+    }
+
+    const reportError = error => {
+      const message = error?.message || String(error || 'Bilinmeyen emülatör hatası');
+      $('#player-error').textContent = `Oyun motoru hatası: ${message}`;
+      $('#player-status').textContent = 'Oturum durduruldu';
+    };
+
+    if (requestedNesCore() === 'jsnes') {
+      // Keep the known engine available for direct A/B comparison.
+      const browser = new NesBrowser({
+        container: $('#player-screen'),
+        onError: reportError
+      });
+      activeEmulator = {
+        engineName: 'JSNES (karşılaştırma)',
+        romInfo: validation,
+        destroy: () => browser.destroy(),
+        pause: () => browser.stop(),
+        resume: () => browser.start(),
+        fitInParent: () => browser.fitInParent(),
+        pressButton: name => {
+          const button = NesController[name];
+          if (button !== undefined) browser.nes.buttonDown(1, button);
+        },
+        releaseButton: name => {
+          const button = NesController[name];
+          if (button !== undefined) browser.nes.buttonUp(1, button);
+        }
+      };
+      browser.loadROM(bytes);
+    } else {
+      const player = new BrowserNesPlayer($('#player-screen'), {
+        onError: reportError,
+        onAudioError: error => {
+          const message = error?.message || String(error);
+          $('#player-error').textContent = `Oyun çalışıyor ancak ses başlatılamadı: ${message}`;
+        }
+      });
+      activeEmulator = player;
+      activeEmulator.romInfo = validation;
+      await player.loadROM(bytes);
+      activeEmulator.romInfo = player.romInfo || validation;
+      await player.start();
+    }
+
+    $('#player-status').textContent = playerStatus('Çalışıyor');
+    $('#pause-game').disabled = false;
+    game.lastPlayed = Date.now();
+    await saveGame(game);
+    await refreshGames();
+  } catch (error) {
+    if (activeEmulator) {
+      try { activeEmulator.destroy(); } catch {}
+      activeEmulator = null;
+    }
+    $('#player-status').textContent = 'Başlatılamadı';
+    $('#player-error').textContent = `Bu ROM çalıştırılamadı: ${error?.message || error}. ROM biçimi ve mapper desteği kontrol edilmeli.`;
+    showToast('NES oyunu başlatılamadı. Ayrıntı oynatıcı penceresinde.', 'error');
+  }
+}
+function closePlayer() {
+  if (activeEmulator) {
+    try { activeEmulator.destroy(); } catch {}
+    activeEmulator = null;
+  }
+  activeGameId = null;
+  emulatorPaused = false;
+  $('#player-modal').classList.add('hidden');
+  $('#player-screen').replaceChildren();
+}
+async function togglePause() {
+  if (!activeEmulator) return;
+  try {
+    if (emulatorPaused) {
+      await activeEmulator.resume();
+      emulatorPaused = false;
+      $('#pause-game').textContent = 'Ⅱ Duraklat';
+      $('#player-status').textContent = playerStatus('Çalışıyor');
+    } else {
+      await activeEmulator.pause();
+      emulatorPaused = true;
+      $('#pause-game').textContent = '▶ Devam et';
+      $('#player-status').textContent = playerStatus('Duraklatıldı');
+    }
+  } catch (error) {
+    $('#player-error').textContent = `Duraklatma/devam hatası: ${error?.message || error}`;
+  }
+}
+function wireTouchControls() {
+  const root = $('#touch-controls');
+  root.addEventListener('pointerdown', event => {
+    const button = event.target.closest('[data-nes-button]');
+    if (!button || !activeEmulator) return;
+    event.preventDefault();
+    try { button.setPointerCapture?.(event.pointerId); } catch {}
+    activeEmulator.pressButton?.(button.dataset.nesButton);
+    button.classList.add('pressed');
+  });
+  const release = event => {
+    const button = event.target.closest('[data-nes-button]');
+    if (!button || !activeEmulator) return;
+    activeEmulator.releaseButton?.(button.dataset.nesButton);
+    button.classList.remove('pressed');
+  };
+  root.addEventListener('pointerup', release);
+  root.addEventListener('pointercancel', release);
+  root.addEventListener('lostpointercapture', release);
+}
 
 async function refreshGames(){const stored=await allStored();games=[...DEMO_GAMES.map(g=>({...g})),...stored];renderAll();}
 async function toggleFavorite(id){const game=games.find(g=>g.id===id);if(!game)return;game.favorite=!game.favorite;if(!game.demo){try{await saveGame(game);}catch(e){game.favorite=!game.favorite;showToast(`Favori kaydedilemedi: ${e.message}`,'error');return;}}renderAll();showToast(game.favorite?'Favorilere eklendi.':'Favorilerden çıkarıldı.');}
