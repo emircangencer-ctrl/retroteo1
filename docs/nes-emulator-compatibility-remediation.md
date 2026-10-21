@@ -17,7 +17,11 @@ Several unrelated NES games show tile/background corruption on desktop and mobil
 
 Run a small integration spike for a more accurate browser-compatible core, prioritizing a self-hosted WebAssembly build of Nestopia/libretro (or FCEUmm as a comparison). Nestopia's project documentation describes it as cycle-accurate and claims compatibility with all officially released titles and most homebrew/hacks. This is a candidate, not a final adoption decision until the artifact, browser API, and performance are tested.
 
-### Licensing gate
+### Candidate comparison and licensing gate
+
+- **Primary candidate: Nestopia JG / libretro Nestopia built locally with Emscripten.** Upstream documentation describes the core as cycle-accurate and reports compatibility with all officially released titles and most homebrew/hacks. This is a claim to validate against our test matrix, not a guarantee for every dump or mapper. A browser build is technically feasible, but the integration work is significant: build the core from pinned source, create a small host adapter for ROM loading/frame/audio/input, and keep the generated WASM/JS assets local.
+- **Fallback / comparison candidate: wasm-nes (C compiled to WebAssembly, MIT).** The public project documents a browser build and reports the `nestest` diagnostic as passed. Its visible test evidence and maturity are much narrower, so its permissive license alone is not enough to select it as the main engine.
+- **Do not embed the full RetroArch Web Player UI as the first solution.** It proves that browser-based libretro cores can run, but it brings a much larger frontend and asset bundle than RetroPlay needs. We should reuse the core/build approach where licensing permits, not replace RetroPlay's UI with a second frontend.
 
 The libretro Nestopia core is GPL-2.0. Before distributing its compiled core with RetroPlay, review and satisfy the applicable license/source-notice obligations. Keep the core and its license notices identifiable. Do not download a third-party binary from an untrusted source. If the distribution/licensing implications are unsuitable, compare another legally compatible core before choosing.
 
