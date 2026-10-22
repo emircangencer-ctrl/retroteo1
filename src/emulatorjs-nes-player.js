@@ -1,10 +1,12 @@
 const DATA_PATH = 'https://cdn.emulatorjs.org/stable/data/';
-export const EMULATORJS_INPUT_INDEX = Object.freeze({ BUTTON_B: 0, BUTTON_SELECT: 2, BUTTON_START: 3, BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7, BUTTON_A: 8 });
+export const EMULATORJS_INPUT_INDEX = Object.freeze({ BUTTON_B: 0, BUTTON_Y: 1, BUTTON_SELECT: 2, BUTTON_START: 3, BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7, BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11 });
 const INPUT_INDEX = EMULATORJS_INPUT_INDEX;
-const KEY_TO_BUTTON = Object.freeze({ ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT', KeyZ:'BUTTON_B', KeyX:'BUTTON_A', Enter:'BUTTON_START', ControlRight:'BUTTON_SELECT' });
+const KEY_TO_BUTTON = Object.freeze({ ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT', KeyZ:'BUTTON_B', KeyX:'BUTTON_A', KeyA:'BUTTON_Y', KeyS:'BUTTON_X', KeyQ:'BUTTON_L', KeyW:'BUTTON_R', Enter:'BUTTON_START', ControlRight:'BUTTON_SELECT' });
+const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD']);
 const HIDDEN_BUTTONS = { playPause:false, play:false, pause:false, restart:false, mute:false, unmute:false, volumeSlider:false, settings:false, fullscreen:false, enterFullscreen:false, exitFullscreen:false, saveState:false, loadState:false, quickSave:false, quickLoad:false, screenshot:false, gamepad:false, cheat:false, cacheManager:false, exitEmulation:false, netplay:false, diskButton:false, contextMenu:false, saveSavFiles:false, loadSavFiles:false };
 const literal = value => JSON.stringify(value).replace(/</g, '\\u003c');
-export function buildEmulatorDocument(gameUrl, gameName) {
+export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes') {
+  if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
   const startup = [
     '(() => {',
     "const notify = (type, details = {}) => parent.postMessage({ source: 'retroplay-emulatorjs', type, ...details }, '*');",
@@ -12,7 +14,7 @@ export function buildEmulatorDocument(gameUrl, gameName) {
     "window.addEventListener('unhandledrejection', event => notify('error', { message: String(event.reason && event.reason.message || event.reason || 'Emülatör başlatılamadı.') }));",
     "window.EJS_player = '#ejs-player';",
     'window.EJS_startOnLoaded = true;',
-    "window.EJS_core = 'nes';",
+    'window.EJS_core = ' + literal(systemId) + ';',
     'window.EJS_pathtodata = ' + literal(DATA_PATH) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
     'window.EJS_gameName = ' + literal(gameName) + ';',
@@ -25,9 +27,10 @@ export function buildEmulatorDocument(gameUrl, gameName) {
   ].join('\n');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay NES runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
-export class EmulatorJsNesPlayer {
-  constructor(container, { onError = () => {} } = {}) {
-    this.container=container; this.onError=onError; this.engineName='EmulatorJS · NES'; this.romInfo=null;
+export class EmulatorJsPlayer {
+  constructor(container, { onError = () => {}, systemId = 'nes', systemLabel = 'NES' } = {}) {
+    if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
+    this.container=container; this.onError=onError; this.systemId=systemId; this.systemLabel=systemLabel; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
@@ -37,9 +40,9 @@ export class EmulatorJsNesPlayer {
     if(this.frame) return Promise.reject(new Error('Bu oynatıcıda zaten bir ROM yükleniyor.'));
     const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
     this.romUrl=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
-    const frame=document.createElement('iframe'); frame.title=gameName+' — NES emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
+    const frame=document.createElement('iframe'); frame.title=gameName+' — '+this.systemLabel+' emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
     this.frame=frame; frame.addEventListener('load',this.boundFrameLoad); this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
-    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('NES çekirdeği 75 saniye içinde başlamadı. İnternet bağlantısını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName); });
+    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('NES çekirdeği 75 saniye içinde başlamadı. İnternet bağlantısını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName,this.systemId); });
   }
   handleMessage(event) {
     if(!this.frame||event.source!==this.frame.contentWindow||!event.data||event.data.source!=='retroplay-emulatorjs')return;
@@ -57,7 +60,7 @@ export class EmulatorJsNesPlayer {
     if (event.altKey || event.metaKey || (event.ctrlKey && event.code !== 'ControlRight')) return;
     const targetTag = event.target?.tagName?.toLowerCase();
     if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || event.target?.isContentEditable) return;
-    const name = KEY_TO_BUTTON[event.code] || (event.key === 'Control' && event.location === 2 ? 'BUTTON_SELECT' : null);
+    const name = this.keyToButton[event.code] || (event.key === 'Control' && event.location === 2 ? 'BUTTON_SELECT' : null);
     if (!name) return;
     event.preventDefault();
     // The iframe's own default keyboard handler must not process the same key a second time.
@@ -101,5 +104,12 @@ export class EmulatorJsNesPlayer {
     this.frame?.remove(); this.frame = null;
     if (this.romUrl) URL.revokeObjectURL(this.romUrl);
     this.romUrl = null; this.held.clear();
+  }
+}
+
+// Backward-compatible NES name for existing callers and tests.
+export class EmulatorJsNesPlayer extends EmulatorJsPlayer {
+  constructor(container, options = {}) {
+    super(container, { ...options, systemId: 'nes', systemLabel: 'NES' });
   }
 }
