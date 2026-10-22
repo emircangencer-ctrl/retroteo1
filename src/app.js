@@ -2,9 +2,6 @@ import { inspectNesRom } from './nes-rom.js';
 import { PLATFORM, platformInfo } from './platforms.js';
 import { safeCoverColor, validBackup } from './library-backup.js';
 import { extractRomFilesFromZip } from './zip-rom.js';
-import { Browser as NesBrowser, Controller as NesController } from 'jsnes';
-import { BrowserNesPlayer } from './nes-core-player.js';
-import { resolveNesCore } from './nes-engine.js';
 import { EmulatorJsPlayer } from './emulatorjs-nes-player.js';
 import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './emulator-systems.js';
 import { createBatterySaveRecord, emulatorGameId } from './save-data.js';
@@ -153,7 +150,8 @@ async function handleFiles(fileList){
   showToast(`${success} ROM dosyası içe aktarıldı. Oynatma desteği NES, SNES ve Mega Drive için etkin.`,success?'success':'error');setView('library');
 }
 
-function requestedNesCore() {
+async function requestedNesCore() {
+  const { resolveNesCore } = await import('./nes-engine.js');
   return resolveNesCore(window.location.search);
 }
 function playerStatus(label) {
@@ -212,7 +210,7 @@ async function startGame(id) {
       $('#player-status').textContent = 'Oturum durduruldu';
     };
 
-    const engine = game.platform === 'NES' ? requestedNesCore() : 'emulatorjs';
+    const engine = game.platform === 'NES' ? await requestedNesCore() : 'emulatorjs';
     if (engine === 'emulatorjs') {
       const player = new EmulatorJsPlayer($('#player-screen'), {
         onError: reportError,
@@ -239,6 +237,7 @@ async function startGame(id) {
       }
     } else if (engine === 'jsnes') {
       // Legacy engine retained only for explicit A/B comparison.
+      const { Browser: NesBrowser, Controller: NesController } = await import('jsnes');
       const browser = new NesBrowser({ container: $('#player-screen'), onError: reportError });
       if (browser._speakers) browser._speakers.onBufferUnderrun = null;
       activeEmulator = {
@@ -251,6 +250,7 @@ async function startGame(id) {
       };
       browser.loadROM(bytes);
     } else {
+      const { BrowserNesPlayer } = await import('./nes-core-player.js');
       const player = new BrowserNesPlayer($('#player-screen'), {
         onError: reportError,
         onAudioError: error => {
