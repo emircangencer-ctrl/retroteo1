@@ -154,3 +154,12 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - **Requires configuration before it can connect:** set Netlify build environment variable `VITE_GOOGLE_CLIENT_ID`, enable Google Drive API in a Google Cloud project, configure a Web OAuth client with the exact Netlify origin, and add the intended account as a test user while the consent screen is in testing mode. The app requests `drive.readonly`; public release may require Google verification.
 - Latest code/test commit: `69343f6b28b800a190be6f5f8b52b772b596bcc8`. CI passed 86/86 tests and Netlify Deploy Preview is ready: https://deploy-preview-2--retroteo1.netlify.app.
 - **Not yet tested live:** OAuth consent, actual Drive folder visibility, download of a real user-owned ROM, quota/large-file behavior, and importing/playing the downloaded ROM. This feature must not be called fully operational until OAuth is configured and these flows pass in a browser.
+
+
+## Stage 20 — Google OAuth popup reliability review (2026-10-22)
+
+- The Google Identity Services script is preloaded only when `VITE_GOOGLE_CLIENT_ID` is configured. The Drive connect button stays disabled until the library is ready, preventing the first click from being consumed by an asynchronous script load.
+- The token request is now initiated directly in the user's click handler before awaiting its result, reducing the risk that browser popup protections block Google's authorization flow.
+- Fixed an extra comma in the local import file-picker extension list.
+- Regression suite checks the OAuth activation flow. Latest successful CI on code commit `30e39fa4aa51d87e7ee42de7597c1d084fa986ae`: **86/86 tests passed**, syntax checks and production build passed. The main app chunk remains 136.94 kB (32.43 kB gzip); the separate runtime chunk is 65.73 kB (22.34 kB gzip); CSS is 31.22 kB (7.61 kB gzip).
+- Netlify is rebuilding the preview for this newest revision. Google OAuth and real ROM flows still require the owner to configure the client ID and test in a real browser.
