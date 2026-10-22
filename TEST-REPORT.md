@@ -37,5 +37,5 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - Unsupported `.7z` files were removed from the file-picker filters; this build supports standard ZIP only.
 - PWA updates use a versioned shell cache, hashed Vite assets, HTML revalidation headers, and a Netlify build pipeline that runs `npm run check`, `npm test`, and `npm run build`.
 - Regression suite currently contains 25 tests across NES validation, ZIP extraction, and backup validation.
-- The Netlify Deploy Preview was successfully produced for the preceding revision. The newest commit after these additional review fixes must finish its own Preview build before these latest edits are considered verified.
+- Netlify Deploy Preview succeeded for commit `08bbc2e` (2026-10-22). Its build command chains `npm install`, `npm run check`, `npm test`, and `npm run build` with `&&`; the successful Preview therefore confirms those steps completed for that revision. Later source changes still require their own successful Preview run.
 - Still required: manually open the latest Preview, import a real licensed/homebrew NES ROM, test keyboard and touch controls, test stored and deflate ZIP files, and verify the app shell opens offline after at least one online visit. This environment cannot reach the public Preview URL directly, so I have not claimed those browser/mobile checks passed.
