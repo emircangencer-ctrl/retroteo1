@@ -36,3 +36,13 @@ test('touch layouts expose two buttons for NES and expanded buttons for SNES and
   assert.equal(EMULATED_SYSTEMS.SNES.actionButtons.length, 6);
   assert.deepEqual(EMULATED_SYSTEMS.MD.actionButtons.map(button => button.label), ['Y', 'X', 'Z', 'B', 'C', 'A']);
 });
+
+test('prototype-inherited names never resolve to playable emulator systems', () => {
+  for (const platform of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+    assert.equal(getEmulatedSystem(platform), null);
+    assert.equal(isPlayablePlatform(platform), false);
+    assert.equal(supportsRomExtension(platform, 'nes'), false);
+  }
+  assert.equal(getEmulatedSystem({}), null);
+  assert.equal(isPlayablePlatform({}), false);
+});
