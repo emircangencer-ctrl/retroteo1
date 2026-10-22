@@ -32,10 +32,10 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 ## Stage 07 — hardening and verification (2026-10-22)
 
 - NES import now checks the 16-byte header against the actual file length, so large valid ROMs are not rejected because only a header sample was read.
-- ZIP extraction now enforces archive and expansion caps, streams decompression into a bounded buffer, validates the EOCD and central-directory boundaries, compares local and central headers/file names, verifies CRC-32, and uses table-driven CRC for much lower per-byte CPU cost.
+- ZIP extraction now enforces archive and expansion caps, streams decompression into a bounded buffer, validates the EOCD and central-directory boundaries, compares local and central headers/file names/CRC/size fields, verifies CRC-32, and uses table-driven CRC for much lower per-byte CPU cost.
 - Library-backup JSON is checked for metadata types, bounded strings, color values, and duplicate or reserved demo game IDs before restore. Cover colors are also sanitized at render time to protect against malformed records saved by older versions.
 - Unsupported `.7z` files were removed from the file-picker filters; this build supports standard ZIP only.
 - PWA updates use a versioned shell cache, hashed Vite assets, HTML revalidation headers, and a Netlify build pipeline that runs `npm run check`, `npm test`, and `npm run build`.
-- Regression suite currently contains 27 tests across NES validation, ZIP extraction, and backup validation, including runtime cover-color sanitization and reserved demo-ID rejection.
+- Regression suite currently contains 28 tests across NES validation, ZIP extraction, and backup validation, including runtime cover-color sanitization, reserved demo-ID rejection, and local ZIP header consistency.
 - Netlify Deploy Preview succeeded for source commit `9497b7b` (2026-10-22), including runtime cover-color sanitization, duplicate and reserved demo-ID rejection, the CRC32 optimization, and the `.7z` picker correction. Its build command chains `npm install`, `npm run check`, `npm test`, and `npm run build` with `&&`; the successful Preview therefore confirms those steps completed for that source revision.
 - Still required: manually open the latest Preview, import a real licensed/homebrew NES ROM, test keyboard and touch controls, test stored and deflate ZIP files, and verify the app shell opens offline after at least one online visit. This environment cannot reach the public Preview URL directly, so I have not claimed those browser/mobile checks passed.
