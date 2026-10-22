@@ -39,3 +39,10 @@ Earlier screenshots showed severe graphical corruption in *Super Mario Bros. 3* 
 - Do not migrate or overwrite existing IndexedDB ROM blobs merely to change emulator engines.
 - Keep this pull request in draft until representative real-ROM visual checks and Android/desktop tests pass.
 - Do not describe the issue as fixed based on a successful bundle build alone.
+
+
+## Super Mario Bros. 3 ROM identity checks
+
+The launch path now performs a **non-blocking** diagnostic for filenames containing `Super Mario Bros. 3` or `SMB3`. It expects Mapper 4 for the original cartridge family and, when the iNES header reports the standard 256 KiB PRG + 128 KiB CHR layout, compares the payload CRC-32 against `2E6301ED`, a documented U.S. Rev-A PRG+CHR reference (https://nescartdb.com/profile/view/870/super-mario-bros-3). A mismatch can indicate a different region/revision, a hack, or an incorrect/corrupt dump; it is only a warning and does not block, rewrite or replace the file. NES 2.0 and non-reference sizes receive header-level checks only.
+
+Super Mario Bros. 3 itself has documented PPU/scroll-split and attribute artifacts on original hardware (https://www.nesdev.org/wiki/Game_bugs). Therefore, the correct acceptance test is to compare the exact visual symptom and ROM identity on a known-good reference. Do not add title-specific visual hacks merely to hide a cartridge's authentic behavior.
