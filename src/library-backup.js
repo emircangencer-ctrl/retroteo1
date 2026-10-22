@@ -7,9 +7,12 @@ export function validBackup(data) {
   const optionalText = (value, max) => value === undefined || value === null || (typeof value === 'string' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value));
   const safeColor = value => value === undefined || value === null || (typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value));
 
+  const ids = new Set();
   return data.games.every(g => {
     if (!g || !textField(g.id, 200) || !textField(g.title, 300) || !textField(g.platform, 32) ||
         !textField(g.fileName, 255) || !Number.isSafeInteger(g.size) || g.size < 0) return false;
+    if (ids.has(g.id)) return false;
+    ids.add(g.id);
     if (g.year !== undefined && g.year !== null && (!Number.isInteger(g.year) || g.year < 1970 || g.year > 2100)) return false;
     if (!optionalText(g.genre, 80) || !optionalText(g.symbol, 32) || !optionalText(g.sizeLabel, 40) || !optionalText(g.status, 80)) return false;
     if (!safeColor(g.coverBg) || !safeColor(g.coverGlow)) return false;
