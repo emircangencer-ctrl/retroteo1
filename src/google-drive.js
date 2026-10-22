@@ -74,7 +74,7 @@ export function requestDriveAccessToken({ clientId, googleLike = globalThis.goog
       }
     });
     try {
-      client.requestAccessToken({ prompt: '' });
+      client.requestAccessToken();
     } catch (error) {
       settled = true;
       reject(error instanceof Error ? error : new Error('Google Drive bağlantısı başlatılamadı.'));
