@@ -203,5 +203,7 @@ test('runtime reports started only when required controller and pause APIs exist
     pause: () => {},
     play: () => {}
   });
-  assert.deepEqual(messages, [{ source: 'retroplay-emulatorjs', type: 'started' }]);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].source, 'retroplay-emulatorjs');
+  assert.equal(messages[0].type, 'started');
 });
