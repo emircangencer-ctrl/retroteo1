@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/app.js && node --check src/nes-rom.js && node --check src/zip-rom.js && node --check scripts/patch-jsnes-mapper4.mjs && node --check src/nes-core-player.js && node --check src/nes-engine.js && node --check src/emulator-systems.js && node --check src/save-data.js && node --check src/emulatorjs-nes-player.js && node --check src/gamepad-status.js && node --check public/nes-audio-processor.js && node --check src/platforms.js && node --check src/library-backup.js && node --check public/service-worker.js && node --check service-worker.js",
+    "check": "node --check src/app.js && node --check src/nes-rom.js && node --check src/zip-rom.js && node --check scripts/patch-jsnes-mapper4.mjs && node --check src/nes-core-player.js && node --check src/nes-engine.js && node --check src/emulator-systems.js && node --check src/save-data.js && node --check src/emulatorjs-nes-player.js && node --check src/gamepad-status.js && node --check src/fullscreen.js && node --check public/nes-audio-processor.js && node --check src/platforms.js && node --check src/library-backup.js && node --check public/service-worker.js && node --check service-worker.js",
     "postinstall": "node scripts/patch-jsnes-mapper4.mjs"
   },
   "dependencies": {
