@@ -125,3 +125,12 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - The checklist separates browser detection from actual in-game inputs and records device/browser/controller model so any failure can be reproduced.
 - Linked the checklist from the README.
 - **No real-device tests were run by adding this checklist.** Until someone completes it on hardware, physical controller support remains pending acceptance.
+
+## Stage 17 — fullscreen gameplay controls (2026-10-22)
+
+- Added a visible **Tam ekran** button to the shared player, which expands the whole game/player surface so the game image and controls remain available.
+- Added standard and WebKit-prefixed Fullscreen API helpers with readable failure handling; browser fullscreen-change events update the button and trigger the emulator's resize/fit hook.
+- Escape is intended to leave native fullscreen before closing the game. The toolbar also exposes a direct exit-fullscreen action.
+- Added an immersive viewport-sized fallback for browsers without a Fullscreen API. It expands the player but may not hide browser chrome; this is explicitly communicated to the user.
+- Added responsive fullscreen styling, safe-area padding for mobile devices, compact landscape controls, and tests for API support/failure paths and UI/resize wiring.
+- **Still requires real-browser acceptance:** confirm native fullscreen, game image scaling, Escape behavior, touch controls, and return-to-normal layout on desktop Chrome and Android Chrome. iOS Safari may use the expanded fallback depending on its Fullscreen API support.
