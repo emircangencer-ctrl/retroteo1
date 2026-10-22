@@ -20,7 +20,7 @@ npm run build
 npm run preview
 ```
 
-Vite outputs the deployable static site to `dist/`. Netlify is configured to run `npm install && npm run build` and publish `dist`. Use a Git-connected Netlify deployment so Netlify can install the dependency and build the site; uploading this source ZIP directly as a prebuilt static folder will not run the build command.
+Vite outputs the deployable static site to `dist/`. Netlify is configured to run `npm install`, `npm run check`, `npm test`, and `npm run build` in sequence, and then publish `dist`. The current pull request uses Node.js 22 for this pipeline. Use a Git-connected Netlify deployment so Netlify can install the dependency and build the site; uploading this source ZIP directly as a prebuilt static folder will not run the build command.
 
 ## Playing a game
 
@@ -39,7 +39,7 @@ The service worker caches the built application shell and same-origin assets as 
 ## Known limitations
 
 - Only `.nes` files are currently wired to an emulator.
-- The local execution environment used to prepare this archive had DNS/network access blocked, so `npm install` and a complete Vite production build could not be run here. Netlify must successfully install `jsnes@2.1.0` and Vite during its build. The JavaScript syntax, ROM validator tests, configuration shape and archive are checked locally, but a live Netlify/Android/browser end-to-end test remains required.
+- The local execution environment used for this review cannot access public hosts because DNS/network access is blocked. The Netlify Deploy Preview for the current pull request is ready, and its configured build pipeline runs syntax checks, the Node.js test suite, and the Vite production build. A real ROM gameplay test and offline-cache test on desktop and Android/mobile browsers still require hands-on browser verification.
 - Save states and battery-backed SRAM persistence are not yet connected to the UI.
 - Game compatibility varies by mapper and ROM format.
 
