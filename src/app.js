@@ -5,6 +5,7 @@ import { BrowserNesPlayer } from './nes-core-player.js';
 import { resolveNesCore } from './nes-engine.js';
 import { EmulatorJsPlayer } from './emulatorjs-nes-player.js';
 import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './emulator-systems.js';
+import { createBatterySaveRecord, emulatorGameId } from './save-data.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -43,31 +44,15 @@ function openDB(){return new Promise((resolve,reject)=>{if(!('indexedDB' in wind
 function txStore(mode='readonly'){return db.transaction(STORE,mode).objectStore(STORE)}
 function allStored(){return new Promise((resolve,reject)=>{const r=txStore().getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error);});}
 function saveGame(game){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(game);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('Oyun kaydı yazılamadı.'));tx.onabort=()=>reject(tx.error||new Error('Kayıt işlemi iptal edildi.'));});}
-function emulatorGameId(game){
-  const source=`${game.platform}:${game.contentHash||game.id}`;
-  let hash=2166136261;
-  for(let i=0;i<source.length;i++)hash=Math.imul(hash^source.charCodeAt(i),16777619);
-  return ((hash>>>0)&0x7fffffff)||1;
-}
 function saveBatteryBackup(game, update){
   if(!db)return Promise.reject(new Error('Yerel veritabanı hazır değil.'));
-  const bytes=update?.bytes instanceof Uint8Array?new Uint8Array(update.bytes):new Uint8Array(update?.bytes||[]);
-  if(!bytes.byteLength)return Promise.resolve(false);
+  const record=createBatterySaveRecord(game,update,getEmulatedSystem(game.platform)?.emulatorJsSystemId);
+  if(!record)return Promise.resolve(false);
   return new Promise((resolve,reject)=>{
     let tx;
     try{
       tx=db.transaction(SAVE_STORE,'readwrite');
-      tx.objectStore(SAVE_STORE).put({
-        id:game.id,
-        gameId:emulatorGameId(game),
-        platform:game.platform,
-        systemId:update.systemId||getEmulatedSystem(game.platform)?.emulatorJsSystemId||game.platform,
-        contentHash:game.contentHash||null,
-        saveHash:String(update.hash||''),
-        bytes,
-        byteLength:bytes.byteLength,
-        updatedAt:Number(update.updatedAt)||Date.now()
-      });
+      tx.objectStore(SAVE_STORE).put(record);
     }catch(error){reject(error);return;}
     tx.oncomplete=()=>resolve(true);
     tx.onerror=()=>reject(tx.error||new Error('Batarya kaydı yerel olarak yedeklenemedi.'));
