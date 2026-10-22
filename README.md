@@ -30,7 +30,7 @@ npm run build
 npm run preview
 ```
 
-Netlify builds with `npm install && npm run build` and publishes `dist/`. Use a Git-connected Netlify deployment so the build command runs; uploading this source tree as already-built static files skips that build.
+Netlify runs `npm install`, `npm run check`, `npm test`, and `npm run build` in sequence (Node.js 20) before publishing `dist/`. Use a Git-connected Netlify deployment so the verification pipeline runs; uploading this source tree as already-built static files skips those checks.
 
 ## Playing games
 
@@ -72,8 +72,15 @@ Before the multi-system branch is marked release-ready, test at least one known-
 - [SNES system details](https://emulatorjs.org/docs/systems/snes/)
 - [Sega Mega Drive system details](https://emulatorjs.org/docs/systems/sega-mega-drive/)
 
+## Import and backup hardening
+
+- The NES preflight reads only the 16-byte iNES header and validates it against the original file size.
+- JSON library backups are type-checked with bounded strings and valid hexadecimal cover colors; duplicate IDs and IDs reserved for sample cards are rejected. Cover colors are sanitized at render time as well, protecting older IndexedDB records.
+- Platform and emulator registries use own-property checks so metadata such as `__proto__` and `constructor` cannot masquerade as supported systems.
+- The PWA shell uses a new cache generation, refreshes `index.html` when installing the worker, and uses content-hashed Vite assets to reduce stale-bundle collisions. The pinned EmulatorJS runtime cache is versioned separately.
+
 ## ZIP import behavior
 
 - Accepts ordinary non-encrypted ZIP archives and extracts supported ROM entries in memory without uploading them.
-- Supports ZIP methods 0 (stored) and 8 (deflate), verifies CRC-32 and declared uncompressed size, and limits archives to 1,000 entries, 256 MiB per ROM and 512 MiB total expanded ROM data.
+- Supports ZIP methods 0 (stored) and 8 (deflate); checks end-of-central-directory and directory bounds; compares local and central file names, CRCs and sizes; and verifies CRC-32. Decompression is streamed into a bounded buffer so a forged uncompressed-size field cannot trigger unbounded output allocation. Limits: 512 MiB compressed archive, 1,000 entries, 256 MiB per ROM, 512 MiB total expanded ROM data.
 - ZIP64, multi-volume, encrypted archives, unsupported compression methods and nested ZIPs are not supported. If the browser lacks `DecompressionStream('deflate-raw')`, use a current browser or extract the ROM first.
