@@ -34,7 +34,7 @@ Vite outputs the deployable static site to `dist/`. Netlify is configured to run
 4. Use the arrow keys, Z/X, Enter, Right Ctrl, a compatible gamepad, or the on-screen touch controls.
 5. Use pause or exit in the player window.
 
-The default uses JSNES. To compare the newer engine for the same locally stored ROM, open the preview with `?nescore=nesjs`. Remove that query parameter to return to the faster JSNES path.
+The default uses EmulatorJS with the FCEUmm Libretro core. For diagnosis, add `?nescore=jsnes` to compare the legacy JSNES engine or `?nescore=nesjs` to compare `@nesjs/core`; remove the query parameter to return to EmulatorJS.
 
 ROMs stay in the browser's local IndexedDB. The app does not download or distribute commercial ROMs. A valid iNES/NES 2.0 header does not guarantee that a game dump, mapper, or PPU behavior is compatible. The new core publishes a broader mapper list, but the target games must still be visually tested on real ROMs.
 
@@ -51,7 +51,7 @@ The service worker caches the built application shell and same-origin assets as 
 
 ## Third-party notices
 
-The production bundle uses `jsnes` (Apache-2.0) by default and retains `@nesjs/core` (MIT) for comparison. License texts are included in [THIRD-PARTY-NOTICES.txt](./public/THIRD-PARTY-NOTICES.txt) and served at `/THIRD-PARTY-NOTICES.txt`.
+The app loads EmulatorJS/FCEUmm from its official CDN at runtime (GPL-3.0; separately hosted, not bundled in the repository). It also bundles `jsnes` (Apache-2.0) and `@nesjs/core` (MIT) for diagnostics. License texts are included in [THIRD-PARTY-NOTICES.txt](./public/THIRD-PARTY-NOTICES.txt) and served at `/THIRD-PARTY-NOTICES.txt`.
 
 ## ZIP import behavior
 
