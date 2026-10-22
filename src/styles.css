@@ -137,3 +137,6 @@
 #drive-status[data-state="ready"]{color:#9ad8b1}
 #drive-status[data-state="loading"]{color:#d8c8ff}
 @media(max-width:520px){.drive-panel-heading{align-items:stretch;flex-direction:column}.drive-panel-heading .button{align-self:flex-start}.drive-file-row{gap:7px;padding:8px}.drive-file-action{padding:7px;font-size:9px}}
+
+.grid-load-more{display:flex;margin:18px auto 4px;min-width:190px}
+.grid-load-more[hidden]{display:none}
