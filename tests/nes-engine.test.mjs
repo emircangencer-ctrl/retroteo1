@@ -26,6 +26,7 @@ test('EmulatorJS bootstrap script is valid and uses the NES system ID and starts
   assert.doesNotThrow(() => new Function(script), 'generated iframe JavaScript should parse');
   assert.ok(script.includes('window.EJS_core = "nes"'));
   assert.ok(script.includes('window.EJS_startOnLoaded = true'));
+  assert.ok(script.includes('https://cdn.emulatorjs.org/4.2.3/data/'), 'runtime should use the pinned CDN release');
   assert.ok(script.includes('window.EJS_gameUrl = "blob:'));
 });
 
