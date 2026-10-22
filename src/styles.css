@@ -48,3 +48,69 @@
 .gamepad-status[data-state="unsupported"],.gamepad-status[data-state="unavailable"]{border-color:#55462c;color:#e2c68d}
 .gamepad-status .text-button{margin-left:auto;padding:3px 0}
 @media(max-width:480px){.gamepad-status{align-items:flex-start}.gamepad-status .text-button{margin-left:16px}}
+
+/* Stage 17: immersive/fullscreen play */
+#player-modal:fullscreen,
+#player-modal.is-immersive-fallback{
+  width:100vw;
+  height:100vh;
+  height:100dvh;
+  max-height:100dvh;
+  margin:0;
+  border:0;
+  border-radius:0;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  display:flex;
+  flex-direction:column;
+  background:#101827;
+}
+#player-modal:fullscreen .player-header,
+#player-modal.is-immersive-fallback .player-header{margin-bottom:10px}
+#player-modal:fullscreen .player-screen-frame,
+#player-modal.is-immersive-fallback .player-screen-frame{flex:1 1 auto;min-height:0;display:flex;padding:6px}
+#player-modal:fullscreen .player-screen,
+#player-modal.is-immersive-fallback .player-screen{flex:1 1 auto;width:100%;height:100%;min-height:100px;aspect-ratio:auto;max-height:none}
+#player-modal:fullscreen #player-screen iframe,
+#player-modal.is-immersive-fallback #player-screen iframe{width:100%;height:100%;border:0}
+#player-modal:fullscreen #player-screen canvas,
+#player-modal.is-immersive-fallback #player-screen canvas{max-height:100%;max-width:100%}
+#player-modal:fullscreen .player-disclaimer,
+#player-modal.is-immersive-fallback .player-disclaimer{display:none}
+#player-modal:fullscreen .touch-controls,
+#player-modal.is-immersive-fallback .touch-controls{margin:10px auto 4px;gap:10px;flex:0 0 auto}
+#player-modal:fullscreen .touch-controls button,
+#player-modal.is-immersive-fallback .touch-controls button{min-width:42px;min-height:42px}
+#player-modal:fullscreen .action-pad button,
+#player-modal.is-immersive-fallback .action-pad button{width:48px;height:48px}
+#player-modal:fullscreen .system-pad button,
+#player-modal.is-immersive-fallback .system-pad button{min-height:30px}
+#player-modal:fullscreen .gamepad-status,
+#player-modal.is-immersive-fallback .gamepad-status{margin-top:6px;padding:6px 9px}
+#player-modal:fullscreen .player-toolbar,
+#player-modal.is-immersive-fallback .player-toolbar{margin-top:8px}
+#player-modal:fullscreen .modal-close,
+#player-modal.is-immersive-fallback .modal-close{position:static;flex:0 0 auto}
+.player-backdrop.is-immersive-fallback{padding:0;align-items:stretch;overflow:hidden}
+.player-backdrop.is-immersive-fallback .player-modal{width:100%;height:100%;max-height:100dvh;margin:0;border-radius:0}
+@media(max-height:520px) and (orientation:landscape){
+  #player-modal:fullscreen .player-header,
+  #player-modal.is-immersive-fallback .player-header{align-items:center;margin-bottom:5px}
+  #player-modal:fullscreen .player-header .eyebrow,
+  #player-modal.is-immersive-fallback .player-header .eyebrow{display:none}
+  #player-modal:fullscreen .player-header h2,
+  #player-modal.is-immersive-fallback .player-header h2{font-size:16px;margin:0}
+  #player-modal:fullscreen .player-header p,
+  #player-modal.is-immersive-fallback .player-header p{font-size:10px}
+  #player-modal:fullscreen .gamepad-status,
+  #player-modal.is-immersive-fallback .gamepad-status{font-size:9px;padding:4px 7px}
+  #player-modal:fullscreen .touch-controls,
+  #player-modal.is-immersive-fallback .touch-controls{margin:4px auto 0}
+  #player-modal:fullscreen .touch-controls button,
+  #player-modal.is-immersive-fallback .touch-controls button{min-width:34px;min-height:34px}
+  #player-modal:fullscreen .action-pad button,
+  #player-modal.is-immersive-fallback .action-pad button{width:36px;height:36px}
+  #player-modal:fullscreen .system-pad button,
+  #player-modal.is-immersive-fallback .system-pad button{min-height:25px}
+}
