@@ -87,3 +87,10 @@ test('service worker does not cache unrelated CDN paths or third-party origins',
   assert.equal(unrelated.intercepted, false);
   assert.equal(otherHost.intercepted, false);
 });
+
+
+test('offline cache is pinned to the same EmulatorJS release as the player', () => {
+  assert.match(serviceWorkerSource, /EMULATORJS_DATA_PREFIX = '\/4\.2\.3\/data\/'/);
+  assert.match(serviceWorkerSource, /EMULATORJS_CACHE_NAME = 'retroplay-emulatorjs-runtime-v2'/);
+  assert.doesNotMatch(serviceWorkerSource, /\/stable\/data\//);
+});
