@@ -54,7 +54,8 @@ export const EMULATED_SYSTEMS = Object.freeze({
 });
 
 export function getEmulatedSystem(platform) {
-  return EMULATED_SYSTEMS[platform] || null;
+  if (typeof platform !== 'string' || !Object.prototype.hasOwnProperty.call(EMULATED_SYSTEMS, platform)) return null;
+  return EMULATED_SYSTEMS[platform];
 }
 
 export function isPlayablePlatform(platform) {
