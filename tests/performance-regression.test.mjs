@@ -32,5 +32,7 @@ test('Drive import is opt-in and does not store OAuth access tokens in persisten
   assert.match(html, /id="drive-files"/);
   assert.match(drive, /https:\/\/www\.googleapis\.com\/auth\/drive\.readonly/);
   assert.doesNotMatch(drive, /localStorage|sessionStorage|indexedDB/);
-  assert.match(app, /driveAccessToken=await requestDriveAccessToken/);
+  assert.match(app, /const tokenPromise=requestDriveAccessToken\(\{clientId,googleLike:google\}\)/);
+  assert.match(app, /Preload Google Identity before the user clicks/);
+  assert.match(app, /loadGoogleIdentity\(\)\.then\(\(\)=>\{/);
 });
