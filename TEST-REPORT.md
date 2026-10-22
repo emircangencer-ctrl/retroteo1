@@ -108,3 +108,11 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - Added regression coverage confirming that all three supported systems retain the correct control scheme and expose the gamepad-mapping control.
 - GitHub Actions passed on code/test commit `2d955496d20be038a6049bd62bc2108b2cbb07fe`: syntax checks, 66/66 unit tests, production build, and output-artifact checks. The later documentation-only commit `5afd3acb11b59d61bb1e21dd7f0dd8c4399041d3` also passed CI.
 - **Still unverified:** physical USB/Bluetooth controller connection, real button input and remapping behavior in a live browser. EmulatorJS provides the gamepad functionality, but RetroPlay should not be declared hardware-tested until a real controller has been tried on desktop and Android Chrome.
+
+## Stage 15 — browser-level gamepad detection status (2026-10-22)
+
+- Added `src/gamepad-status.js` to safely read the browser Gamepad API, ignore disconnected/empty slots, bound controller IDs and format user-facing Turkish status text.
+- Added a live controller status row to the player. It refreshes on connect/disconnect, window focus, return to the visible tab, and the user's **Yeniden tara** action.
+- The status makes a deliberate distinction between a browser-detected controller and a controller that has not been detected. It does **not** claim a controller can control a game simply because the browser reports it.
+- Added unit tests for unsupported APIs, permission/API exceptions, empty/disconnected slots, multiple controllers and bounded IDs. Added the new module to the syntax-check pipeline.
+- **Acceptance still required:** test a real USB/Bluetooth controller in desktop Chrome and Android Chrome, including directional input, action buttons, remapping, disconnect/reconnect, and close/reopen. Browser-level status and EmulatorJS config tests cannot simulate a physical controller.
