@@ -546,7 +546,7 @@ async function downloadSelectedDriveFile(fileId){
   if(button)button.disabled=true;
   setDriveStatus(`İndiriliyor: ${file.name}`,'loading');
   try{
-    const blob=await downloadDriveFile({accessToken:driveAccessToken,fileId});
+    const blob=await downloadDriveFile({accessToken:driveAccessToken,fileId,maxBytes:limit});
     if(blob.size===0)throw new Error('Drive dosyası boş.');
     if(blob.size>limit)throw new Error(`Dosya boyutu ${formatBytes(limit)} sınırını aşıyor.`);
     const importedFile=new File([blob],file.name,{type:blob.type||'application/octet-stream',lastModified:file.modifiedTime?Date.parse(file.modifiedTime)||Date.now():Date.now()});
