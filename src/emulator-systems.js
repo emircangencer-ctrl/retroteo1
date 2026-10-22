@@ -7,6 +7,7 @@ export const EMULATED_SYSTEMS = Object.freeze({
     shortLabel: 'NES',
     extensions: Object.freeze(['nes']),
     emulatorJsSystemId: 'nes',
+    emulatorJsCoreId: 'nestopia',
     supportsLegacyComparison: true,
     actionButtons: Object.freeze([
       makeButton('B', 'BUTTON_B'),
@@ -21,6 +22,7 @@ export const EMULATED_SYSTEMS = Object.freeze({
     shortLabel: 'SNES',
     extensions: Object.freeze(['sfc', 'smc']),
     emulatorJsSystemId: 'snes',
+    emulatorJsCoreId: 'snes',
     supportsLegacyComparison: false,
     actionButtons: Object.freeze([
       makeButton('Y', 'BUTTON_Y'),
@@ -39,6 +41,7 @@ export const EMULATED_SYSTEMS = Object.freeze({
     shortLabel: 'Mega Drive',
     extensions: Object.freeze(['md', 'gen']),
     emulatorJsSystemId: 'segaMD',
+    emulatorJsCoreId: 'segaMD',
     supportsLegacyComparison: false,
     actionButtons: Object.freeze([
       makeButton('Y', 'BUTTON_X'),
