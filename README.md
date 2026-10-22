@@ -22,7 +22,7 @@ npm run build
 npm run preview
 ```
 
-The install step retains the version-guarded JSNES MMC3 patch only for the optional legacy comparison engine. The default EmulatorJS runtime and FCEUmm core are fetched from `https://cdn.emulatorjs.org/stable/data/` and cached by EmulatorJS in browser storage after the first online load. Initial use of a new core requires an internet connection.
+The install step retains the version-guarded JSNES MMC3 patch only for the optional legacy comparison engine. The default EmulatorJS runtime and FCEUmm core are fetched from `https://cdn.emulatorjs.org/stable/data/`. Initial use requires an internet connection; EmulatorJS caches core binaries in browser storage, but the loader and supporting runtime assets remain CDN-hosted.
 
 Vite outputs the deployable static site to `dist/`. Netlify is configured to run `npm install && npm run build` and publish `dist`. Use a Git-connected Netlify deployment so Netlify can install the dependencies and build the site; uploading this source ZIP directly as a prebuilt static folder will not run the build command.
 
@@ -40,7 +40,7 @@ ROMs stay in the browser's local IndexedDB. The app does not download or distrib
 
 ## Offline behavior
 
-The service worker caches the built application shell and same-origin assets as they are fetched. Install the PWA while online first. EmulatorJS downloads and caches its core binaries on first use. Test offline play only after the EmulatorJS runtime and FCEUmm core have successfully started at least once while online.
+The service worker caches the built application shell and same-origin assets as they are fetched. Install the PWA while online first. **Offline playback with the default EmulatorJS engine is not guaranteed**: although its core binaries are cached after first use, the loader and supporting runtime assets remain CDN-hosted. For offline diagnostics, `?nescore=jsnes` selects the bundled legacy engine, which may retain its known mapper-4 graphics issues.
 
 ## Verification status
 
