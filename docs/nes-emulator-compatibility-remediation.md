@@ -19,7 +19,7 @@ Earlier screenshots showed severe graphical corruption in *Super Mario Bros. 3* 
 - ROM bytes stay in the browser and are handed to the iframe using a local Blob URL. RetroPlay does not upload the ROM to a third-party ROM service.
 - The existing JSNES player remains selectable with `?nescore=jsnes`; `@nesjs/core` remains selectable with `?nescore=nesjs`. These are comparison paths, not evidence that either engine is the correct fallback for every title.
 - The application preserves its own player shell and touch controls. Keyboard events are registered on the outer page and on the emulator iframe so controls can still be captured when the iframe owns focus. A unit test verifies the forwarded key-down/key-up calls.
-- EmulatorJS and its core assets are requested from the official CDN. Initial setup needs network access. Browser caching may help subsequent launches, but **offline playback is not guaranteed** by this integration.
+- EmulatorJS and its core assets are requested from the version-pinned official CDN path `https://cdn.emulatorjs.org/4.2.3/data/`. The versioned path was chosen over the moving `stable` alias so upstream releases do not silently change the runtime. Initial setup needs network access. Browser caching may help subsequent launches, but **offline playback is not guaranteed** by this integration.
 - EmulatorJS is GPL-3.0 licensed. Review the licensing and distribution implications before public release.
 
 ## Required validation before merge or production deployment
@@ -30,7 +30,7 @@ Earlier screenshots showed severe graphical corruption in *Super Mario Bros. 3* 
 4. Repeat the key checks in desktop Chromium. Record the browser/device, ROM dump/source, and observed result so a failure can be reproduced.
 5. Test malformed, unsupported, and truncated ROM files for clear failure behavior; header validation alone must not label a game as compatible.
 6. Confirm that existing IndexedDB ROM records and ROM export remain intact across the engine change.
-7. Test offline startup separately. The current CDN-based default is not expected to guarantee offline playback; if offline operation is a release requirement, a future step must package or self-host the runtime and core assets and re-evaluate licensing/distribution before release.
+7. Test offline startup separately. The current CDN-based default is not expected to guarantee offline playback; if offline operation is a release requirement, test the current version-pinned cache behavior on actual browsers, then decide whether to package or self-host the runtime and core assets and re-evaluate licensing/distribution before release.
 
 ## Guardrails
 
