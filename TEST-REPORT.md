@@ -180,3 +180,11 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - The NES registry explicitly selects EmulatorJS's documented `nestopia` core while retaining the NES input scheme. Core ID and controller scheme are now independent, with a system/core allow-list to prevent mismatched configuration.
 - Added regression checks for immersive fullscreen UI, aspect-ratio sizing, and the NES core/control-scheme separation.
 - This is a code-level remediation, not proof that every ROM dump is valid or that every visual artifact has disappeared. Super Mario Bros. 3 has documented PPU/scroll-split visual quirks; verify the user's own ROM against a known-good dump/reference on the deployed preview. CI cannot establish real gameplay visuals without that manual check.
+
+
+## Stage 23 — Super Mario Bros. 3 ROM identity diagnostics (2026-10-22)
+
+- Added title-scoped diagnostic checks when a NES file is named `Super Mario Bros. 3` or `SMB3`: the header mapper is compared with the standard game's Mapper 4, and an iNES payload with the reference U.S. Rev-A layout is CRC-32 checked against PRG+CHR fingerprint `2E6301ED`.
+- A mismatch never edits, blocks or silently replaces the user's ROM. It presents a non-blocking warning because another region/revision or a ROM hack can be legitimate; a mismatch is not conclusive proof of corruption.
+- CRC-32 implementation has a canonical test vector; tests cover mapper mismatch, payload-fingerprint mismatch and avoiding unrelated file names.
+- Reference profile: https://nescartdb.com/profile/view/870/super-mario-bros-3. Automated tests still cannot replace playing the user's ROM in Android/desktop browsers and comparing actual scrolling/graphics to a known-good reference.
