@@ -91,15 +91,25 @@ test('Drive download uses authenticated media endpoint and returns bytes as a Bl
   const result = await downloadDriveFile({
     accessToken: 'token',
     fileId: 'file/id',
+    maxBytes: 32,
     fetchImpl: async (url, options) => {
       requestedUrl = new URL(url);
       assert.equal(options.headers.Authorization, 'Bearer token');
-      return new Response(blob, { status: 200 });
+      return new Response(blob, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
     }
   });
   assert.equal(requestedUrl.pathname, '/drive/v3/files/file%2Fid');
   assert.equal(requestedUrl.searchParams.get('alt'), 'media');
   assert.equal(await result.text(), 'ROM bytes');
+});
+
+test('Drive download aborts as soon as streamed bytes exceed the configured limit', async () => {
+  await assert.rejects(downloadDriveFile({
+    accessToken: 'token',
+    fileId: 'large-file',
+    maxBytes: 4,
+    fetchImpl: async () => new Response(new Blob(['12345']), { status: 200 })
+  }), /indirme sınırını aşıyor/);
 });
 
 test('Drive API failures are readable and do not leak access tokens', async () => {
