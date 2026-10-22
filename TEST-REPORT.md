@@ -134,3 +134,23 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - Added an immersive viewport-sized fallback for browsers without a Fullscreen API. It expands the player but may not hide browser chrome; this is explicitly communicated to the user.
 - Added responsive fullscreen styling, safe-area padding for mobile devices, compact landscape controls, and tests for API support/failure paths and UI/resize wiring.
 - **Still requires real-browser acceptance:** confirm native fullscreen, game image scaling, Escape behavior, touch controls, and return-to-normal layout on desktop Chrome and Android Chrome. iOS Safari may use the expanded fallback depending on its Fullscreen API support.
+
+
+## Stage 18 — startup and large-library performance pass (2026-10-22)
+
+- Legacy NES diagnostic engines (`jsnes`, `nes-engine.js`, and `nes-core-player.js`) are dynamically imported only when their diagnostic route is selected, rather than statically loading those paths at app startup.
+- Library search now schedules rendering through `requestAnimationFrame` and updates only the library results instead of rebuilding every view for each keystroke.
+- Library, favorites and recent-game grids render in pages of 48 cards. The user can progressively reveal more results; off-screen cards use `content-visibility: auto` where supported.
+- Latest successful CI run: https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39844564505. **86/86 tests passed**, syntax checks passed, production build passed, and output-artifact checks passed.
+- Build output for the tested revision: main app JS chunk 136.94 kB (32.43 kB gzip), CSS 31.22 kB (7.61 kB gzip). These are build artifact sizes only; no Lighthouse run or real-device timing benchmark has been performed.
+- **Still required:** profile on an actual low-end Android device with a large library; compare LCP/INP and memory before claiming a measured speed improvement.
+
+## Stage 19 — optional Google Drive read-only archive (2026-10-22)
+
+- Added `src/google-drive.js` for Google Identity Services token requests, read-only Drive folder listing with pagination, and authenticated file downloads.
+- The import dialog now includes a Drive browser with folder navigation, supported ROM/ZIP filtering, file-size guardrails, and a selected-file download that feeds the existing validated local import path.
+- OAuth tokens are held in memory only; no token is written to localStorage, sessionStorage, or IndexedDB. ROM bytes download directly from Google Drive into the browser and are then stored in the local library.
+- Added tests for OAuth scope/token handling, Drive listing fields/pagination, download behavior, error cases, and performance regression guards.
+- **Requires configuration before it can connect:** set Netlify build environment variable `VITE_GOOGLE_CLIENT_ID`, enable Google Drive API in a Google Cloud project, configure a Web OAuth client with the exact Netlify origin, and add the intended account as a test user while the consent screen is in testing mode. The app requests `drive.readonly`; public release may require Google verification.
+- Latest code/test commit: `69343f6b28b800a190be6f5f8b52b772b596bcc8`. CI passed 86/86 tests and Netlify Deploy Preview is ready: https://deploy-preview-2--retroteo1.netlify.app.
+- **Not yet tested live:** OAuth consent, actual Drive folder visibility, download of a real user-owned ROM, quota/large-file behavior, and importing/playing the downloaded ROM. This feature must not be called fully operational until OAuth is configured and these flows pass in a browser.
