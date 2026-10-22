@@ -45,9 +45,11 @@ ROMs remain in local browser storage. Use only ROM files you own or are authoriz
 
 ## Offline behavior and its current limit
 
-The service worker caches the app shell and same-origin assets, and the cache version is bumped with app updates. **That does not currently guarantee offline gameplay.** EmulatorJS's loader and supporting runtime are loaded from `https://cdn.emulatorjs.org/stable/data/`; the service worker intentionally ignores cross-origin requests. EmulatorJS can cache parts of its runtime in browser storage, but that is not the same as a fully self-contained offline install.
+The service worker caches the app shell and same-origin assets. It now also keeps a separate, cache-first store for requests under the official EmulatorJS `/stable/data/` path on `cdn.emulatorjs.org`. Other cross-origin requests are not intercepted. Once a runtime file or a system core has been fetched successfully while online, a later request may be served from the runtime cache when offline; each system's core must have been downloaded at least once.
 
-To deliver reliable offline gameplay, the remaining work is to select and pin a specific EmulatorJS release, self-host the runtime plus the required NES/SNES/Mega Drive core assets, precache those same-origin assets during PWA installation, and test a clean offline launch. The core assets and total transfer size must be measured before deciding which systems are included in the offline bundle. Do not simply precache every supported core: it would inflate the PWA download for systems that the user may never use.
+**Treat this as an offline improvement, not yet as a guaranteed offline release.** The current cache test simulates the worker and network failure, but it does not prove that every browser sends EmulatorJS iframe requests through the worker, that every runtime asset is cacheable, or that storage quota is sufficient. A first launch of a system whose core is not cached still requires a connection.
+
+The next hardening step is to test cold-start/offline behavior in desktop Chromium and Android Chrome (and iOS Safari if it is a target), verify the actual core/resource requests in each case, and decide whether a pinned, self-hosted runtime/core bundle is needed. Measure the required file set and size before preloading assets. Do not precache every core; it would inflate the PWA download for systems a user may never use.
 
 ## Save-data status
 
