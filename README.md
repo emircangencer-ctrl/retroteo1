@@ -103,3 +103,6 @@ The integration requests the read-only `drive.readonly` scope. Google may requir
 ## Performance notes
 
 The initial page no longer eagerly imports the legacy NES diagnostic engines; those are dynamically loaded only when the corresponding diagnostic route is selected. Library search is scheduled to the next animation frame and updates only the library result area rather than rebuilding every view for every keystroke. These changes reduce avoidable startup and interaction work, but actual speed improvements must be measured on representative low-end mobile devices and with a large library. Do not treat a passing build as a Lighthouse or real-device performance result.
+
+
+Large game grids are rendered in pages of 48 cards. Search and sort update only the library result grid, while off-screen game cards use browser content-visibility where supported. Use the “Daha fazla göster” controls to progressively render more library, favorite, and recent-game cards instead of building thousands of card nodes at once.
