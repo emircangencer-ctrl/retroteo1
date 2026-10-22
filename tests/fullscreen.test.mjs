@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from '../src/fullscreen.js';
 
 test('detects standard and WebKit fullscreen elements', () => {
@@ -43,4 +44,20 @@ test('supports WebKit-prefixed fullscreen APIs and reports failures', async () =
   assert.equal(failed.supported, true);
   assert.equal(failed.entered, false);
   assert.equal(failed.error.message, 'blocked');
+});
+
+
+test('player UI exposes fullscreen and updates after browser fullscreen changes', async () => {
+  const [html, app, styles] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+  ]);
+  assert.match(html, /id="fullscreen-game"[^>]*aria-label="Oyunu tam ekran yap"/);
+  assert.match(html, /id="fullscreen-game"[^>]*>⛶ Tam ekran<\/button>/);
+  assert.match(app, /document\.addEventListener\('fullscreenchange', onChange\)/);
+  assert.match(app, /activeEmulator\?\.fitInParent\?\.\(\)/);
+  assert.match(app, /setFullscreenFallback\(true\)/);
+  assert.match(styles, /#player-modal:fullscreen/);
+  assert.match(styles, /\.player-backdrop\.is-immersive-fallback/);
 });
