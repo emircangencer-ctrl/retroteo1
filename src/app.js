@@ -3,7 +3,8 @@ import { extractRomFilesFromZip } from './zip-rom.js';
 import { Browser as NesBrowser, Controller as NesController } from 'jsnes';
 import { BrowserNesPlayer } from './nes-core-player.js';
 import { resolveNesCore } from './nes-engine.js';
-import { EmulatorJsNesPlayer } from './emulatorjs-nes-player.js';
+import { EmulatorJsPlayer } from './emulatorjs-nes-player.js';
+import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './emulator-systems.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -49,7 +50,7 @@ function getFileExt(name){const i=name.lastIndexOf('.');return i>=0?name.slice(i
 async function sha256File(file){if(!globalThis.crypto?.subtle||file.size>256*1024*1024)return null;const bytes=await file.arrayBuffer();const digest=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');}
 function storageErrorMessage(error){if(error?.name==='QuotaExceededError')return 'Tarayıcı depolama alanı dolu';if(error?.name==='DataCloneError')return 'Dosya tarayıcı depolamasına aktarılamadı';return error?.message||'Bilinmeyen depolama hatası';}
 function guessPlatform(file){const ext=getFileExt(file.name);return Object.entries(PLATFORM).find(([,p])=>p.ext.includes(ext))?.[0]||'UNKNOWN';}
-function renderCard(g){const p=platformInfo(g.platform);const bg=g.coverBg||p.color;const glow=g.coverGlow||p.glow;const fav=g.favorite?' favorited':'';const size=g.sizeLabel||formatBytes(g.size||0);const canPlay=!g.demo&&g.platform==='NES'&&!g.restoredMetadataOnly&&g.blob instanceof Blob;const actions=g.demo?'':`<div class="game-card-actions">${canPlay?`<button class="button primary small" data-play="${esc(g.id)}">▶ Oyna</button>`:''}${g.restoredMetadataOnly?'':`<button class="text-button" data-export-rom="${esc(g.id)}">ROM dışa aktar</button>`}<button class="text-button remove-game" data-remove="${esc(g.id)}">Kütüphaneden kaldır</button></div>`;const fileLabel=g.demo?'Örnek içerik':g.restoredMetadataOnly?'Yedek kaydı · ROM yok':canPlay?'NES · Oynatılabilir dosya':'Yerel dosya';return `<article class="game-card" data-game-id="${esc(g.id)}"><div class="game-cover" style="--cover-bg:${esc(bg)};--cover-glow:${esc(glow)}"><span class="cover-tag">${esc(p.short.toUpperCase())}</span><span class="cover-symbol">${esc(g.symbol||p.logo)}</span><button class="favorite-button${fav}" data-favorite="${esc(g.id)}" aria-label="${g.favorite?'Favorilerden çıkar':'Favorilere ekle'}" title="${g.favorite?'Favorilerden çıkar':'Favorilere ekle'}">${g.favorite?'♥':'♡'}</button></div><div class="game-info"><h3 class="game-title" title="${esc(g.title)}">${esc(g.title)}</h3><div class="game-meta"><span>${esc(g.year||'Yıl bilinmiyor')}</span><span class="platform-pill">${esc(p.short)}</span></div><div class="game-foot"><span>${fileLabel}</span><span class="status">${esc(size)}</span></div>${actions}</div></article>`;}
+function renderCard(g){const p=platformInfo(g.platform);const bg=g.coverBg||p.color;const glow=g.coverGlow||p.glow;const fav=g.favorite?' favorited':'';const size=g.sizeLabel||formatBytes(g.size||0);const canPlay=!g.demo&&isPlayablePlatform(g.platform)&&!g.restoredMetadataOnly&&g.blob instanceof Blob;const actions=g.demo?'':`<div class="game-card-actions">${canPlay?`<button class="button primary small" data-play="${esc(g.id)}">▶ Oyna</button>`:''}${g.restoredMetadataOnly?'':`<button class="text-button" data-export-rom="${esc(g.id)}">ROM dışa aktar</button>`}<button class="text-button remove-game" data-remove="${esc(g.id)}">Kütüphaneden kaldır</button></div>`;const fileLabel=g.demo?'Örnek içerik':g.restoredMetadataOnly?'Yedek kaydı · ROM yok':canPlay?`${p.short} · Oynatılabilir dosya`:'Yerel dosya';return `<article class="game-card" data-game-id="${esc(g.id)}"><div class="game-cover" style="--cover-bg:${esc(bg)};--cover-glow:${esc(glow)}"><span class="cover-tag">${esc(p.short.toUpperCase())}</span><span class="cover-symbol">${esc(g.symbol||p.logo)}</span><button class="favorite-button${fav}" data-favorite="${esc(g.id)}" aria-label="${g.favorite?'Favorilerden çıkar':'Favorilere ekle'}" title="${g.favorite?'Favorilerden çıkar':'Favorilere ekle'}">${g.favorite?'♥':'♡'}</button></div><div class="game-info"><h3 class="game-title" title="${esc(g.title)}">${esc(g.title)}</h3><div class="game-meta"><span>${esc(g.year||'Yıl bilinmiyor')}</span><span class="platform-pill">${esc(p.short)}</span></div><div class="game-foot"><span>${fileLabel}</span><span class="status">${esc(size)}</span></div>${actions}</div></article>`;}
 function formatBytes(n){if(!Number.isFinite(n)||n<=0)return '—';const units=['B','KB','MB','GB'];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),units.length-1);return `${(n/Math.pow(1024,i)).toFixed(i?1:0)} ${units[i]}`;}
 function renderSystemTile(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key).length;return `<button class="system-tile" data-system-filter="${key}"><span class="system-logo">${esc(p.logo)}</span><span><strong>${esc(p.short)}</strong><small>${count?`${count} kütüphane kaydı`:'Platform hazır değil'}</small></span></button>`;}
 function renderSystemRow(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key&&!g.demo).length;return `<article class="system-row"><span class="system-logo">${esc(p.logo)}</span><div class="system-row-copy"><strong>${esc(p.short)} <span style="color:#8291aa;font-weight:500">· ${esc(p.label)}</span></strong><p>${key==='N64'?'Uyumluluk oyun ve cihaz bazında ayrıca test edilecek.':key==='CPS1'||key==='CPS2'||key==='NEOGEO'?'Arcade dosyaları için çekirdek ve doğru dosya seti gereklidir.':'İlk sürüm platform adayı; emülatör entegrasyonu henüz eklenmedi.'}</p></div><span class="system-row-count">${count} yerel oyun</span></article>`;}
@@ -132,8 +133,8 @@ function playerStatus(label) {
 }
 async function startGame(id) {
   const game = games.find(g => g.id === id && !g.demo);
-  if (!game || game.platform !== 'NES' || !(game.blob instanceof Blob)) {
-    showToast('Bu kayıt için oynatılabilir bir NES dosyası bulunamadı.', 'error');
+  if (!game || !isPlayablePlatform(game.platform) || !(game.blob instanceof Blob)) {
+    showToast('Bu kayıt için henüz desteklenen bir sistemde oynatılabilir ROM bulunamadı.', 'error');
     return;
   }
   const session = ++emulatorSession;
@@ -145,6 +146,7 @@ async function startGame(id) {
   activeGameId = game.id;
   emulatorPaused = false;
   $('#player-title').textContent = game.title;
+  renderTouchControls(game.platform);
   $('#player-status').textContent = 'ROM yükleniyor…';
   $('#player-error').textContent = '';
   $('#player-modal').classList.remove('hidden');
@@ -154,7 +156,15 @@ async function startGame(id) {
 
   try {
     const bytes = new Uint8Array(await game.blob.arrayBuffer());
-    const validation = inspectNesRom(bytes);
+    const system = getEmulatedSystem(game.platform);
+    if (!system) throw new Error('Bu sistem için emülatör kaydı bulunamadı.');
+    const extension = getFileExt(game.fileName || game.title);
+    if (!supportsRomExtension(game.platform, extension)) {
+      throw new Error(`${system.shortLabel} sistemi için desteklenmeyen dosya uzantısı: .${extension || 'bilinmiyor'}`);
+    }
+    const validation = game.platform === 'NES'
+      ? inspectNesRom(bytes)
+      : { valid: bytes.byteLength > 0, system: game.platform, mapper: null };
     if (session !== emulatorSession || activeGameId !== game.id) return;
     if (!validation.valid) {
       throw new Error(validation.reason || 'ROM başlığı veya dosya uzunluğu geçersiz.');
@@ -167,9 +177,13 @@ async function startGame(id) {
       $('#player-status').textContent = 'Oturum durduruldu';
     };
 
-    const engine = requestedNesCore();
+    const engine = game.platform === 'NES' ? requestedNesCore() : 'emulatorjs';
     if (engine === 'emulatorjs') {
-      const player = new EmulatorJsNesPlayer($('#player-screen'), { onError: reportError });
+      const player = new EmulatorJsPlayer($('#player-screen'), {
+        onError: reportError,
+        systemId: system.emulatorJsSystemId,
+        systemLabel: system.shortLabel
+      });
       activeEmulator = player;
       activeEmulator.romInfo = validation;
       await player.loadROM(bytes, game.title);
@@ -251,6 +265,14 @@ async function togglePause() {
   } catch (error) {
     $('#player-error').textContent = `Duraklatma/devam hatası: ${error?.message || error}`;
   }
+}
+function renderTouchControls(platform) {
+  const root = $('#touch-controls');
+  const system = getEmulatedSystem(platform);
+  if (!root || !system) return;
+  const button = ({ label, input, ariaLabel = label }) => `<button data-nes-button="${esc(input)}" aria-label="${esc(ariaLabel)}">${esc(label)}</button>`;
+  root.dataset.platform = platform;
+  root.innerHTML = `<div class="dpad"><button data-nes-button="BUTTON_UP" aria-label="Yukarı">▲</button><div><button data-nes-button="BUTTON_LEFT" aria-label="Sola">◀</button><button data-nes-button="BUTTON_DOWN" aria-label="Aşağı">▼</button><button data-nes-button="BUTTON_RIGHT" aria-label="Sağa">▶</button></div></div><div class="action-pad">${system.actionButtons.map(button).join('')}</div><div class="system-pad">${system.showSelect ? button({label:'SELECT',input:'BUTTON_SELECT'}) : ''}${system.showStart ? button({label:'START',input:'BUTTON_START'}) : ''}</div>`;
 }
 function wireTouchControls() {
   const root = $('#touch-controls');
