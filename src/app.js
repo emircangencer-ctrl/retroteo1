@@ -141,7 +141,29 @@ function safeFilename(name){return String(name||'retroplay').replace(/[\\/:*?"<>
 async function exportROM(id){const game=games.find(g=>g.id===id&&!g.demo);if(!game)return;if(!(game.blob instanceof Blob)){showToast('Bu oyun için yerel ROM içeriği bulunamadı. Dosyayı yeniden içe aktar.','error');return;}try{downloadBlob(game.blob,safeFilename(game.fileName||`${game.title}.rom`));showToast('ROM dışa aktarma başlatıldı.');}catch(e){showToast(`ROM dışa aktarılamadı: ${storageErrorMessage(e)}`,'error');}}
 function backupMetadata(game){const {blob,...metadata}=game;return metadata;}
 function exportLibraryBackup(){try{const payload={app:'RetroPlay',backupType:'library-metadata',schemaVersion:1,appVersion:'0.3.0',createdAt:new Date().toISOString(),gameCount:games.filter(g=>!g.demo).length,games:games.filter(g=>!g.demo).map(backupMetadata)};const json=JSON.stringify(payload,null,2);downloadBlob(new Blob([json],{type:'application/json'}),`RetroPlay-Library-${new Date().toISOString().slice(0,10)}-v0.3.0.json`);showToast('Kütüphane yedeği hazırlandı. ROM içerikleri bu dosyaya dahil değildir.');}catch(e){showToast(`Yedek oluşturulamadı: ${e.message}`,'error');}}
-function validBackup(data){if(!data||data.app!=='RetroPlay'||data.backupType!=='library-metadata'||data.schemaVersion!==1||!Array.isArray(data.games))return false;if(data.games.length>10000)return false;return data.games.every(g=>g&&typeof g.id==='string'&&typeof g.title==='string'&&typeof g.platform==='string'&&typeof g.fileName==='string'&&Number.isFinite(g.size)&&g.size>=0);}
+function validBackup(data) {
+  if (!data || data.app !== 'RetroPlay' || data.backupType !== 'library-metadata' || data.schemaVersion !== 1 || !Array.isArray(data.games)) return false;
+  if (data.games.length > 10000) return false;
+
+  const textField = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+  const optionalText = (value, max) => value === undefined || value === null || (typeof value === 'string' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value));
+  const safeColor = value => value === undefined || value === null || (typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value));
+
+  return data.games.every(g => {
+    if (!g || !textField(g.id, 200) || !textField(g.title, 300) || !textField(g.platform, 32) ||
+        !textField(g.fileName, 255) || !Number.isSafeInteger(g.size) || g.size < 0) return false;
+    if (g.year !== undefined && g.year !== null && (!Number.isInteger(g.year) || g.year < 1970 || g.year > 2100)) return false;
+    if (!optionalText(g.genre, 80) || !optionalText(g.symbol, 32) || !optionalText(g.sizeLabel, 40) || !optionalText(g.status, 80)) return false;
+    if (!safeColor(g.coverBg) || !safeColor(g.coverGlow)) return false;
+    if (g.favorite !== undefined && typeof g.favorite !== 'boolean') return false;
+    if (g.restoredMetadataOnly !== undefined && typeof g.restoredMetadataOnly !== 'boolean') return false;
+    if (g.addedAt !== undefined && (!Number.isFinite(g.addedAt) || g.addedAt < 0)) return false;
+    if (g.lastPlayed !== undefined && g.lastPlayed !== null && (!Number.isFinite(g.lastPlayed) || g.lastPlayed < 0)) return false;
+    if (g.contentHash !== undefined && g.contentHash !== null && (typeof g.contentHash !== 'string' || !/^[a-f0-9]{64}$/i.test(g.contentHash))) return false;
+    if (g.romValidation !== undefined && g.romValidation !== null && (typeof g.romValidation !== 'object' || Array.isArray(g.romValidation))) return false;
+    return true;
+  });
+}
 async function restoreLibraryBackup(file){if(!file)return;try{if(file.size>20*1024*1024)throw new Error('Yedek 20 MB sınırını aşıyor.');const data=JSON.parse(await file.text());if(!validBackup(data))throw new Error('Yedek biçimi veya şema sürümü geçersiz. Mevcut kayıtlar değiştirilmedi.');const existing=new Set((await allStored()).map(g=>g.id));const candidates=data.games.filter(g=>!existing.has(g.id));const duplicateCount=data.games.length-candidates.length;const totalSize=candidates.reduce((n,g)=>n+(g.size||0),0);const preview=`Yedek önizlemesi\n\nYedek tarihi: ${data.createdAt||'Bilinmiyor'}\nYedekteki kayıt: ${data.games.length}\nYeni eklenebilecek kayıt: ${candidates.length}\nKimlik çakışması nedeniyle atlanacak: ${duplicateCount}\nİlişkili ROM boyutlarının toplamı: ${formatBytes(totalSize)}\n\nÖNEMLİ: Bu JSON yedeğinde ROM dosyalarının kendisi yoktur. Geri yüklenen kayıtlar, ROM dosyası tekrar eklenene kadar yalnızca metadata kaydıdır. Mevcut kayıtların üzerine yazılmayacak.\n\nBirleştirmeyi onaylıyor musun?`;
 if(!confirm(preview))return;let added=0,failed=0;for(const raw of candidates){const g={...raw,blob:undefined,restoredMetadataOnly:true,addedAt:Number(raw.addedAt)||Date.now()};try{await saveGame(g);added++;}catch(e){failed++;}}await refreshGames();showToast(`Geri yükleme tamamlandı: ${added} eklendi, ${duplicateCount} çakışma atlandı, ${failed} hata.`,failed?'error':'success');if(failed)alert('Bazı kayıtlar geri yüklenemedi. Sağlıklı kayıtlar korundu. İşlem sonucu: '+added+' eklendi, '+failed+' hata.');}catch(e){showToast(`Yedek geri yüklenemedi: ${e.message}`,'error');}}
 async function clearDemo(){if(!confirm('Örnek oyunları bu ekrandan kaldırmak istiyor musun? Gerçek ROM dosyalarına dokunulmaz.'))return;games=games.filter(g=>!g.demo);renderAll();showToast('Örnek içerikler bu oturumda gizlendi.');}
