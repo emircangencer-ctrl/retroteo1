@@ -39,6 +39,7 @@ Netlify runs `npm install`, `npm run check`, `npm test`, and `npm run build` in 
 3. Choose **Oyna** on a supported game card.
 4. Use the arrow keys and keyboard buttons shown in the player, or the per-system touch layout.
 5. For a USB/Bluetooth controller, launch a supported game and open the visible EmulatorJS gamepad button to review or remap controller inputs. RetroPlay sets the matching control scheme for NES, SNES, or Mega Drive. Actual hardware compatibility still needs a desktop/mobile acceptance test; controller layouts can vary by device and browser.
+7. Use **⛶ Tam ekran** in the player toolbar to expand the game and controls to the screen. Press **Esc** or the same button to leave fullscreen. On browsers that do not expose the Fullscreen API, RetroPlay uses an expanded immersive layout; browser chrome may remain visible.
 6. The player also shows whether the browser currently detects a controller. If it does not appear, connect it, press a button once, and choose **Yeniden tara**. This status is a browser-level detection check only; it does not replace testing actual in-game buttons. For the hands-on check, follow [`docs/gamepad-acceptance-checklist.md`](docs/gamepad-acceptance-checklist.md).
 
 On NES, append `?nescore=jsnes` to compare the legacy JSNES player or `?nescore=nesjs` to compare `@nesjs/core`; remove the parameter to use the default EmulatorJS system. Those diagnostic routes apply to NES only.
