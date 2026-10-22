@@ -116,3 +116,12 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - The status makes a deliberate distinction between a browser-detected controller and a controller that has not been detected. It does **not** claim a controller can control a game simply because the browser reports it.
 - Added unit tests for unsupported APIs, permission/API exceptions, empty/disconnected slots, multiple controllers and bounded IDs. Added the new module to the syntax-check pipeline.
 - **Acceptance still required:** test a real USB/Bluetooth controller in desktop Chrome and Android Chrome, including directional input, action buttons, remapping, disconnect/reconnect, and close/reopen. Browser-level status and EmulatorJS config tests cannot simulate a physical controller.
+
+- GitHub Actions passed on code/test commit `4e8334a5d7bfa61b306c4e548d799f6f341b5285`: syntax checks, **70/70 unit tests**, production build and output-artifact checks. The following acceptance-checklist/README/report changes are documentation-only.
+  
+## Stage 16 — real-device gamepad acceptance checklist (2026-10-22)
+
+- Added `docs/gamepad-acceptance-checklist.md` with per-system NES/SNES/Mega Drive test rows for D-pad, analog stick, action inputs, Start/Select, key release, pause/resume, close/reopen, disconnect/reconnect, audio, speed and graphics.
+- The checklist separates browser detection from actual in-game inputs and records device/browser/controller model so any failure can be reproduced.
+- Linked the checklist from the README.
+- **No real-device tests were run by adding this checklist.** Until someone completes it on hardware, physical controller support remains pending acceptance.
