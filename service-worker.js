@@ -1,7 +1,7 @@
-const CACHE_NAME = 'retroplay-shell-v9';
-const EMULATORJS_CACHE_NAME = 'retroplay-emulatorjs-runtime-v1';
+const CACHE_NAME = 'retroplay-shell-v10';
+const EMULATORJS_CACHE_NAME = 'retroplay-emulatorjs-runtime-v2';
 const EMULATORJS_ORIGIN = 'https://cdn.emulatorjs.org';
-const EMULATORJS_DATA_PREFIX = '/stable/data/';
+const EMULATORJS_DATA_PREFIX = '/4.2.3/data/';
 const CORE = ['/','/index.html','/manifest.webmanifest','/assets/icon.svg'];
 
 self.addEventListener('install', event => {
@@ -23,7 +23,10 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys=>Promise.all(keys.filter(key=>key.startsWith('retroplay-shell-')&&key!==CACHE_NAME).map(key=>caches.delete(key))))
+      .then(keys=>Promise.all(keys.filter(key=>
+        (key.startsWith('retroplay-shell-')&&key!==CACHE_NAME) ||
+        (key.startsWith('retroplay-emulatorjs-runtime-')&&key!==EMULATORJS_CACHE_NAME)
+      ).map(key=>caches.delete(key))))
       .then(()=>self.clients.claim())
   );
 });
