@@ -123,8 +123,15 @@ export async function extractRomFilesFromZip(file) {
     if (localOffset + 30 > centralOffset || u32(view, localOffset) !== 0x04034b50) throw new Error(`${name}: yerel ZIP başlığı bozuk.`);
 
     const localFlags = u16(view, localOffset + 6), localMethod = u16(view, localOffset + 8);
+    const localCrc = u32(view, localOffset + 14);
+    const localCompressedSize = u32(view, localOffset + 18);
+    const localUncompressedSize = u32(view, localOffset + 22);
     const localNameLength = u16(view, localOffset + 26), localExtraLength = u16(view, localOffset + 28);
     if (localFlags !== flags || localMethod !== method) throw new Error(`${name}: yerel ve merkezi ZIP başlıkları uyuşmuyor.`);
+    // If bit 3 is clear, sizes and CRC must be duplicated consistently in the local header.
+    if (!(flags & 0x0008) && (localCrc !== expectedCrc || localCompressedSize !== compressedSize || localUncompressedSize !== uncompressedSize)) {
+      throw new Error(`${name}: yerel başlığın CRC veya boyut alanları merkezi dizinle uyuşmuyor.`);
+    }
     const localNameStart = localOffset + 30;
     const localNameEnd = localNameStart + localNameLength;
     const dataStart = localNameEnd + localExtraLength;
