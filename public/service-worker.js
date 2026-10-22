@@ -1,4 +1,4 @@
-const CACHE_NAME = 'retroplay-shell-v6';
+const CACHE_NAME = 'retroplay-shell-v7';
 const CORE = ['/','/index.html','/manifest.webmanifest','/assets/icon.svg'];
 self.addEventListener('install', event => {
   event.waitUntil((async()=>{
