@@ -18,7 +18,8 @@ export function validBackup(data) {
   return data.games.every(g => {
     if (!g || !textField(g.id, 200) || !textField(g.title, 300) || !textField(g.platform, 32) ||
         !textField(g.fileName, 255) || !Number.isSafeInteger(g.size) || g.size < 0) return false;
-    if (ids.has(g.id)) return false;
+    // Reserve the demo- namespace for the built-in sample cards.
+    if (g.id.startsWith('demo-') || ids.has(g.id)) return false;
     ids.add(g.id);
     if (g.year !== undefined && g.year !== null && (!Number.isInteger(g.year) || g.year < 1970 || g.year > 2100)) return false;
     if (!optionalText(g.genre, 80) || !optionalText(g.symbol, 32) || !optionalText(g.sizeLabel, 40) || !optionalText(g.status, 80)) return false;
