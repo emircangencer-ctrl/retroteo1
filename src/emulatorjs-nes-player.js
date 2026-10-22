@@ -12,9 +12,7 @@ export function buildEmulatorDocument(gameUrl, gameName) {
     "window.addEventListener('unhandledrejection', event => notify('error', { message: String(event.reason && event.reason.message || event.reason || 'Emülatör başlatılamadı.') }));",
     "window.EJS_player = '#ejs-player';",
     'window.EJS_startOnLoaded = true;',
-    "// EJS_core expects a system identifier ("nes"), not a libretro core ID.
-    // EmulatorJS resolves this system to its NES core list (FCEUmm by default).
-    window.EJS_core = 'nes';",
+    "window.EJS_core = 'nes';",
     'window.EJS_pathtodata = ' + literal(DATA_PATH) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
     'window.EJS_gameName = ' + literal(gameName) + ';',
