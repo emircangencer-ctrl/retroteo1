@@ -19,7 +19,7 @@ function buildDocument(gameUrl, gameName) {
     "window.EJS_onExit = () => notify('exit');",
     "const loader = document.createElement('script'); loader.src = " + literal(DATA_PATH + 'loader.js') + "; loader.onerror = () => notify('error', { message: 'EmulatorJS yüklenemedi. İnternet bağlantısını kontrol et.' }); document.head.appendChild(loader);",
     '})();'
-  ].join('\\n');
+  ].join('\n');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay NES runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsNesPlayer {
