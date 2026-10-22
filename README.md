@@ -1,6 +1,6 @@
-# RetroPlay — Stage 06 (ZIP ROM import + NES core compatibility)
+# RetroPlay — Stage 07 (NES core replacement / compatibility)
 
-RetroPlay is a static PWA intended for Netlify. It imports standard ZIP archives locally and can play `.nes` files. The default player uses the faster `jsnes@2.1.0` engine, with a guarded MMC3 CHR-bank alignment patch for mapper-4 graphics compatibility. The newer `@nesjs/core@2.7.0` engine remains available for A/B tests with `?nescore=nesjs`; it is not the default because its current software-rendering path is too costly on mobile devices. This is a compatibility test stage, not a claim that every NES title is now accurate.
+RetroPlay is a static PWA intended for Netlify. It imports standard ZIP archives locally and can play `.nes` files. The default NES player uses EmulatorJS with the FCEUmm Libretro core, loaded from the official stable EmulatorJS CDN inside a dedicated iframe. This replaces per-game JSNES mapper patches as the primary compatibility strategy. Legacy JSNES (`?nescore=jsnes`) and `@nesjs/core` (`?nescore=nesjs`) remain available only for A/B comparison. This is a compatibility test stage, not a claim that every NES title is now accurate.
 
 SNES, Mega Drive, N64 and arcade entries remain library-only; they are not emulated yet.
 
@@ -22,7 +22,7 @@ npm run build
 npm run preview
 ```
 
-The install step applies a version-guarded compatibility patch to JSNES's MMC3 R0/R1 CHR-bank selection for the retained comparison engine. It fails closed if the pinned upstream source is different from the expected version.
+The install step retains the version-guarded JSNES MMC3 patch only for the optional legacy comparison engine. The default EmulatorJS runtime and FCEUmm core are fetched from `https://cdn.emulatorjs.org/stable/data/` and cached by EmulatorJS in browser storage after the first online load. Initial use of a new core requires an internet connection.
 
 Vite outputs the deployable static site to `dist/`. Netlify is configured to run `npm install && npm run build` and publish `dist`. Use a Git-connected Netlify deployment so Netlify can install the dependencies and build the site; uploading this source ZIP directly as a prebuilt static folder will not run the build command.
 
@@ -40,7 +40,7 @@ ROMs stay in the browser's local IndexedDB. The app does not download or distrib
 
 ## Offline behavior
 
-The service worker caches the built application shell and same-origin assets as they are fetched. Install the PWA while online first. The new core's AudioWorklet is self-hosted at `/nes-audio-processor.js` and is cached after it is fetched during the first play session; open one NES game while online before expecting audio to work offline.
+The service worker caches the built application shell and same-origin assets as they are fetched. Install the PWA while online first. EmulatorJS downloads and caches its core binaries on first use. Test offline play only after the EmulatorJS runtime and FCEUmm core have successfully started at least once while online.
 
 ## Verification status
 
@@ -58,3 +58,8 @@ The production bundle uses `jsnes` (Apache-2.0) by default and retains `@nesjs/c
 - Accepts ordinary, non-encrypted ZIP archives; extracts supported ROM entries in memory without uploading them to a server.
 - Supports ZIP methods 0 (stored) and 8 (deflate), verifies CRC-32 and declared uncompressed size, and limits archives to 1,000 entries, 256 MiB per ROM, and 512 MiB total expanded ROM data.
 - ZIP64, multi-volume archives, encrypted archives, unsupported compression methods, and nested ZIPs are not supported. If the browser does not support `DecompressionStream('deflate-raw')`, use a current browser or extract the ROM file before importing.
+
+
+## EmulatorJS licensing and network behavior
+
+RetroPlay loads EmulatorJS as a separately hosted runtime from the official stable CDN; it does not copy the EmulatorJS runtime into this repository. EmulatorJS is GPL-3.0 licensed: https://github.com/EmulatorJS/EmulatorJS. Review the licensing implications for your distribution before publishing. The emulator downloads the FCEUmm core when a NES game is first opened; this first launch therefore needs network access. ROM bytes are passed to the runtime through a local Blob URL and are not uploaded to a ROM hosting service by this integration.
