@@ -57,3 +57,9 @@ test('rejects backups with too many library records', () => {
   const games = Array.from({ length: 10001 }, validGame);
   assert.equal(validBackup({ app: 'RetroPlay', backupType: 'library-metadata', schemaVersion: 1, games }), false);
 });
+
+test('rejects duplicate game IDs that would overwrite each other during restore', () => {
+  const first = validGame();
+  const duplicate = { ...validGame(), title: 'Different title' };
+  assert.equal(validBackup({ app: 'RetroPlay', backupType: 'library-metadata', schemaVersion: 1, games: [first, duplicate] }), false);
+});
