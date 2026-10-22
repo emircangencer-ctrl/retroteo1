@@ -9,6 +9,7 @@ import { EmulatorJsPlayer } from './emulatorjs-nes-player.js';
 import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './emulator-systems.js';
 import { createBatterySaveRecord, emulatorGameId } from './save-data.js';
 import { inspectGamepads, describeGamepads } from './gamepad-status.js';
+import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from './fullscreen.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -263,6 +264,65 @@ async function startGame(id) {
     showToast('Oyun başlatılamadı. Ayrıntı oynatıcı penceresinde.', 'error');
   }
 }
+let fullscreenFallback = false;
+function updateFullscreenButton() {
+  const button = $('#fullscreen-game');
+  if (!button) return;
+  const active = isFullscreen(document, $('#player-modal')) || fullscreenFallback;
+  button.textContent = active ? '⛶ Tam ekrandan çık' : '⛶ Tam ekran';
+  button.setAttribute('aria-pressed', String(active));
+  button.setAttribute('aria-label', active ? 'Tam ekrandan çık' : 'Oyunu tam ekran yap');
+}
+function setFullscreenFallback(active) {
+  fullscreenFallback = active;
+  $('#player-modal')?.classList.toggle('is-immersive-fallback', active);
+  $('#player-modal')?.parentElement?.classList.toggle('is-immersive-fallback', active);
+  updateFullscreenButton();
+  if (active) showToast('Geniş ekran görünümü açıldı. Tarayıcı tam ekran API’sini desteklemediği için adres çubuğu gizlenmeyebilir.');
+  requestAnimationFrame(() => {
+    try { activeEmulator?.fitInParent?.(); } catch {}
+  });
+}
+async function toggleGameFullscreen() {
+  const modal = $('#player-modal');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if (fullscreenFallback) {
+    setFullscreenFallback(false);
+    return;
+  }
+  if (isFullscreen(document, modal)) {
+    const result = await leaveFullscreen(document);
+    if (result.error) showToast('Tam ekrandan çıkılamadı. Esc tuşunu deneyebilirsin.', 'error');
+    return;
+  }
+  const result = await enterFullscreen(modal, document);
+  if (!result.supported) {
+    setFullscreenFallback(true);
+    return;
+  }
+  if (result.error) {
+    showToast('Tarayıcı tam ekrana geçişi engelledi. Tarayıcı izinlerini kontrol et.', 'error');
+    return;
+  }
+  updateFullscreenButton();
+  requestAnimationFrame(() => {
+    try { activeEmulator?.fitInParent?.(); } catch {}
+  });
+}
+function setupFullscreen() {
+  $('#fullscreen-game')?.addEventListener('click', toggleGameFullscreen);
+  const onChange = () => {
+    if (fullscreenElement(document) !== $('#player-modal') && fullscreenFallback) setFullscreenFallback(false);
+    updateFullscreenButton();
+    requestAnimationFrame(() => {
+      try { activeEmulator?.fitInParent?.(); } catch {}
+    });
+  };
+  document.addEventListener('fullscreenchange', onChange);
+  document.addEventListener('webkitfullscreenchange', onChange);
+  updateFullscreenButton();
+}
+
 function closePlayer() {
   emulatorSession += 1;
   if (activeEmulator) {
@@ -271,6 +331,8 @@ function closePlayer() {
   }
   activeGameId = null;
   emulatorPaused = false;
+  if (isFullscreen(document, $('#player-modal'))) void leaveFullscreen(document);
+  if (fullscreenFallback) setFullscreenFallback(false);
   $('#player-modal').classList.add('hidden');
   $('#player-screen').replaceChildren();
 }
@@ -354,7 +416,7 @@ function exportLibraryBackup(){try{const payload={app:'RetroPlay',backupType:'li
 async function restoreLibraryBackup(file){if(!file)return;try{if(file.size>20*1024*1024)throw new Error('Yedek 20 MB sınırını aşıyor.');const data=JSON.parse(await file.text());if(!validBackup(data))throw new Error('Yedek biçimi veya şema sürümü geçersiz. Mevcut kayıtlar değiştirilmedi.');const existing=new Set((await allStored()).map(g=>g.id));const candidates=data.games.filter(g=>!existing.has(g.id));const duplicateCount=data.games.length-candidates.length;const totalSize=candidates.reduce((n,g)=>n+(g.size||0),0);const preview=`Yedek önizlemesi\n\nYedek tarihi: ${data.createdAt||'Bilinmiyor'}\nYedekteki kayıt: ${data.games.length}\nYeni eklenebilecek kayıt: ${candidates.length}\nKimlik çakışması nedeniyle atlanacak: ${duplicateCount}\nİlişkili ROM boyutlarının toplamı: ${formatBytes(totalSize)}\n\nÖNEMLİ: Bu JSON yedeğinde ROM dosyalarının kendisi yoktur. Geri yüklenen kayıtlar, ROM dosyası tekrar eklenene kadar yalnızca metadata kaydıdır. Mevcut kayıtların üzerine yazılmayacak.\n\nBirleştirmeyi onaylıyor musun?`;
 if(!confirm(preview))return;let added=0,failed=0;for(const raw of candidates){const g={...raw,blob:undefined,restoredMetadataOnly:true,addedAt:Number(raw.addedAt)||Date.now()};try{await saveGame(g);added++;}catch(e){failed++;}}await refreshGames();showToast(`Geri yükleme tamamlandı: ${added} eklendi, ${duplicateCount} çakışma atlandı, ${failed} hata.`,failed?'error':'success');if(failed)alert('Bazı kayıtlar geri yüklenemedi. Sağlıklı kayıtlar korundu. İşlem sonucu: '+added+' eklendi, '+failed+' hata.');}catch(e){showToast(`Yedek geri yüklenemedi: ${e.message}`,'error');}}
 async function clearDemo(){if(!confirm('Örnek oyunları bu ekrandan kaldırmak istiyor musun? Gerçek ROM dosyalarına dokunulmaz.'))return;games=games.filter(g=>!g.demo);renderAll();showToast('Örnek içerikler bu oturumda gizlendi.');}
-function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;renderAll();return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active'))renderAll();});$('#sort-select').addEventListener('change',renderAll);$('#modal-close').addEventListener('click',closeImport);$('#player-close').addEventListener('click',closePlayer);$('#player-modal').addEventListener('click',e=>{if(e.target===$('#player-modal'))closePlayer();});$('#pause-game').addEventListener('click',togglePause);$('#player-exit').addEventListener('click',closePlayer);wireTouchControls();setupGamepadStatus();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
+function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;renderAll();return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active'))renderAll();});$('#sort-select').addEventListener('change',renderAll);$('#modal-close').addEventListener('click',closeImport);$('#player-close').addEventListener('click',closePlayer);$('#player-modal').addEventListener('click',e=>{if(e.target===$('#player-modal'))closePlayer();});$('#pause-game').addEventListener('click',togglePause);$('#player-exit').addEventListener('click',closePlayer);wireTouchControls();setupGamepadStatus();setupFullscreen();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
 window.addEventListener('pagehide',()=>{if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}});
 function updateNetwork(){
   const online=navigator.onLine;
