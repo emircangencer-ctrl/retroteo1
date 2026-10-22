@@ -34,7 +34,7 @@ test('Super Mario Bros. 3 title warns on unrecognized PRG/CHR fingerprint withou
   const result = diagnoseSuperMarioBros3Rom(bytes, 'SMB3 (USA).nes');
   assert.equal(result.status, 'review');
   assert.match(result.message, /CRC32/);
-  assert.match(result.message, /başka bir bölge\/revizyon/);
+  assert.match(result.message, /başka bir bölge\/revizyon/i);
   assert.equal(result.payloadCrc32, crc32(bytes.subarray(16)));
 });
 
