@@ -70,3 +70,8 @@ test('sanitizes malicious legacy cover colors when rendered', () => {
   assert.equal(safeCoverColor('url(https://attacker.example)', '#3b9bca'), '#3b9bca');
   assert.equal(safeCoverColor(null, '#284e78'), '#284e78');
 });
+
+test('rejects IDs reserved for built-in demo cards', () => {
+  const game = { ...validGame(), id: 'demo-mario' };
+  assert.equal(validBackup(backup(game)), false);
+});
