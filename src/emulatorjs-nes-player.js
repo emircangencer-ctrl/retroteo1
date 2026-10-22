@@ -1,4 +1,4 @@
-const DATA_PATH = 'https://cdn.emulatorjs.org/stable/data/';
+const DATA_PATH = 'https://cdn.emulatorjs.org/4.2.3/data/';
 export const EMULATORJS_INPUT_INDEX = Object.freeze({ BUTTON_B: 0, BUTTON_Y: 1, BUTTON_SELECT: 2, BUTTON_START: 3, BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7, BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11 });
 const INPUT_INDEX = EMULATORJS_INPUT_INDEX;
 const KEY_TO_BUTTON = Object.freeze({ ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT', KeyZ:'BUTTON_B', KeyX:'BUTTON_A', KeyA:'BUTTON_Y', KeyS:'BUTTON_X', KeyQ:'BUTTON_L', KeyW:'BUTTON_R', Enter:'BUTTON_START', ControlRight:'BUTTON_SELECT' });
