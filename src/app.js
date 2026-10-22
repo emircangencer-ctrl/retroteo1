@@ -1,4 +1,4 @@
-import { inspectNesRom } from './nes-rom.js';
+import { inspectNesRom, diagnoseSuperMarioBros3Rom } from './nes-rom.js';
 import { PLATFORM, platformInfo } from './platforms.js';
 import { safeCoverColor, validBackup } from './library-backup.js';
 import { extractRomFilesFromZip } from './zip-rom.js';
@@ -226,6 +226,12 @@ async function startGame(id) {
     if (!validation.valid) {
       throw new Error(validation.reason || 'ROM başlığı veya dosya uzunluğu geçersiz.');
     }
+    const smb3Diagnostic = game.platform === 'NES'
+      ? diagnoseSuperMarioBros3Rom(bytes, `${game.fileName || ''} ${game.title}`, validation)
+      : null;
+    if (smb3Diagnostic?.status === 'review') {
+      $('#player-error').textContent = `ROM denetimi uyarısı: ${smb3Diagnostic.message}`;
+    }
 
     const reportError = error => {
       if (session !== emulatorSession || activeGameId !== game.id) return;
@@ -255,6 +261,7 @@ async function startGame(id) {
       });
       activeEmulator = player;
       activeEmulator.romInfo = validation;
+      activeEmulator.romDiagnostic = smb3Diagnostic;
       await player.loadROM(bytes, game.title);
       if (session !== emulatorSession || activeGameId !== game.id) {
         player.destroy();
