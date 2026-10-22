@@ -54,10 +54,15 @@ test('player UI exposes fullscreen and updates after browser fullscreen changes'
     readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
   ]);
   assert.match(html, /id="fullscreen-game"[^>]*aria-label="Oyunu tam ekran yap"/);
+  assert.match(html, /id="immersive-exit"[^>]*aria-label="Tam ekrandan çık"/);
   assert.match(html, /id="fullscreen-game"[^>]*>⛶ Tam ekran<\/button>/);
   assert.match(app, /document\.addEventListener\('fullscreenchange', onChange\)/);
   assert.match(app, /activeEmulator\?\.fitInParent\?\.\(\)/);
   assert.match(app, /setFullscreenFallback\(true\)/);
+  assert.match(app, /\$\('#immersive-exit'\)\?\.addEventListener\('click', toggleGameFullscreen\)/);
+  assert.match(styles, /#player-modal:fullscreen \.player-header[\s\S]*?display:none!important/);
+  assert.match(styles, /#player-modal:fullscreen \.touch-controls[\s\S]*?position:absolute!important/);
+  assert.match(styles, /\.immersive-exit/);
   assert.match(styles, /#player-modal:fullscreen/);
   assert.match(styles, /\.player-backdrop\.is-immersive-fallback/);
 });
