@@ -31,9 +31,9 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 
 ## Stage 07 — EmulatorJS migration validation (2026-10-22)
 
-- Current branch head at report update: `6ad8317d6ef88352f3dcf6020f5168c70547347a`.
-- GitHub Actions CI passed on this head: https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39757966430. Syntax checks, unit tests, production bundle build, and output-artifact checks all passed.
+- Latest app and technical-documentation commit validated by CI: `267ce3af632978bf9d5f254a99e6dcdee57a759f`.
+- GitHub Actions CI passed: https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39758230246. Syntax checks, unit tests, production bundle build, and output-artifact checks all passed.
 - Added a regression test verifying that when the emulator iframe receives keyboard focus, arrow-key press and release are forwarded to the emulator input adapter.
-- Netlify Deploy Preview: https://deploy-preview-2--retroteo1.netlify.app. The latest confirmed preview at the time of this report was built from code commit `85896e57dc7ac3a7091858172f1baaec362fd2b7`; the subsequent commit only updated documentation and the preview update should be confirmed before claiming it contains that exact head.
+- Netlify Deploy Preview: https://deploy-preview-2--retroteo1.netlify.app. Netlify confirmed that commit `267ce3af632978bf9d5f254a99e6dcdee57a759f` was deployed successfully; deploy log: https://app.netlify.com/projects/retroteo1/deploys/6ad9dbde2e5a2a68f3cbf446.
 - **Not verified:** no real commercial ROM was launched by this CI run; no screenshot comparison, gameplay timing measurement, or Android device test has been performed. SMB3 graphics and original SMB speed remain open acceptance checks.
 - **Known trade-offs:** the default EmulatorJS/FCEUmm runtime is fetched from the official stable CDN, so first launch needs network access and offline playback is not guaranteed. EmulatorJS is GPL-3.0 licensed; distribution implications need review before public release.
