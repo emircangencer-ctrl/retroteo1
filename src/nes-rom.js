@@ -25,7 +25,7 @@ export function crc32(input) {
 }
 
 export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesRom(input)) {
-  const compactName = String(name || '').normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const compactName = String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!compactName.includes('supermariobros3') && !compactName.includes('smb3')) return null;
 
   if (!inspection?.valid) {
