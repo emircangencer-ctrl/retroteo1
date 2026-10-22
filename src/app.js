@@ -2,6 +2,7 @@ import { inspectNesRom } from './nes-rom.js';
 import { extractRomFilesFromZip } from './zip-rom.js';
 import { Browser as NesBrowser, Controller as NesController } from 'jsnes';
 import { BrowserNesPlayer } from './nes-core-player.js';
+import { resolveNesCore } from './nes-engine.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -116,9 +117,7 @@ async function handleFiles(fileList){
 }
 
 function requestedNesCore() {
-  return new URLSearchParams(window.location.search).get('nescore') === 'jsnes'
-    ? 'jsnes'
-    : 'nesjs';
+  return resolveNesCore(window.location.search);
 }
 function playerStatus(label) {
   const engine = activeEmulator?.engineName || 'NES';
@@ -164,13 +163,13 @@ async function startGame(id) {
     };
 
     if (requestedNesCore() === 'jsnes') {
-      // Keep the known engine available for direct A/B comparison.
+      // JSNES is the fast default; @nesjs/core remains available for graphics A/B testing.
       const browser = new NesBrowser({
         container: $('#player-screen'),
         onError: reportError
       });
       activeEmulator = {
-        engineName: 'JSNES (karşılaştırma)',
+        engineName: 'JSNES (hızlı varsayılan)',
         romInfo: validation,
         destroy: () => browser.destroy(),
         pause: () => browser.stop(),

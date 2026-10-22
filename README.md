@@ -1,6 +1,6 @@
 # RetroPlay — Stage 06 (ZIP ROM import + NES core compatibility)
 
-RetroPlay is a static PWA intended for Netlify. It imports standard ZIP archives locally and can play `.nes` files. The default player now uses `@nesjs/core@2.7.0`; the earlier `jsnes@2.1.0` engine is retained for side-by-side comparison with `?nescore=jsnes`. This is a compatibility test stage, not a claim that every NES title is now accurate.
+RetroPlay is a static PWA intended for Netlify. It imports standard ZIP archives locally and can play `.nes` files. The default player uses the faster `jsnes@2.1.0` engine, with a guarded MMC3 CHR-bank alignment patch for mapper-4 graphics compatibility. The newer `@nesjs/core@2.7.0` engine remains available for A/B tests with `?nescore=nesjs`; it is not the default because its current software-rendering path is too costly on mobile devices. This is a compatibility test stage, not a claim that every NES title is now accurate.
 
 SNES, Mega Drive, N64 and arcade entries remain library-only; they are not emulated yet.
 
@@ -34,7 +34,7 @@ Vite outputs the deployable static site to `dist/`. Netlify is configured to run
 4. Use the arrow keys, Z/X, Enter, Right Ctrl, a compatible gamepad, or the on-screen touch controls.
 5. Use pause or exit in the player window.
 
-To compare the two engines for the same locally stored ROM, open the deploy preview with `?nescore=jsnes`. Remove that query parameter to use the default `@nesjs/core` path.
+The default uses JSNES. To compare the newer engine for the same locally stored ROM, open the preview with `?nescore=nesjs`. Remove that query parameter to return to the faster JSNES path.
 
 ROMs stay in the browser's local IndexedDB. The app does not download or distribute commercial ROMs. A valid iNES/NES 2.0 header does not guarantee that a game dump, mapper, or PPU behavior is compatible. The new core publishes a broader mapper list, but the target games must still be visually tested on real ROMs.
 
@@ -51,7 +51,7 @@ The service worker caches the built application shell and same-origin assets as 
 
 ## Third-party notices
 
-The production bundle uses `@nesjs/core` (MIT) and retains `jsnes` (Apache-2.0) for comparison. License texts are included in [THIRD-PARTY-NOTICES.txt](./public/THIRD-PARTY-NOTICES.txt) and served at `/THIRD-PARTY-NOTICES.txt`.
+The production bundle uses `jsnes` (Apache-2.0) by default and retains `@nesjs/core` (MIT) for comparison. License texts are included in [THIRD-PARTY-NOTICES.txt](./public/THIRD-PARTY-NOTICES.txt) and served at `/THIRD-PARTY-NOTICES.txt`.
 
 ## ZIP import behavior
 
