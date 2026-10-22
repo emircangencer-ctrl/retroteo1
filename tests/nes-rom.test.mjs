@@ -12,3 +12,21 @@ test('rejects zero PRG size',()=>assert.equal(inspectNesRom(ines({prg:0})).valid
 test('rejects truncated PRG/CHR payload',()=>{const b=ines();assert.equal(inspectNesRom(b.slice(0,100)).valid,false);});
 test('accounts for optional trainer',()=>{const b=ines({trainer:true});assert.equal(inspectNesRom(b).valid,true);assert.equal(inspectNesRom(b).trainerBytes,512);});
 test('recognizes NES 2.0 conservatively',()=>{const b=ines();b[7]=(b[7]&0xf3)|0x08;const r=inspectNesRom(b);assert.equal(r.valid,true);assert.equal(r.format,'NES 2.0');assert.equal(r.sizeVerified,false);});
+
+
+test('validates a large ROM from its header plus actual file length',()=>{
+  const b=ines({prg:4,chr:2});
+  const header=b.slice(0,16);
+  const r=inspectNesRom(header,{declaredLength:b.length});
+  assert.equal(r.valid,true);
+  assert.equal(r.prgBytes,65536);
+  assert.equal(r.chrBytes,16384);
+});
+
+test('rejects a large ROM when the actual declared length is truncated',()=>{
+  const b=ines({prg:4,chr:2});
+  const header=b.slice(0,16);
+  const r=inspectNesRom(header,{declaredLength:b.length-1});
+  assert.equal(r.valid,false);
+  assert.match(r.reason,/ROM verisi eksik/);
+});
