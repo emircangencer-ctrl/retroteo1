@@ -1,6 +1,9 @@
 [build]
-  command = "npm install && npm run build"
+  command = "npm install && npm run check && npm test && npm run build"
   publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
 
 [[headers]]
   for = "/*"
