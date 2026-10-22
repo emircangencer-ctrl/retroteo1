@@ -37,7 +37,7 @@ test('Drive token request uses read-only scope and returns access token', async 
   } } };
   assert.equal(await requestDriveAccessToken({ clientId: 'client-id', googleLike }), 'test-token');
   assert.equal(config.scope, DRIVE_READ_SCOPE);
-  assert.equal(request.prompt, '');
+  assert.equal(request, undefined);
 });
 
 test('Drive token request fails safely when not configured or denied', async () => {
