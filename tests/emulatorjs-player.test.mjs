@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EmulatorJsNesPlayer } from '../src/emulatorjs-nes-player.js';
+import { runInNewContext } from 'node:vm';
+import { buildEmulatorDocument, EmulatorJsNesPlayer } from '../src/emulatorjs-nes-player.js';
 
 class FakeFrameWindow extends EventTarget {
   constructor(inputCalls) {
@@ -164,4 +165,43 @@ test('a runtime bootstrap error rejects pending startup and reports a readable e
     try { player?.destroy(); } catch {}
     restore();
   }
+});
+
+function invokeGameStart(emulator) {
+  const messages = [];
+  const fakeDocument = {
+    head: { appendChild: () => {} },
+    createElement: () => ({})
+  };
+  const context = {
+    document: fakeDocument,
+    parent: { postMessage: message => messages.push(message) },
+    addEventListener: () => {}
+  };
+  context.window = context;
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Test ROM');
+  const start = html.indexOf('<script>') + '<script>'.length;
+  const end = html.indexOf('</script>', start);
+  runInNewContext(html.slice(start, end), context);
+  if (emulator !== undefined) context.EJS_emulator = emulator;
+  context.EJS_onGameStart();
+  return messages;
+}
+
+test('runtime reports an error instead of false startup when controller/pause APIs are missing', () => {
+  const messages = invokeGameStart(undefined);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'error');
+  assert.match(messages[0].message, /kontrol desteği/);
+  assert.match(messages[0].message, /duraklatma/);
+  assert.match(messages[0].message, /devam etme/);
+});
+
+test('runtime reports started only when required controller and pause APIs exist', () => {
+  const messages = invokeGameStart({
+    gameManager: { simulateInput: () => {} },
+    pause: () => {},
+    play: () => {}
+  });
+  assert.deepEqual(messages, [{ source: 'retroplay-emulatorjs', type: 'started' }]);
 });
