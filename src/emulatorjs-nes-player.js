@@ -4,7 +4,7 @@ const INPUT_INDEX = EMULATORJS_INPUT_INDEX;
 const KEY_TO_BUTTON = Object.freeze({ ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT', KeyZ:'BUTTON_B', KeyX:'BUTTON_A', Enter:'BUTTON_START', ControlRight:'BUTTON_SELECT' });
 const HIDDEN_BUTTONS = { playPause:false, play:false, pause:false, restart:false, mute:false, unmute:false, volumeSlider:false, settings:false, fullscreen:false, enterFullscreen:false, exitFullscreen:false, saveState:false, loadState:false, quickSave:false, quickLoad:false, screenshot:false, gamepad:false, cheat:false, cacheManager:false, exitEmulation:false, netplay:false, diskButton:false, contextMenu:false, saveSavFiles:false, loadSavFiles:false };
 const literal = value => JSON.stringify(value).replace(/</g, '\\u003c');
-function buildDocument(gameUrl, gameName) {
+export function buildEmulatorDocument(gameUrl, gameName) {
   const startup = [
     '(() => {',
     "const notify = (type, details = {}) => parent.postMessage({ source: 'retroplay-emulatorjs', type, ...details }, '*');",
@@ -39,7 +39,7 @@ export class EmulatorJsNesPlayer {
     this.romUrl=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
     const frame=document.createElement('iframe'); frame.title=gameName+' — NES emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
     this.frame=frame; this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
-    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('NES çekirdeği 75 saniye içinde başlamadı. İnternet bağlantısını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildDocument(this.romUrl,gameName); });
+    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('NES çekirdeği 75 saniye içinde başlamadı. İnternet bağlantısını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName); });
   }
   handleMessage(event) {
     if(!this.frame||event.source!==this.frame.contentWindow||!event.data||event.data.source!=='retroplay-emulatorjs')return;
