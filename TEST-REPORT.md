@@ -28,3 +28,12 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - JavaScript syntax checks for `app.js`, `nes-rom.js`, and `zip-rom.js`: PASS.
 - Live Netlify/browser test after deploying this revision: NOT YET RUN.
 - Deflate compression in a real browser and mobile Safari: NOT YET verified live.
+
+## Stage 07 — EmulatorJS migration validation (2026-10-22)
+
+- Current branch head at report update: `6ad8317d6ef88352f3dcf6020f5168c70547347a`.
+- GitHub Actions CI passed on this head: https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39757966430. Syntax checks, unit tests, production bundle build, and output-artifact checks all passed.
+- Added a regression test verifying that when the emulator iframe receives keyboard focus, arrow-key press and release are forwarded to the emulator input adapter.
+- Netlify Deploy Preview: https://deploy-preview-2--retroteo1.netlify.app. The latest confirmed preview at the time of this report was built from code commit `85896e57dc7ac3a7091858172f1baaec362fd2b7`; the subsequent commit only updated documentation and the preview update should be confirmed before claiming it contains that exact head.
+- **Not verified:** no real commercial ROM was launched by this CI run; no screenshot comparison, gameplay timing measurement, or Android device test has been performed. SMB3 graphics and original SMB speed remain open acceptance checks.
+- **Known trade-offs:** the default EmulatorJS/FCEUmm runtime is fetched from the official stable CDN, so first launch needs network access and offline playback is not guaranteed. EmulatorJS is GPL-3.0 licensed; distribution implications need review before public release.
