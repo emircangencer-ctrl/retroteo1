@@ -209,3 +209,9 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+
+4. EmulatorJS (external runtime, stable CDN) — GPL-3.0
+   Project/source: https://github.com/EmulatorJS/EmulatorJS
+   Runtime URL: https://cdn.emulatorjs.org/stable/data/
+   The project loads this runtime separately in an iframe; it is not vendored in this repository.
