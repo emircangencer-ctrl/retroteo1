@@ -510,7 +510,7 @@ async function downloadSelectedDriveFile(fileId){
   const extension=getFileExt(file.name);
   const limit=extension==='zip'?512*1024*1024:256*1024*1024;
   if(Number(file.size)>limit){showToast(`Dosya boyutu ${formatBytes(limit)} sınırını aşıyor.`,'error');return;}
-  const button=$(`[data-drive-download="${CSS.escape(fileId)}"]`);
+  const button=[...$('#drive-files').querySelectorAll('[data-drive-download]')].find(item=>item.dataset.driveDownload===fileId);
   if(button)button.disabled=true;
   setDriveStatus(`İndiriliyor: ${file.name}`,'loading');
   try{
