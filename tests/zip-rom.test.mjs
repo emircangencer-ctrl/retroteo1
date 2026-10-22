@@ -89,3 +89,13 @@ test('rejects trailing bytes after the ZIP end-of-central-directory record',asyn
     /bitiş kaydı/
   );
 });
+
+test('rejects inconsistent local CRC/size fields when no data descriptor is used', async () => {
+  const zip = storedZip([{ name: 'header-mismatch.nes', data: sampleNes }]);
+  const bytes = Buffer.from(await zip.arrayBuffer());
+  bytes.writeUInt32LE(sampleNes.length - 1, 22); // Local uncompressed-size field only.
+  await assert.rejects(
+    () => extractRomFilesFromZip(new File([bytes], 'header-mismatch.zip')),
+    /CRC veya boyut alanları/
+  );
+});
