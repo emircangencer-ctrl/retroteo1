@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validBackup } from '../src/library-backup.js';
+import { safeCoverColor, validBackup } from '../src/library-backup.js';
 
 const validGame = () => ({
   id: 'rom-123',
@@ -62,4 +62,11 @@ test('rejects duplicate game IDs that would overwrite each other during restore'
   const first = validGame();
   const duplicate = { ...validGame(), title: 'Different title' };
   assert.equal(validBackup({ app: 'RetroPlay', backupType: 'library-metadata', schemaVersion: 1, games: [first, duplicate] }), false);
+});
+
+test('sanitizes malicious legacy cover colors when rendered', () => {
+  assert.equal(safeCoverColor('#12aBcF', '#000000'), '#12aBcF');
+  assert.equal(safeCoverColor('#123456; background-image:url(https://attacker.example)', '#284e78'), '#284e78');
+  assert.equal(safeCoverColor('url(https://attacker.example)', '#3b9bca'), '#3b9bca');
+  assert.equal(safeCoverColor(null, '#284e78'), '#284e78');
 });
