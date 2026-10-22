@@ -53,7 +53,9 @@ The next hardening step is to test cold-start/offline behavior in desktop Chromi
 
 ## Save-data status
 
-The app's own library metadata, favorites and ROM blobs are stored in IndexedDB; an app-level JSON backup can restore library metadata, but it does not include ROM bytes. Emulator battery-backed save RAM persistence and a first-class save-state UI are **not yet wired into RetroPlay's controls**. These are separate capabilities and should be implemented using documented EmulatorJS save callbacks rather than depending on undocumented internals where possible.
+The app's library metadata, favorites and ROM blobs are stored in IndexedDB; an app-level JSON backup can restore library metadata, but it does not include ROM bytes. The app now also mirrors EmulatorJS's documented `EJS_onSaveUpdate` SRAM/battery-save events into a separate `batterySaves` object store. Save records are associated with the local game record and a stable numeric `EJS_gameID`; a 15-second save flush interval is configured so EmulatorJS can detect and emit changed save data.
+
+This is a **local secondary backup foundation**, not a complete save-management feature. It does not yet expose SRAM export/import, load the mirrored copy back into the core, sync across devices, or provide a first-class save-state UI. The core's own save behavior remains separate. The callback and save bytes are tested at unit level, but the browser's real core/save pipeline still needs validation with games that actually use battery-backed SRAM.
 
 ## Automated verification and release guardrails
 
