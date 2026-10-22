@@ -135,12 +135,33 @@ export async function listDriveFiles({
 export async function downloadDriveFile({
   accessToken,
   fileId,
+  maxBytes = 256 * 1024 * 1024,
   fetchImpl = globalThis.fetch
 } = {}) {
   if (!accessToken) throw new Error('Önce Google Drive bağlantısı kur.');
   if (typeof fileId !== 'string' || !fileId.trim()) throw new Error('Google Drive dosya kimliği geçersiz.');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('İndirme boyutu sınırı geçersiz.');
   if (typeof fetchImpl !== 'function') throw new Error('Bu ortamda ağ isteği yapılamıyor.');
   const url = `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media`;
   const response = await driveRequest(url, accessToken, fetchImpl);
-  return response.blob();
+  const reader = response.body?.getReader?.();
+  if (!reader) throw new Error('Güvenli akışlı indirme bu tarayıcıda desteklenmiyor.');
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        throw new Error(`Dosya boyutu ${maxBytes} bayt indirme sınırını aşıyor.`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch {}
+    throw error;
+  }
+  return new Blob(chunks, { type: response.headers?.get?.('content-type') || 'application/octet-stream' });
 }
