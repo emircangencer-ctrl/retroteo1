@@ -116,7 +116,7 @@ async function handleFiles(fileList){
   }
   await refreshGames();$('#progress-label').textContent='İçe aktarma tamamlandı';$('#progress-percent').textContent=`${success}/${files.length}`;
   $('#import-results').textContent=`Tamamlandı: ${success} · Atlandı: ${skipped} · Hata: ${failed}\n`+$('#import-results').textContent;
-  showToast(`${success} ROM dosyası içe aktarıldı. Bu sürümde oynatma desteği yalnızca NES .nes dosyaları içindir.`,success?'success':'error');setView('library');
+  showToast(`${success} ROM dosyası içe aktarıldı. Oynatma desteği NES, SNES ve Mega Drive için etkin.`,success?'success':'error');setView('library');
 }
 
 function requestedNesCore() {
