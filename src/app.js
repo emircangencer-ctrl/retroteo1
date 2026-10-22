@@ -513,11 +513,19 @@ async function connectDrive(){
     return;
   }
   const button=$('#drive-connect');
+  const google=globalThis.google;
+  if(!google?.accounts?.oauth2){
+    setDriveStatus('Google kimlik kitaplığı hazır değil. Sayfayı yenileyip tekrar dene.','error');
+    showToast('Google bağlantısı henüz hazır değil.','error');
+    return;
+  }
   button.disabled=true;
-  setDriveStatus('Google bağlantısı hazırlanıyor…','loading');
+  setDriveStatus('Google izin penceresi bekleniyor…','loading');
+  // Start the token request directly inside the click gesture. Awaiting a script load here
+  // can lose transient user activation and cause popup blockers to reject the Google flow.
+  const tokenPromise=requestDriveAccessToken({clientId,googleLike:google});
   try{
-    const google=await loadGoogleIdentity();
-    driveAccessToken=await requestDriveAccessToken({clientId,googleLike:google});
+    driveAccessToken=await tokenPromise;
     driveFolderStack=[{id:'root',name:'Drive'}];
     driveCurrentFolder='root';
     await loadDriveFolder('root');
@@ -570,8 +578,20 @@ function setupDrive(){
     const download=event.target.closest('[data-drive-download]');
     if(download)await downloadSelectedDriveFile(download.dataset.driveDownload);
   });
-  // Load the small Google identity client only when Drive is configured; never load it on default builds.
-  if(getDriveClientId())loadGoogleIdentity().catch(error=>setDriveStatus(error?.message||'Google kimlik kitaplığı yüklenemedi.','error'));
+  // Preload Google Identity before the user clicks so the OAuth popup is opened from a real gesture.
+  // This code path is opt-in and runs only when a client ID is configured for this deployment.
+  if(getDriveClientId()){
+    const button=$('#drive-connect');
+    if(button)button.disabled=true;
+    setDriveStatus('Google bağlantı hizmeti hazırlanıyor…','loading');
+    loadGoogleIdentity().then(()=>{
+      if(button)button.disabled=false;
+      setDriveStatus('Google Drive bağlantıya hazır.','ready');
+    }).catch(error=>{
+      if(button)button.disabled=true;
+      setDriveStatus((error?.message||'Google kimlik kitaplığı yüklenemedi.')+' Sayfayı yenileyip tekrar dene.','error');
+    });
+  }
 }
 
 function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',closeImport);$('#player-close').addEventListener('click',closePlayer);$('#player-modal').addEventListener('click',e=>{if(e.target===$('#player-modal'))closePlayer();});$('#pause-game').addEventListener('click',togglePause);$('#player-exit').addEventListener('click',closePlayer);wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
