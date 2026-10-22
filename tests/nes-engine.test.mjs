@@ -30,7 +30,15 @@ test('EmulatorJS bootstrap script is valid and uses the NES system ID and starts
 
 test('EmulatorJS uses standard RetroArch NES joypad indices for touch and keyboard input', () => {
   assert.deepEqual(EMULATORJS_INPUT_INDEX, {
-    BUTTON_B: 0, BUTTON_SELECT: 2, BUTTON_START: 3, BUTTON_UP: 4,
-    BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7, BUTTON_A: 8
+    BUTTON_B: 0, BUTTON_Y: 1, BUTTON_SELECT: 2, BUTTON_START: 3,
+    BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7,
+    BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11
   });
+});
+
+
+test('EmulatorJS bootstrap selects supported system identifiers without accepting injected values', () => {
+  assert.ok(buildEmulatorDocument('blob:rom', 'SNES test', 'snes').includes('window.EJS_core = "snes"'));
+  assert.ok(buildEmulatorDocument('blob:rom', 'Mega Drive test', 'segaMD').includes('window.EJS_core = "segaMD"'));
+  assert.throws(() => buildEmulatorDocument('blob:rom', 'Invalid', 'nes\';alert(1);//'), /Unsupported EmulatorJS system/);
 });
