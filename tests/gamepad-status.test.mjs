@@ -6,7 +6,7 @@ test('reports unsupported when the browser has no Gamepad API', () => {
   const status = inspectGamepads({});
   assert.equal(status.state, 'unsupported');
   assert.equal(status.supported, false);
-  assert.match(describeGamepads(status), /emülatör menüsündeki kontrolcü ayarını/);
+  assert.match(describeGamepads(status), /Emülatör menüsündeki kontrolcü ayarını/i);
 });
 
 test('handles a Gamepad API that throws without crashing the UI', () => {
