@@ -8,7 +8,7 @@ RetroPlay is a static PWA intended for Netlify. ROM files are imported into the 
 | SNES | `.sfc`, `.smc` | `snes` | Snes9x |
 | Sega Mega Drive / Genesis | `.md`, `.gen` | `segaMD` | Genesis Plus GX |
 
-The system registry is in `src/emulator-systems.js`. It defines platform identity, supported extensions, EmulatorJS system IDs and per-system touch-button layouts. The player runtime is shared; per-platform configuration selects the system ID and controller layout. SNES and Mega Drive integration is a newly wired path and still needs real-ROM validation across representative games and devices before it should be considered release-ready.
+The system registry is in `src/emulator-systems.js`. It defines platform identity, supported extensions, EmulatorJS system IDs and per-system touch-button layouts. The player runtime is shared; per-platform configuration selects the system ID and controller layout. SNES and Mega Drive integration is a newly wired path and still needs real-ROM validation across representative games and devices before it should be considered release-ready. EmulatorJS is pinned to version `4.2.3` instead of the moving `stable` alias, so a CDN update cannot silently change gameplay behavior; upgrade it deliberately after regression tests.
 
 N64, CPS1, CPS2 and Neo Geo can appear in the library, but their gameplay emulators are not wired in this branch. Extension support in the import dialog alone does not imply that a file can be played. Generic `.bin` files are intentionally not auto-assigned to a system because that extension is ambiguous.
 
@@ -45,11 +45,11 @@ ROMs remain in local browser storage. Use only ROM files you own or are authoriz
 
 ## Offline behavior and its current limit
 
-The service worker caches the app shell and same-origin assets. It now also keeps a separate, cache-first store for requests under the official EmulatorJS `/stable/data/` path on `cdn.emulatorjs.org`. Other cross-origin requests are not intercepted. Once a runtime file or a system core has been fetched successfully while online, a later request may be served from the runtime cache when offline; each system's core must have been downloaded at least once.
+The service worker caches the app shell and same-origin assets. It now also keeps a separate, cache-first store for requests under the pinned EmulatorJS `4.2.3/data/` path on `cdn.emulatorjs.org`. Other cross-origin requests are not intercepted. Once a runtime file or a system core has been fetched successfully while online, a later request may be served from the runtime cache when offline; each system's core must have been downloaded at least once.
 
 **Treat this as an offline improvement, not yet as a guaranteed offline release.** The current cache test simulates the worker and network failure, but it does not prove that every browser sends EmulatorJS iframe requests through the worker, that every runtime asset is cacheable, or that storage quota is sufficient. A first launch of a system whose core is not cached still requires a connection.
 
-The next hardening step is to test cold-start/offline behavior in desktop Chromium and Android Chrome (and iOS Safari if it is a target), verify the actual core/resource requests in each case, and decide whether a pinned, self-hosted runtime/core bundle is needed. Measure the required file set and size before preloading assets. Do not precache every core; it would inflate the PWA download for systems a user may never use.
+The runtime and service-worker cache now both target EmulatorJS `4.2.3`; the service worker removes older cache generations when activated. This reduces drift and stale-cache collisions but does not guarantee offline launch. The next hardening step is to test cold-start/offline behavior in desktop Chromium and Android Chrome (and iOS Safari if it is a target), verify the actual core/resource requests in each case, and decide whether a self-hosted runtime/core bundle is needed. Measure the required file set and size before preloading assets. Do not precache every core; it would inflate the PWA download for systems a user may never use.
 
 ## Save-data status
 
