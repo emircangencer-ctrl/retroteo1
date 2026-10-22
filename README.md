@@ -1,19 +1,27 @@
-# RetroPlay — Stage 07 (NES core replacement / compatibility)
+# RetroPlay — multi-system EmulatorJS rollout
 
-RetroPlay is a static PWA intended for Netlify. It imports standard ZIP archives locally and can play `.nes` files. The default NES player uses EmulatorJS with the FCEUmm Libretro core, loaded from the official stable EmulatorJS CDN inside a dedicated iframe. This replaces per-game JSNES mapper patches as the primary compatibility strategy. Legacy JSNES (`?nescore=jsnes`) and `@nesjs/core` (`?nescore=nesjs`) remain available only for A/B comparison. This is a compatibility test stage, not a claim that every NES title is now accurate.
+RetroPlay is a static PWA intended for Netlify. ROM files are imported into the browser's local IndexedDB; the application does not upload ROM bytes to a game-hosting service. In this branch, gameplay is wired through a shared EmulatorJS player for:
 
-SNES, Mega Drive, N64 and arcade entries remain library-only; they are not emulated yet.
+| System | Accepted gameplay extensions | EmulatorJS system ID | Default core |
+|---|---|---|---|
+| NES | `.nes` | `nes` | FCEUmm |
+| SNES | `.sfc`, `.smc` | `snes` | Snes9x |
+| Sega Mega Drive / Genesis | `.md`, `.gen` | `segaMD` | Genesis Plus GX |
+
+The system registry is in `src/emulator-systems.js`. It defines platform identity, supported extensions, EmulatorJS system IDs and per-system touch-button layouts. The player runtime is shared; per-platform configuration selects the system ID and controller layout. SNES and Mega Drive integration is a newly wired path and still needs real-ROM validation across representative games and devices before it should be considered release-ready.
+
+N64, CPS1, CPS2 and Neo Geo can appear in the library, but their gameplay emulators are not wired in this branch. Extension support in the import dialog alone does not imply that a file can be played. Generic `.bin` files are intentionally not auto-assigned to a system because that extension is ambiguous.
 
 ## Local development
 
-Requires Node.js 20+ and internet access for the first dependency install.
+Requires Node.js 20+ and internet access for dependency installation.
 
 ```bash
 npm install
 npm run dev
 ```
 
-For a production build:
+Production verification:
 
 ```bash
 npm run check
@@ -22,44 +30,46 @@ npm run build
 npm run preview
 ```
 
-The install step retains the version-guarded JSNES MMC3 patch only for the optional legacy comparison engine. The default EmulatorJS runtime and FCEUmm core are fetched from `https://cdn.emulatorjs.org/stable/data/`. Initial use requires an internet connection; EmulatorJS caches core binaries in browser storage, but the loader and supporting runtime assets remain CDN-hosted.
+Netlify builds with `npm install && npm run build` and publishes `dist/`. Use a Git-connected Netlify deployment so the build command runs; uploading this source tree as already-built static files skips that build.
 
-Vite outputs the deployable static site to `dist/`. Netlify is configured to run `npm install && npm run build` and publish `dist`. Use a Git-connected Netlify deployment so Netlify can install the dependencies and build the site; uploading this source ZIP directly as a prebuilt static folder will not run the build command.
+## Playing games
 
-## Playing a game
+1. Open RetroPlay on HTTPS (or localhost).
+2. Import a local ROM file, or a ZIP containing supported ROM files.
+3. Choose **Oyna** on a supported game card.
+4. Use the arrow keys and keyboard buttons shown in the player, or the per-system touch layout.
 
-1. Open RetroPlay on HTTPS (or localhost for development).
-2. Import a `.nes` ROM file you own or are authorized to use.
-3. In the game card, press **Oyna**.
-4. Use the arrow keys, Z/X, Enter, Right Ctrl, a compatible gamepad, or the on-screen touch controls.
-5. Use pause or exit in the player window.
+On NES, append `?nescore=jsnes` to compare the legacy JSNES player or `?nescore=nesjs` to compare `@nesjs/core`; remove the parameter to use the default EmulatorJS system. Those diagnostic routes apply to NES only.
 
-The default uses EmulatorJS with the FCEUmm Libretro core. For diagnosis, add `?nescore=jsnes` to compare the legacy JSNES engine or `?nescore=nesjs` to compare `@nesjs/core`; remove the query parameter to return to EmulatorJS.
+ROMs remain in local browser storage. Use only ROM files you own or are authorized to use. A recognized header or accepted extension is not proof that a game dump is complete or compatible.
 
-ROMs stay in the browser's local IndexedDB. The app does not download or distribute commercial ROMs. A valid iNES/NES 2.0 header does not guarantee that a game dump, mapper, or PPU behavior is compatible. The new core publishes a broader mapper list, but the target games must still be visually tested on real ROMs.
+## Offline behavior and its current limit
 
-## Offline behavior
+The service worker caches the app shell and same-origin assets, and the cache version is bumped with app updates. **That does not currently guarantee offline gameplay.** EmulatorJS's loader and supporting runtime are loaded from `https://cdn.emulatorjs.org/stable/data/`; the service worker intentionally ignores cross-origin requests. EmulatorJS can cache parts of its runtime in browser storage, but that is not the same as a fully self-contained offline install.
 
-The service worker caches the built application shell and same-origin assets as they are fetched. Install the PWA while online first. **Offline playback with the default EmulatorJS engine is not guaranteed**: although its core binaries are cached after first use, the loader and supporting runtime assets remain CDN-hosted. For offline diagnostics, `?nescore=jsnes` selects the bundled legacy engine, which may retain its known mapper-4 graphics issues.
+To deliver reliable offline gameplay, the remaining work is to select and pin a specific EmulatorJS release, self-host the runtime plus the required NES/SNES/Mega Drive core assets, precache those same-origin assets during PWA installation, and test a clean offline launch. The core assets and total transfer size must be measured before deciding which systems are included in the offline bundle. Do not simply precache every supported core: it would inflate the PWA download for systems that the user may never use.
 
-## Verification status
+## Save-data status
 
-- CI runs dependency installation, syntax checks, unit tests, and the Vite production build.
-- The test suite includes a synthetic mapper-4/NES 2.0 cartridge smoke test that checks ROM loading and a complete 256×240 RGBA frame, plus touch-button normalization and the JSNES patch guard.
-- **Automated tests are not a substitute for visual validation.** The current PR remains a draft until the user-owned Batman Returns ROM and several unrelated games are compared in the Netlify preview on desktop and mobile. Nothing in this branch has been merged into the production site.
-- Only `.nes` files are currently wired to an emulator. Save states and battery-backed SRAM persistence are not yet connected to the player UI. Other platforms can be added to the library but are not emulated.
+The app's own library metadata, favorites and ROM blobs are stored in IndexedDB; an app-level JSON backup can restore library metadata, but it does not include ROM bytes. Emulator battery-backed save RAM persistence and a first-class save-state UI are **not yet wired into RetroPlay's controls**. These are separate capabilities and should be implemented using documented EmulatorJS save callbacks rather than depending on undocumented internals where possible.
 
-## Third-party notices
+## Automated verification and release guardrails
 
-The app loads EmulatorJS/FCEUmm from its official CDN at runtime (GPL-3.0; separately hosted, not bundled in the repository). It also bundles `jsnes` (Apache-2.0) and `@nesjs/core` (MIT) for diagnostics. License texts are included in [THIRD-PARTY-NOTICES.txt](./public/THIRD-PARTY-NOTICES.txt) and served at `/THIRD-PARTY-NOTICES.txt`.
+GitHub Actions runs dependency installation, JavaScript syntax checks, unit tests and the Vite production build. Tests cover ROM/ZIP validation, the legacy mapper patch guard, the EmulatorJS bootstrap and startup handshake, input routing, and the system registry. They do not launch real games or compare rendered frames.
+
+Before the multi-system branch is marked release-ready, test at least one known-good local ROM per system on desktop and Android Chrome, verify audio and pause/resume, and test close/reopen. The prior NES reports of graphics and speed issues should remain part of this regression pass. Do not claim visual accuracy based on a successful build alone.
+
+## Licensing and upstream references
+
+- EmulatorJS is GPL-3.0 licensed and loaded from its official CDN: https://github.com/EmulatorJS/EmulatorJS. Review the licensing implications before distributing the app.
+- [EmulatorJS CDN configuration](https://emulatorjs.org/docs/cdn/)
+- [EmulatorJS options and documented save callbacks](https://emulatorjs.org/docs/options/)
+- [NES system details](https://emulatorjs.org/docs/getting-started/)
+- [SNES system details](https://emulatorjs.org/docs/systems/snes/)
+- [Sega Mega Drive system details](https://emulatorjs.org/docs/systems/sega-mega-drive/)
 
 ## ZIP import behavior
 
-- Accepts ordinary, non-encrypted ZIP archives; extracts supported ROM entries in memory without uploading them to a server.
-- Supports ZIP methods 0 (stored) and 8 (deflate), verifies CRC-32 and declared uncompressed size, and limits archives to 1,000 entries, 256 MiB per ROM, and 512 MiB total expanded ROM data.
-- ZIP64, multi-volume archives, encrypted archives, unsupported compression methods, and nested ZIPs are not supported. If the browser does not support `DecompressionStream('deflate-raw')`, use a current browser or extract the ROM file before importing.
-
-
-## EmulatorJS licensing and network behavior
-
-RetroPlay loads EmulatorJS as a separately hosted runtime from the official stable CDN; it does not copy the EmulatorJS runtime into this repository. EmulatorJS is GPL-3.0 licensed: https://github.com/EmulatorJS/EmulatorJS. Review the licensing implications for your distribution before publishing. The emulator downloads the FCEUmm core when a NES game is first opened; this first launch therefore needs network access. ROM bytes are passed to the runtime through a local Blob URL and are not uploaded to a ROM hosting service by this integration.
+- Accepts ordinary non-encrypted ZIP archives and extracts supported ROM entries in memory without uploading them.
+- Supports ZIP methods 0 (stored) and 8 (deflate), verifies CRC-32 and declared uncompressed size, and limits archives to 1,000 entries, 256 MiB per ROM and 512 MiB total expanded ROM data.
+- ZIP64, multi-volume, encrypted archives, unsupported compression methods and nested ZIPs are not supported. If the browser lacks `DecompressionStream('deflate-raw')`, use a current browser or extract the ROM first.
