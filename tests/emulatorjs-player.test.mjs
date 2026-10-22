@@ -188,6 +188,13 @@ function invokeGameStart(emulator) {
   return messages;
 }
 
+test('NES supports the explicit Nestopia core without changing its NES control scheme', () => {
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Super Mario Bros. 3', 'nes', 7, 'nestopia');
+  assert.ok(html.includes('window.EJS_core = "nestopia";'));
+  assert.ok(html.includes('window.EJS_controlScheme = "nes";'));
+  assert.throws(() => buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Invalid', 'nes', 7, 'snes'), /Unsupported EmulatorJS core/);
+});
+
 test('gamepad mapping remains accessible and uses the active console control scheme', () => {
   const systems = [
     ['nes', 'nes'],
