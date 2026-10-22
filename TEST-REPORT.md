@@ -171,3 +171,12 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - The import UI passes the 256 MiB cap for single ROM files and 512 MiB for ZIP archives. This still requires adequate browser memory and storage; those caps are upper bounds, not recommended file sizes for mobile devices.
 - Added a regression test for over-limit streaming. CI run https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39846817226 passed; the dedicated test run https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39846808900 passed.
 - Latest code commit: `803a4c26399a561982388dec75086ee0fa15449c`. The Netlify Deploy Preview is rebuilding this revision. Live OAuth, Drive downloads, and gameplay still need real-browser acceptance testing after OAuth configuration.
+
+
+## Stage 22 — immersive game view and NES core hardening (2026-10-22)
+
+- Reworked native fullscreen and the no-Fullscreen-API fallback so the visual surface shows the game image, touch controls, and one small exit-fullscreen control. The title/header, toolbar, gamepad status, hints, and disclaimer are hidden in immersive mode.
+- The emulator canvas now uses a centered 4:3 display box with pixel-preserving scaling instead of CSS forcing both width and height to 100%, which could stretch the image when the parent was not 4:3.
+- The NES registry explicitly selects EmulatorJS's documented `nestopia` core while retaining the NES input scheme. Core ID and controller scheme are now independent, with a system/core allow-list to prevent mismatched configuration.
+- Added regression checks for immersive fullscreen UI, aspect-ratio sizing, and the NES core/control-scheme separation.
+- This is a code-level remediation, not proof that every ROM dump is valid or that every visual artifact has disappeared. Super Mario Bros. 3 has documented PPU/scroll-split visual quirks; verify the user's own ROM against a known-good dump/reference on the deployed preview. CI cannot establish real gameplay visuals without that manual check.
