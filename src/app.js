@@ -10,6 +10,7 @@ import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './e
 import { createBatterySaveRecord, emulatorGameId } from './save-data.js';
 import { inspectGamepads, describeGamepads } from './gamepad-status.js';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from './fullscreen.js';
+import { getDriveClientId, loadGoogleIdentity, requestDriveAccessToken, listDriveFiles, downloadDriveFile, isDriveFolder, isSupportedDriveGame } from './google-drive.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -35,6 +36,13 @@ let activeGameId = null;
 let emulatorSession = 0;
 let emulatorPaused = false;
 let batterySaveIds = new Set();
+let libraryRenderFrame = 0;
+let driveAccessToken = '';
+let driveCurrentFolder = 'root';
+let driveFolderStack = [{ id: 'root', name: 'Drive' }];
+let driveNextPageToken = '';
+let driveVisibleFiles = [];
+let driveListingGeneration = 0;
 
 function openDB(){return new Promise((resolve,reject)=>{if(!('indexedDB' in window)){reject(new Error('Bu tarayıcı IndexedDB desteklemiyor.'));return;}const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE)){const st=d.createObjectStore(STORE,{keyPath:'id'});st.createIndex('addedAt','addedAt');st.createIndex('platform','platform');}if(!d.objectStoreNames.contains(SAVE_STORE))d.createObjectStore(SAVE_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('Yerel veritabanı açılamadı.'));});}
 function txStore(mode='readonly'){return db.transaction(STORE,mode).objectStore(STORE)}
@@ -71,6 +79,17 @@ function renderSystemTile(key){const p=platformInfo(key);const count=games.filte
 function renderSystemRow(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key&&!g.demo).length;return `<article class="system-row"><span class="system-logo">${esc(p.logo)}</span><div class="system-row-copy"><strong>${esc(p.short)} <span style="color:#8291aa;font-weight:500">· ${esc(p.label)}</span></strong><p>${key==='N64'?'Uyumluluk oyun ve cihaz bazında ayrıca test edilecek.':key==='CPS1'||key==='CPS2'||key==='NEOGEO'?'Arcade dosyaları için çekirdek ve doğru dosya seti gereklidir.':'İlk sürüm platform adayı; emülatör entegrasyonu henüz eklenmedi.'}</p></div><span class="system-row-count">${count} yerel oyun</span></article>`;}
 function filteredGames({favorites=false,recent=false}={}){let result=[...games];if(favorites)result=result.filter(g=>g.favorite);if(recent)result=result.filter(g=>!g.demo&&g.lastPlayed).sort((a,b)=>(b.lastPlayed||0)-(a.lastPlayed||0));const q=($('#search-input')?.value||'').trim().toLocaleLowerCase('tr-TR');if(q&&$('#view-library').classList.contains('active'))result=result.filter(g=>`${g.title} ${platformInfo(g.platform).short} ${g.fileName||''}`.toLocaleLowerCase('tr-TR').includes(q));if($('#view-library').classList.contains('active')&&selectedPlatform!=='ALL')result=result.filter(g=>g.platform===selectedPlatform);const sort=$('#sort-select')?.value||'recent';if(sort==='name')result.sort((a,b)=>a.title.localeCompare(b.title,'tr'));else if(sort==='platform')result.sort((a,b)=>platformInfo(a.platform).short.localeCompare(platformInfo(b.platform).short)||a.title.localeCompare(b.title,'tr'));else result.sort((a,b)=>(b.addedAt||0)-(a.addedAt||0));return result;}
 function fillGrid(el,items){if(!el)return;el.innerHTML=items.map(renderCard).join('');el.classList.toggle('list-layout',layoutMode==='list');}
+function renderLibraryResults(){
+  const lib=filteredGames();
+  fillGrid($('#library-games'),lib);
+  const realCount=games.reduce((count,game)=>count+(!game.demo?1:0),0);
+  $('#results-label').textContent=`${lib.length} kayıt · ${realCount} içe aktarılmış dosya`;
+  $('#empty-state').classList.toggle('hidden',lib.length!==0);
+}
+function scheduleLibraryRender(){
+  if(libraryRenderFrame)cancelAnimationFrame(libraryRenderFrame);
+  libraryRenderFrame=requestAnimationFrame(()=>{libraryRenderFrame=0;renderLibraryResults();});
+}
 function renderAll(){const realCount=games.filter(g=>!g.demo).length;$('#library-count').textContent=String(games.length);$('#home-games').innerHTML=games.slice().sort((a,b)=>(b.addedAt||0)-(a.addedAt||0)).slice(0,4).map(renderCard).join('');$('#home-systems').innerHTML=['NES','SNES','MD','N64','CPS1','CPS2','NEOGEO'].map(renderSystemTile).join('');$('#systems-list').innerHTML=['NES','SNES','MD','N64','CPS1','CPS2','NEOGEO'].map(renderSystemRow).join('');const lib=filteredGames();fillGrid($('#library-games'),lib);$('#results-label').textContent=`${lib.length} kayıt · ${realCount} içe aktarılmış dosya`;$('#empty-state').classList.toggle('hidden',lib.length!==0);fillGrid($('#favorite-games'),games.filter(g=>g.favorite));$('#favorite-empty').classList.toggle('hidden',games.some(g=>g.favorite));const rec=games.filter(g=>!g.demo&&g.lastPlayed);fillGrid($('#recent-games'),rec);$('#recent-empty').classList.toggle('hidden',rec.length!==0);renderFilters();}
 function renderFilters(){const list=[['ALL','Tümü'],...Object.keys(PLATFORM).map(k=>[k,platformInfo(k).short])];$('#platform-filters').innerHTML=list.map(([key,label])=>`<button class="filter-chip ${selectedPlatform===key?'selected':''}" data-filter="${key}">${esc(label)}</button>`).join('');}
 function setView(name){const target=$(`#view-${name}`);if(!target)return;$$('.view').forEach(v=>v.classList.toggle('active',v===target));$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===name));const labels={home:'Ana Sayfa',library:'Kütüphane',systems:'Sistemler',favorites:'Favoriler',recent:'Son oynananlar',settings:'Ayarlar',help:'Yardım'};$('#breadcrumb').innerHTML=`${esc(labels[name]||'RetroPlay')} <span>/</span> ${name==='library'?'Koleksiyonun':name==='systems'?'Platform rehberi':'Kişisel retro merkez'}`;if(name==='library')renderAll();window.scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}
@@ -416,7 +435,122 @@ function exportLibraryBackup(){try{const payload={app:'RetroPlay',backupType:'li
 async function restoreLibraryBackup(file){if(!file)return;try{if(file.size>20*1024*1024)throw new Error('Yedek 20 MB sınırını aşıyor.');const data=JSON.parse(await file.text());if(!validBackup(data))throw new Error('Yedek biçimi veya şema sürümü geçersiz. Mevcut kayıtlar değiştirilmedi.');const existing=new Set((await allStored()).map(g=>g.id));const candidates=data.games.filter(g=>!existing.has(g.id));const duplicateCount=data.games.length-candidates.length;const totalSize=candidates.reduce((n,g)=>n+(g.size||0),0);const preview=`Yedek önizlemesi\n\nYedek tarihi: ${data.createdAt||'Bilinmiyor'}\nYedekteki kayıt: ${data.games.length}\nYeni eklenebilecek kayıt: ${candidates.length}\nKimlik çakışması nedeniyle atlanacak: ${duplicateCount}\nİlişkili ROM boyutlarının toplamı: ${formatBytes(totalSize)}\n\nÖNEMLİ: Bu JSON yedeğinde ROM dosyalarının kendisi yoktur. Geri yüklenen kayıtlar, ROM dosyası tekrar eklenene kadar yalnızca metadata kaydıdır. Mevcut kayıtların üzerine yazılmayacak.\n\nBirleştirmeyi onaylıyor musun?`;
 if(!confirm(preview))return;let added=0,failed=0;for(const raw of candidates){const g={...raw,blob:undefined,restoredMetadataOnly:true,addedAt:Number(raw.addedAt)||Date.now()};try{await saveGame(g);added++;}catch(e){failed++;}}await refreshGames();showToast(`Geri yükleme tamamlandı: ${added} eklendi, ${duplicateCount} çakışma atlandı, ${failed} hata.`,failed?'error':'success');if(failed)alert('Bazı kayıtlar geri yüklenemedi. Sağlıklı kayıtlar korundu. İşlem sonucu: '+added+' eklendi, '+failed+' hata.');}catch(e){showToast(`Yedek geri yüklenemedi: ${e.message}`,'error');}}
 async function clearDemo(){if(!confirm('Örnek oyunları bu ekrandan kaldırmak istiyor musun? Gerçek ROM dosyalarına dokunulmaz.'))return;games=games.filter(g=>!g.demo);renderAll();showToast('Örnek içerikler bu oturumda gizlendi.');}
-function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;renderAll();return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active'))renderAll();});$('#sort-select').addEventListener('change',renderAll);$('#modal-close').addEventListener('click',closeImport);$('#player-close').addEventListener('click',closePlayer);$('#player-modal').addEventListener('click',e=>{if(e.target===$('#player-modal'))closePlayer();});$('#pause-game').addEventListener('click',togglePause);$('#player-exit').addEventListener('click',closePlayer);wireTouchControls();setupGamepadStatus();setupFullscreen();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
+
+function setDriveStatus(message,state='idle'){
+  const el=$('#drive-status');
+  if(el){el.textContent=message;el.dataset.state=state;}
+}
+function renderDriveFiles(append=false){
+  const container=$('#drive-files');
+  if(!container)return;
+  const visible=driveVisibleFiles.filter(file=>isDriveFolder(file)||isSupportedDriveGame(file));
+  if(!visible.length&&!append){
+    container.innerHTML='<p class="drive-empty">Bu klasörde desteklenen oyun dosyası veya alt klasör bulunamadı.</p>';
+    return;
+  }
+  const markup=visible.map(file=>{
+    const folder=isDriveFolder(file);
+    const supported=folder||isSupportedDriveGame(file);
+    const size=Number.isFinite(Number(file.size))&&Number(file.size)>0?formatBytes(Number(file.size)):'';
+    const action=folder
+      ?`<button type="button" class="drive-file-action" data-drive-folder="${esc(file.id)}" data-drive-folder-name="${esc(file.name)}">Klasörü aç →</button>`
+      :`<button type="button" class="drive-file-action" data-drive-download="${esc(file.id)}" ${file.capabilities?.canDownload===false?'disabled':''}>İndir ve ekle</button>`;
+    return `<article class="drive-file-row"><span class="drive-file-icon" aria-hidden="true">${folder?'📁':'🎮'}</span><div class="drive-file-copy"><strong title="${esc(file.name)}">${esc(file.name)}</strong><small>${folder?'Klasör':size||'Oyun dosyası'}</small></div>${action}</article>`;
+  }).join('');
+  if(append)container.insertAdjacentHTML('beforeend',markup);
+  else container.innerHTML=markup;
+}
+async function loadDriveFolder(folderId=driveCurrentFolder,{append=false}={}){
+  if(!driveAccessToken){setDriveStatus('Önce Google Drive bağlantısı kur.','idle');return;}
+  const generation=++driveListingGeneration;
+  setDriveStatus('Drive klasörü yükleniyor…','loading');
+  if(!append){driveVisibleFiles=[];driveNextPageToken='';renderDriveFiles();}
+  try{
+    const result=await listDriveFiles({accessToken:driveAccessToken,folderId,pageToken:append?driveNextPageToken:''});
+    if(generation!==driveListingGeneration)return;
+    driveVisibleFiles=append?[...driveVisibleFiles,...result.files]:result.files;
+    driveNextPageToken=result.nextPageToken;
+    renderDriveFiles();
+    $('#drive-breadcrumb').textContent=driveFolderStack.map(item=>item.name).join(' / ');
+    $('#drive-up').hidden=driveFolderStack.length<=1;
+    $('#drive-load-more').hidden=!driveNextPageToken;
+    setDriveStatus(`${driveVisibleFiles.filter(file=>isDriveFolder(file)||isSupportedDriveGame(file)).length} klasör/oyun girdisi bulundu. Dosyalar seçilene kadar indirilmez.`,'ready');
+  }catch(error){
+    if(generation!==driveListingGeneration)return;
+    setDriveStatus(error?.message||'Drive klasörü okunamadı.','error');
+    showToast(error?.message||'Google Drive klasörü okunamadı.','error');
+  }
+}
+async function connectDrive(){
+  const clientId=getDriveClientId();
+  if(!clientId){
+    setDriveStatus('Bağlantı hazır değil. Netlify ortam değişkenlerine VITE_GOOGLE_CLIENT_ID ekle; Google Cloud Console’da Drive API ve OAuth Web istemcisi oluşturup Netlify alan adını yetkili JavaScript kaynağına ekle.','error');
+    showToast('Google Drive için OAuth istemci kimliği yapılandırılmalı.','error');
+    return;
+  }
+  const button=$('#drive-connect');
+  button.disabled=true;
+  setDriveStatus('Google bağlantısı hazırlanıyor…','loading');
+  try{
+    const google=await loadGoogleIdentity();
+    driveAccessToken=await requestDriveAccessToken({clientId,googleLike:google});
+    driveFolderStack=[{id:'root',name:'Drive'}];
+    driveCurrentFolder='root';
+    await loadDriveFolder('root');
+  }catch(error){
+    driveAccessToken='';
+    setDriveStatus(error?.message||'Google Drive bağlantısı başarısız.','error');
+    showToast(error?.message||'Google Drive bağlantısı başarısız.','error');
+  }finally{button.disabled=false;}
+}
+async function downloadSelectedDriveFile(fileId){
+  const file=driveVisibleFiles.find(item=>item.id===fileId);
+  if(!file||isDriveFolder(file)||!isSupportedDriveGame(file))return;
+  if(file.capabilities?.canDownload===false){showToast('Bu dosyanın indirilmesine Google Drive izin vermiyor.','error');return;}
+  const extension=getFileExt(file.name);
+  const limit=extension==='zip'?512*1024*1024:256*1024*1024;
+  if(Number(file.size)>limit){showToast(`Dosya boyutu ${formatBytes(limit)} sınırını aşıyor.`,'error');return;}
+  const button=$(`[data-drive-download="${CSS.escape(fileId)}"]`);
+  if(button)button.disabled=true;
+  setDriveStatus(`İndiriliyor: ${file.name}`,'loading');
+  try{
+    const blob=await downloadDriveFile({accessToken:driveAccessToken,fileId});
+    if(blob.size===0)throw new Error('Drive dosyası boş.');
+    if(blob.size>limit)throw new Error(`Dosya boyutu ${formatBytes(limit)} sınırını aşıyor.`);
+    const importedFile=new File([blob],file.name,{type:blob.type||'application/octet-stream',lastModified:file.modifiedTime?Date.parse(file.modifiedTime)||Date.now():Date.now()});
+    setDriveStatus(`İndirildi: ${file.name}. Yerel kütüphaneye aktarılıyor…`,'ready');
+    await handleFiles([importedFile]);
+    setDriveStatus(`İçe aktarma başlatıldı: ${file.name}`,'ready');
+  }catch(error){
+    setDriveStatus(error?.message||'Dosya indirilemedi.','error');
+    showToast(error?.message||'Google Drive dosyası indirilemedi.','error');
+  }finally{if(button)button.disabled=false;}
+}
+function setupDrive(){
+  $('#drive-connect')?.addEventListener('click',connectDrive);
+  $('#drive-up')?.addEventListener('click',()=>{
+    if(driveFolderStack.length<=1)return;
+    driveFolderStack.pop();
+    driveCurrentFolder=driveFolderStack[driveFolderStack.length-1].id;
+    loadDriveFolder(driveCurrentFolder);
+  });
+  $('#drive-load-more')?.addEventListener('click',()=>loadDriveFolder(driveCurrentFolder,{append:true}));
+  $('#drive-files')?.addEventListener('click',async event=>{
+    const folder=event.target.closest('[data-drive-folder]');
+    if(folder){
+      driveFolderStack.push({id:folder.dataset.driveFolder,name:folder.dataset.driveFolderName||'Klasör'});
+      driveCurrentFolder=folder.dataset.driveFolder;
+      await loadDriveFolder(driveCurrentFolder);
+      return;
+    }
+    const download=event.target.closest('[data-drive-download]');
+    if(download)await downloadSelectedDriveFile(download.dataset.driveDownload);
+  });
+  // Load the small Google identity client only when Drive is configured; never load it on default builds.
+  if(getDriveClientId())loadGoogleIdentity().catch(error=>setDriveStatus(error?.message||'Google kimlik kitaplığı yüklenemedi.','error'));
+}
+
+function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;renderAll();return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active'))scheduleLibraryRender();});$('#sort-select').addEventListener('change',renderLibraryResults);$('#modal-close').addEventListener('click',closeImport);$('#player-close').addEventListener('click',closePlayer);$('#player-modal').addEventListener('click',e=>{if(e.target===$('#player-modal'))closePlayer();});$('#pause-game').addEventListener('click',togglePause);$('#player-exit').addEventListener('click',closePlayer);wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
 window.addEventListener('pagehide',()=>{if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}});
 function updateNetwork(){
   const online=navigator.onLine;
