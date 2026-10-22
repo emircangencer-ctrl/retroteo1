@@ -15,7 +15,7 @@ Earlier screenshots showed severe graphical corruption in *Super Mario Bros. 3* 
 
 ## Current migration approach
 
-- The default engine is EmulatorJS, loaded from the official stable CDN in a dedicated iframe. The configuration must use `EJS_core = 'nes'`; the official EmulatorJS system documentation identifies FCEUmm as the default core for this system. Passing the libretro core name `fceumm` as the system ID is incorrect.
+- The default engine is EmulatorJS, loaded from the official stable CDN in a dedicated iframe. RetroPlay uses the canonical `EJS_core = 'nes'` setting, which the official EmulatorJS documentation says selects FCEUmm by default. The NES-specific page also documents `fceumm` and `nestopia` as accepted core choices, so this migration should not be described as proof that the old `fceumm` value was invalid.
 - ROM bytes stay in the browser and are handed to the iframe using a local Blob URL. RetroPlay does not upload the ROM to a third-party ROM service.
 - The existing JSNES player remains selectable with `?nescore=jsnes`; `@nesjs/core` remains selectable with `?nescore=nesjs`. These are comparison paths, not evidence that either engine is the correct fallback for every title.
 - The application preserves its own player shell and touch controls. Keyboard events are registered on the outer page and on the emulator iframe so controls can still be captured when the iframe owns focus. A unit test verifies the forwarded key-down/key-up calls.
