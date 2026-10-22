@@ -207,3 +207,49 @@ test('runtime reports started only when required controller and pause APIs exist
   assert.equal(messages[0].source, 'retroplay-emulatorjs');
   assert.equal(messages[0].type, 'started');
 });
+
+
+test('save updates are accepted only from the emulator iframe and forwarded to the app', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  const saves = [];
+  let player;
+  try {
+    player = new EmulatorJsNesPlayer(
+      {
+        closest: () => ({ classList: { contains: () => false } })
+      },
+      { onSaveUpdate: update => saves.push(update) }
+    );
+    player.frame = new FakeFrame(calls);
+    const foreignBuffer = new Uint8Array([99]).buffer;
+    player.handleMessage({
+      source: new FakeFrameWindow(calls),
+      data: {
+        source: 'retroplay-emulatorjs',
+        type: 'save-update',
+        hash: 'foreign',
+        saveBuffer: foreignBuffer
+      }
+    });
+    assert.equal(saves.length, 0, 'ignore save data from another iframe');
+
+    player.handleMessage({
+      source: player.frame.contentWindow,
+      data: {
+        source: 'retroplay-emulatorjs',
+        type: 'save-update',
+        hash: 'save-hash-1',
+        saveBuffer: new Uint8Array([1, 4, 9]).buffer
+      }
+    });
+    assert.equal(saves.length, 1);
+    assert.equal(saves[0].hash, 'save-hash-1');
+    assert.deepEqual([...saves[0].bytes], [1, 4, 9]);
+    assert.equal(saves[0].gameId, 1);
+    assert.equal(saves[0].systemId, 'nes');
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
