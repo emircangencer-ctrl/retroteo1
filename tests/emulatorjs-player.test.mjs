@@ -37,6 +37,7 @@ test('keyboard input is forwarded when the emulator iframe owns focus', () => {
   const previousWindow = globalThis.window;
   const fakeDocument = new EventTarget();
   const fakeWindow = new EventTarget();
+  fakeWindow.clearTimeout = () => {};
   const calls = [];
   globalThis.document = fakeDocument;
   globalThis.window = fakeWindow;
