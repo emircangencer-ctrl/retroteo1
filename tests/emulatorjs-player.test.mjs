@@ -188,6 +188,36 @@ function invokeGameStart(emulator) {
   return messages;
 }
 
+test('gamepad mapping remains accessible and uses the active console control scheme', () => {
+  const systems = [
+    ['nes', 'nes'],
+    ['snes', 'snes'],
+    ['segaMD', 'segaMD']
+  ];
+  for (const [systemId, controlScheme] of systems) {
+    const html = buildEmulatorDocument(
+      'blob:https://retroplay.invalid/rom',
+      'Test ROM',
+      systemId
+    );
+    assert.ok(
+      html.includes(`window.EJS_controlScheme = "${controlScheme}";`),
+      `${systemId} should select its own EmulatorJS control scheme`
+    );
+    assert.ok(html.includes("window.EJS_language = 'tr-TR';"));
+    assert.match(
+      html,
+      /window\\.EJS_Buttons = \\{[^;]*"gamepad":true[^;]*\\};/,
+      'the gamepad-mapping button must be visible'
+    );
+    assert.doesNotMatch(
+      html,
+      /\\.ejs_menu_bar[^}]*display:none!important/,
+      'the runtime toolbar containing controller settings must not be hidden'
+    );
+  }
+});
+
 test('runtime reports an error instead of false startup when controller/pause APIs are missing', () => {
   const messages = invokeGameStart(undefined);
   assert.equal(messages.length, 1);
