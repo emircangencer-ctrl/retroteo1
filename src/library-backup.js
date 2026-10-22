@@ -1,3 +1,10 @@
+const HEX_COLOR_RE = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+/** Return a validated CSS hex color or a caller-provided safe fallback. */
+export function safeCoverColor(value, fallback) {
+  return typeof value === 'string' && HEX_COLOR_RE.test(value) ? value : fallback;
+}
+
 /** Validate untrusted library-backup metadata before previewing or storing it. */
 export function validBackup(data) {
   if (!data || data.app !== 'RetroPlay' || data.backupType !== 'library-metadata' || data.schemaVersion !== 1 || !Array.isArray(data.games)) return false;
@@ -5,7 +12,7 @@ export function validBackup(data) {
 
   const textField = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
   const optionalText = (value, max) => value === undefined || value === null || (typeof value === 'string' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value));
-  const safeColor = value => value === undefined || value === null || (typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value));
+  const safeColor = value => value === undefined || value === null || (typeof value === 'string' && HEX_COLOR_RE.test(value));
 
   const ids = new Set();
   return data.games.every(g => {
