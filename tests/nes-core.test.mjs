@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NES } from '@nesjs/core';
-import { normalizeButtonName } from '../src/nes-core-player.js';
+import { createFastFrameRenderer, normalizeButtonName } from '../src/nes-core-player.js';
 
 function makeMapper4Rom() {
   const prgSize = 8 * 16384;
@@ -55,4 +55,61 @@ test('new core accepts legacy touch-button data attributes', () => {
   assert.equal(normalizeButtonName('BUTTON_SELECT'), 'SELECT');
   assert.equal(normalizeButtonName('BUTTON_START'), 'START');
   assert.equal(normalizeButtonName('UNKNOWN'), null);
+});
+
+test('optimized frame renderer writes correct RGBA pixels into the existing buffer', () => {
+  const palette = Array.from({ length: 64 }, (_, i) =>
+    (0xff000000 | ((i * 3 & 0xff) << 16) | ((i * 5 & 0xff) << 8) | (i * 7 & 0xff)) >>> 0
+  );
+  const bitmap = new Uint8Array(256 * 240);
+  bitmap[0] = 1;
+  bitmap[1] = 2;
+  bitmap[2] = 63;
+  const imageData = { data: new Uint8ClampedArray(256 * 240 * 4) };
+  const nes = { palette, getPalette: () => palette, ppu: { bitmap } };
+  let presented = 0;
+  const render = createFastFrameRenderer(nes, imageData, frame => {
+    assert.equal(frame, imageData);
+    presented++;
+  });
+  render();
+
+  assert.equal(presented, 1);
+  assert.deepEqual(Array.from(imageData.data.slice(0, 4)), [
+    palette[1] >>> 16 & 0xff,
+    palette[1] >>> 8 & 0xff,
+    palette[1] & 0xff,
+    255
+  ]);
+  assert.deepEqual(Array.from(imageData.data.slice(4, 8)), [
+    palette[2] >>> 16 & 0xff,
+    palette[2] >>> 8 & 0xff,
+    palette[2] & 0xff,
+    255
+  ]);
+  assert.deepEqual(Array.from(imageData.data.slice(8, 12)), [
+    palette[63] >>> 16 & 0xff,
+    palette[63] >>> 8 & 0xff,
+    palette[63] & 0xff,
+    255
+  ]);
+
+  render();
+  assert.equal(presented, 2);
+  assert.equal(imageData.data.length, 256 * 240 * 4);
+});
+
+test('optimized frame renderer can skip presentation without skipping emulator frames', () => {
+  const palette = Array(64).fill(0xff000000);
+  const bitmap = new Uint8Array(256 * 240);
+  const imageData = { data: new Uint8ClampedArray(256 * 240 * 4) };
+  const nes = { palette, getPalette: () => palette, ppu: { bitmap } };
+  let shouldRender = false;
+  let presented = 0;
+  const render = createFastFrameRenderer(nes, imageData, () => presented++, () => shouldRender);
+  render();
+  assert.equal(presented, 0);
+  shouldRender = true;
+  render();
+  assert.equal(presented, 1);
 });

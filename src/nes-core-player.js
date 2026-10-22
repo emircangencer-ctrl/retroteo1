@@ -36,6 +36,48 @@ export function normalizeButtonName(name) {
   return BUTTON_BY_NAME[normalized] !== undefined ? normalized : null;
 }
 
+/**
+ * Build a reusable, packed-pixel renderer for @nesjs/core 2.7.0.
+ * The upstream render path clones the 61,440-byte PPU bitmap, allocates a
+ * 245,760-byte RGBA array, converts every pixel, then copies it into ImageData.
+ * The pinned core's TypeScript-private fields are ordinary runtime properties,
+ * so reading ppu.bitmap avoids the per-frame clone without modifying emulation.
+ */
+export function createFastFrameRenderer(nes, imageData, onRendered, shouldRender = () => true) {
+  const palette = typeof nes.getPalette === 'function' ? nes.getPalette() : nes.palette;
+  const littleEndian = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 0x04;
+  const packedPalette = new Uint32Array(64);
+  for (let i = 0; i < packedPalette.length; i++) {
+    const color = palette?.[i] ?? 0;
+    const red = color >>> 16 & 0xff;
+    const green = color >>> 8 & 0xff;
+    const blue = color & 0xff;
+    packedPalette[i] = littleEndian
+      ? (0xff000000 | blue << 16 | green << 8 | red) >>> 0
+      : (red << 24 | green << 16 | blue << 8 | 0xff) >>> 0;
+  }
+
+  const output = new Uint32Array(
+    imageData.data.buffer,
+    imageData.data.byteOffset,
+    PIXEL_COUNT
+  );
+
+  return function renderFastFrame() {
+    if (!shouldRender()) return;
+    const ppu = nes.ppu;
+    // The bitmap field is a stable internal buffer in the pinned core version.
+    // Keep getBitmap() as a safe fallback if a compatible build omits it.
+    const bitmap = ppu?.bitmap ?? ppu?.getBitmap?.();
+    if (!bitmap || bitmap.length < PIXEL_COUNT) return;
+
+    for (let i = 0; i < PIXEL_COUNT; i++) {
+      output[i] = packedPalette[bitmap[i] & 0x3f];
+    }
+    onRendered(imageData);
+  };
+}
+
 class BrowserNesAudioOutput {
   constructor() {
     this.context = null;
@@ -133,6 +175,10 @@ export class BrowserNesPlayer {
     this.lastTime = null;
     this.accumulator = 0;
     this.frameDuration = 1000 / (1789773 / 29781);
+    this.frameCostAverageMs = null;
+    this.renderEveryNFrames = 1;
+    this.emulatedFrameCount = 0;
+    this.shouldRenderFrame = true;
     this.romInfo = null;
     this.sources = {
       keyboard: new Set(),
@@ -158,15 +204,16 @@ export class BrowserNesPlayer {
         onError: error => this.onError(error)
       }
     );
-    this.nes.setRenderer({
-      renderFrame: rgba => {
-        if (this.destroyed || !rgba || rgba.length !== PIXEL_COUNT * 4) {
-          return;
-        }
-        this.imageData.data.set(rgba);
-        this.context.putImageData(this.imageData, 0, 0);
-      }
-    });
+    // Bypass the core's allocation-heavy renderFrame implementation. The
+    // optimized path writes directly into this reusable ImageData buffer.
+    this.nes.renderFrame = createFastFrameRenderer(
+      this.nes,
+      this.imageData,
+      () => {
+        if (!this.destroyed) this.context.putImageData(this.imageData, 0, 0);
+      },
+      () => !this.destroyed && this.shouldRenderFrame
+    );
     this.nes.setAudioInterface(this.audio);
 
     this.handleKeyDown = event => {
@@ -299,12 +346,40 @@ export class BrowserNesPlayer {
     this.lastTime = now;
     this.accumulator += elapsed;
 
+    // Gamepad state need only be sampled once per display refresh, not once
+    // for every catch-up frame.
+    this.pollGamepad();
+
     let frames = 0;
     while (this.accumulator >= this.frameDuration && frames < 4) {
-      this.pollGamepad();
+      this.shouldRenderFrame =
+        this.renderEveryNFrames === 1 ||
+        this.emulatedFrameCount % this.renderEveryNFrames === 0;
+      const frameStarted = performance.now();
       this.nes.runFrame();
+      const frameCost = performance.now() - frameStarted;
+      this.frameCostAverageMs = this.frameCostAverageMs === null
+        ? frameCost
+        : this.frameCostAverageMs * 0.9 + frameCost * 0.1;
+      this.emulatedFrameCount++;
       this.accumulator -= this.frameDuration;
       frames++;
+
+      // If CPU emulation plus presentation is using most of the frame budget,
+      // skip pixel conversion/presentation on alternate frames. Emulation still
+      // advances at the native rate; graphics remain fully detailed when drawn.
+      // Hysteresis prevents flickering between modes on borderline devices.
+      if (
+        this.renderEveryNFrames === 1 &&
+        this.frameCostAverageMs > this.frameDuration * 0.85
+      ) {
+        this.renderEveryNFrames = 2;
+      } else if (
+        this.renderEveryNFrames === 2 &&
+        this.frameCostAverageMs < this.frameDuration * 0.62
+      ) {
+        this.renderEveryNFrames = 1;
+      }
     }
     if (frames === 4 && this.accumulator >= this.frameDuration) {
       this.accumulator = 0;
