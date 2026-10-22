@@ -9,8 +9,9 @@ import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const DB_NAME = 'retroplay-local-v1';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'games';
+const SAVE_STORE = 'batterySaves';
 const PLATFORM = {
   NES: { label: 'Nintendo Entertainment System', short: 'NES', logo: 'NES', color: '#284e78', glow: '#3b9bca', ext: ['nes'] },
   SNES: { label: 'Super Nintendo', short: 'SNES', logo: 'SNES', color: '#44336c', glow: '#9b78ff', ext: ['sfc','smc'] },
@@ -38,10 +39,41 @@ let activeGameId = null;
 let emulatorSession = 0;
 let emulatorPaused = false;
 
-function openDB(){return new Promise((resolve,reject)=>{if(!('indexedDB' in window)){reject(new Error('Bu tarayıcı IndexedDB desteklemiyor.'));return;}const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE)){const st=d.createObjectStore(STORE,{keyPath:'id'});st.createIndex('addedAt','addedAt');st.createIndex('platform','platform');}};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('Yerel veritabanı açılamadı.'));});}
+function openDB(){return new Promise((resolve,reject)=>{if(!('indexedDB' in window)){reject(new Error('Bu tarayıcı IndexedDB desteklemiyor.'));return;}const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE)){const st=d.createObjectStore(STORE,{keyPath:'id'});st.createIndex('addedAt','addedAt');st.createIndex('platform','platform');}if(!d.objectStoreNames.contains(SAVE_STORE))d.createObjectStore(SAVE_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('Yerel veritabanı açılamadı.'));});}
 function txStore(mode='readonly'){return db.transaction(STORE,mode).objectStore(STORE)}
 function allStored(){return new Promise((resolve,reject)=>{const r=txStore().getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error);});}
 function saveGame(game){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(game);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('Oyun kaydı yazılamadı.'));tx.onabort=()=>reject(tx.error||new Error('Kayıt işlemi iptal edildi.'));});}
+function emulatorGameId(game){
+  const source=`${game.platform}:${game.contentHash||game.id}`;
+  let hash=2166136261;
+  for(let i=0;i<source.length;i++)hash=Math.imul(hash^source.charCodeAt(i),16777619);
+  return ((hash>>>0)&0x7fffffff)||1;
+}
+function saveBatteryBackup(game, update){
+  if(!db)return Promise.reject(new Error('Yerel veritabanı hazır değil.'));
+  const bytes=update?.bytes instanceof Uint8Array?new Uint8Array(update.bytes):new Uint8Array(update?.bytes||[]);
+  if(!bytes.byteLength)return Promise.resolve(false);
+  return new Promise((resolve,reject)=>{
+    let tx;
+    try{
+      tx=db.transaction(SAVE_STORE,'readwrite');
+      tx.objectStore(SAVE_STORE).put({
+        id:game.id,
+        gameId:emulatorGameId(game),
+        platform:game.platform,
+        systemId:update.systemId||getEmulatedSystem(game.platform)?.emulatorJsSystemId||game.platform,
+        contentHash:game.contentHash||null,
+        saveHash:String(update.hash||''),
+        bytes,
+        byteLength:bytes.byteLength,
+        updatedAt:Number(update.updatedAt)||Date.now()
+      });
+    }catch(error){reject(error);return;}
+    tx.oncomplete=()=>resolve(true);
+    tx.onerror=()=>reject(tx.error||new Error('Batarya kaydı yerel olarak yedeklenemedi.'));
+    tx.onabort=()=>reject(tx.error||new Error('Batarya kaydı yedekleme işlemi iptal edildi.'));
+  });
+}
 function deleteGame(id){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function showToast(message,type='success'){const el=$('#toast');el.textContent=message;el.className=`toast show ${type}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className='toast',3600);}
@@ -182,7 +214,14 @@ async function startGame(id) {
       const player = new EmulatorJsPlayer($('#player-screen'), {
         onError: reportError,
         systemId: system.emulatorJsSystemId,
-        systemLabel: system.shortLabel
+        systemLabel: system.shortLabel,
+        gameId: emulatorGameId(game),
+        onSaveUpdate: update => {
+          saveBatteryBackup(game, update).catch(error => {
+            if (session !== emulatorSession || activeGameId !== game.id) return;
+            $('#player-error').textContent = `Oyun içi batarya kaydı yerel yedeğe yazılamadı: ${error?.message || error}`;
+          });
+        }
       });
       activeEmulator = player;
       activeEmulator.romInfo = validation;
