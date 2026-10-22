@@ -9,8 +9,11 @@ import {
 
 test('NES, SNES and Mega Drive map to documented EmulatorJS system IDs', () => {
   assert.equal(EMULATED_SYSTEMS.NES.emulatorJsSystemId, 'nes');
+  assert.equal(EMULATED_SYSTEMS.NES.emulatorJsCoreId, 'nestopia');
   assert.equal(EMULATED_SYSTEMS.SNES.emulatorJsSystemId, 'snes');
+  assert.equal(EMULATED_SYSTEMS.SNES.emulatorJsCoreId, 'snes');
   assert.equal(EMULATED_SYSTEMS.MD.emulatorJsSystemId, 'segaMD');
+  assert.equal(EMULATED_SYSTEMS.MD.emulatorJsCoreId, 'segaMD');
 });
 
 test('only systems wired into the player registry are advertised as playable', () => {
