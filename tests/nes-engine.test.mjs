@@ -79,7 +79,7 @@ test('save update callback clones the SRAM buffer before posting it to the host 
   assert.equal(messages[0].source, 'retroplay-emulatorjs');
   assert.equal(messages[0].type, 'save-update');
   assert.equal(messages[0].hash, 'save-hash');
-  assert.ok(messages[0].saveBuffer instanceof ArrayBuffer);
+  assert.equal(Object.prototype.toString.call(messages[0].saveBuffer), '[object ArrayBuffer]');
   assert.deepEqual([...new Uint8Array(messages[0].saveBuffer)], [10, 20, 30]);
   assert.equal(transfers[0].length, 1);
 });
