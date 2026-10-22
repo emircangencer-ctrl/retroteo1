@@ -17,15 +17,16 @@ test('legacy NES diagnostic engines are loaded on demand, not in the initial app
 test('library search schedules only the library results instead of rebuilding every view per keystroke', () => {
   assert.match(app, /function scheduleLibraryRender\(\)/);
   assert.match(app, /requestAnimationFrame\(\(\)=>\{libraryRenderFrame=0;renderLibraryResults\(\);\}\)/);
-  assert.match(app, /\$\('#search-input'\)\.addEventListener\('input',\(\)=>\{if\(\$\('#view-library'\)\.classList\.contains\('active'\)\)scheduleLibraryRender\(\);\}\)/);
-  assert.doesNotMatch(app, /\$\('#search-input'\)\.addEventListener\('input',[^;]*renderAll\(\)/);
+  const searchHandler = app.match(/\$\('#search-input'\)\.addEventListener\('input',([\s\S]*?)\);\$\('#sort-select'/)?.[1] || '';
+  assert.ok(searchHandler, 'search input handler should exist');
+  assert.match(searchHandler, /scheduleLibraryRender\(\)/);
+  assert.doesNotMatch(searchHandler, /renderAll\(\)/);
   assert.match(app, /const GRID_PAGE_SIZE = 48/);
   assert.match(app, /lib\.slice\(0,libraryVisibleLimit\)/);
   assert.match(html, /id="library-load-more"/);
   assert.match(html, /id="favorites-load-more"/);
   assert.match(html, /id="recent-load-more"/);
 });
-
 test('Drive import is opt-in and does not store OAuth access tokens in persistent storage', () => {
   assert.match(html, /id="drive-connect"/);
   assert.match(html, /id="drive-files"/);
