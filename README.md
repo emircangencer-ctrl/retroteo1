@@ -38,6 +38,7 @@ Netlify runs `npm install`, `npm run check`, `npm test`, and `npm run build` in 
 2. Import a local ROM file, or a ZIP containing supported ROM files.
 3. Choose **Oyna** on a supported game card.
 4. Use the arrow keys and keyboard buttons shown in the player, or the per-system touch layout.
+5. For a USB/Bluetooth controller, launch a supported game and open the visible EmulatorJS gamepad button to review or remap controller inputs. RetroPlay sets the matching control scheme for NES, SNES, or Mega Drive. Actual hardware compatibility still needs a desktop/mobile acceptance test; controller layouts can vary by device and browser.
 
 On NES, append `?nescore=jsnes` to compare the legacy JSNES player or `?nescore=nesjs` to compare `@nesjs/core`; remove the parameter to use the default EmulatorJS system. Those diagnostic routes apply to NES only.
 
