@@ -34,6 +34,7 @@ let layoutMode = 'grid';
 let toastTimer;
 let activeEmulator = null;
 let activeGameId = null;
+let emulatorSession = 0;
 let emulatorPaused = false;
 
 function openDB(){return new Promise((resolve,reject)=>{if(!('indexedDB' in window)){reject(new Error('Bu tarayıcı IndexedDB desteklemiyor.'));return;}const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE)){const st=d.createObjectStore(STORE,{keyPath:'id'});st.createIndex('addedAt','addedAt');st.createIndex('platform','platform');}};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('Yerel veritabanı açılamadı.'));});}
@@ -135,6 +136,7 @@ async function startGame(id) {
     showToast('Bu kayıt için oynatılabilir bir NES dosyası bulunamadı.', 'error');
     return;
   }
+  const session = ++emulatorSession;
   if (activeEmulator) {
     try { activeEmulator.destroy(); } catch {}
     activeEmulator = null;
@@ -153,11 +155,13 @@ async function startGame(id) {
   try {
     const bytes = new Uint8Array(await game.blob.arrayBuffer());
     const validation = inspectNesRom(bytes);
+    if (session !== emulatorSession || activeGameId !== game.id) return;
     if (!validation.valid) {
       throw new Error(validation.reason || 'ROM başlığı veya dosya uzunluğu geçersiz.');
     }
 
     const reportError = error => {
+      if (session !== emulatorSession || activeGameId !== game.id) return;
       const message = error?.message || String(error || 'Bilinmeyen emülatör hatası');
       $('#player-error').textContent = `Oyun motoru hatası: ${message}`;
       $('#player-status').textContent = 'Oturum durduruldu';
@@ -169,7 +173,7 @@ async function startGame(id) {
       activeEmulator = player;
       activeEmulator.romInfo = validation;
       await player.loadROM(bytes, game.title);
-      if (activeGameId !== game.id) {
+      if (session !== emulatorSession || activeGameId !== game.id) {
         player.destroy();
         return;
       }
@@ -197,8 +201,10 @@ async function startGame(id) {
       activeEmulator = player;
       activeEmulator.romInfo = validation;
       await player.loadROM(bytes);
+      if (session !== emulatorSession || activeGameId !== game.id) { player.destroy(); return; }
       activeEmulator.romInfo = player.romInfo || validation;
       await player.start();
+      if (session !== emulatorSession || activeGameId !== game.id) { player.destroy(); return; }
     }
 
     $('#player-status').textContent = playerStatus('Çalışıyor');
@@ -207,7 +213,7 @@ async function startGame(id) {
     await saveGame(game);
     await refreshGames();
   } catch (error) {
-    if (activeGameId !== game.id) return;
+    if (session !== emulatorSession || activeGameId !== game.id) return;
     if (activeEmulator) {
       try { activeEmulator.destroy(); } catch {}
       activeEmulator = null;
@@ -218,6 +224,7 @@ async function startGame(id) {
   }
 }
 function closePlayer() {
+  emulatorSession += 1;
   if (activeEmulator) {
     try { activeEmulator.destroy(); } catch {}
     activeEmulator = null;
@@ -257,8 +264,8 @@ function wireTouchControls() {
   });
   const release = event => {
     const button = event.target.closest('[data-nes-button]');
-    if (!button || !activeEmulator) return;
-    activeEmulator.releaseButton?.(button.dataset.nesButton);
+    if (!button) return;
+    activeEmulator?.releaseButton?.(button.dataset.nesButton);
     button.classList.remove('pressed');
   };
   root.addEventListener('pointerup', release);
