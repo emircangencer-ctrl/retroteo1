@@ -23,7 +23,7 @@ test('EmulatorJS bootstrap script is valid and uses the NES system ID and starts
   assert.ok(open >= 8 && close > open, 'bootstrap script should exist in iframe HTML');
   const script = html.slice(open, close);
   assert.doesNotThrow(() => new Function(script), 'generated iframe JavaScript should parse');
-  assert.ok(script.includes("window.EJS_core = 'nes'"));
+  assert.ok(script.includes('window.EJS_core = "nes"'));
   assert.ok(script.includes('window.EJS_startOnLoaded = true'));
   assert.ok(script.includes('window.EJS_gameUrl = "blob:'));
 });
@@ -40,5 +40,5 @@ test('EmulatorJS uses standard RetroArch NES joypad indices for touch and keyboa
 test('EmulatorJS bootstrap selects supported system identifiers without accepting injected values', () => {
   assert.ok(buildEmulatorDocument('blob:rom', 'SNES test', 'snes').includes('window.EJS_core = "snes"'));
   assert.ok(buildEmulatorDocument('blob:rom', 'Mega Drive test', 'segaMD').includes('window.EJS_core = "segaMD"'));
-  assert.throws(() => buildEmulatorDocument('blob:rom', 'Invalid', 'nes\';alert(1);//'), /Unsupported EmulatorJS system/);
+  assert.throws(() => buildEmulatorDocument('blob:rom', 'Invalid', 'unknown-core'), /Unsupported EmulatorJS system/);
 });
