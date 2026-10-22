@@ -9,6 +9,7 @@ function buildDocument(gameUrl, gameName) {
     "window.addEventListener('error', event => notify('error', { message: event && event.message ? event.message : 'Emülatör betiği yüklenemedi.' }));",
     "window.addEventListener('unhandledrejection', event => notify('error', { message: String(event.reason && event.reason.message || event.reason || 'Emülatör başlatılamadı.') }));",
     "window.EJS_player = '#ejs-player';",
+    'window.EJS_startOnLoaded = true;',
     "window.EJS_core = 'fceumm';",
     'window.EJS_pathtodata = ' + literal(DATA_PATH) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
