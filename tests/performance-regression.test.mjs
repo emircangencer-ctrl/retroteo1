@@ -19,6 +19,11 @@ test('library search schedules only the library results instead of rebuilding ev
   assert.match(app, /requestAnimationFrame\(\(\)=>\{libraryRenderFrame=0;renderLibraryResults\(\);\}\)/);
   assert.match(app, /\$\('#search-input'\)\.addEventListener\('input',\(\)=>\{if\(\$\('#view-library'\)\.classList\.contains\('active'\)\)scheduleLibraryRender\(\);\}\)/);
   assert.doesNotMatch(app, /\$\('#search-input'\)\.addEventListener\('input',[^;]*renderAll\(\)/);
+  assert.match(app, /const GRID_PAGE_SIZE = 48/);
+  assert.match(app, /lib\.slice\(0,libraryVisibleLimit\)/);
+  assert.match(html, /id="library-load-more"/);
+  assert.match(html, /id="favorites-load-more"/);
+  assert.match(html, /id="recent-load-more"/);
 });
 
 test('Drive import is opt-in and does not store OAuth access tokens in persistent storage', () => {
