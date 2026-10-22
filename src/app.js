@@ -3,6 +3,7 @@ import { extractRomFilesFromZip } from './zip-rom.js';
 import { Browser as NesBrowser, Controller as NesController } from 'jsnes';
 import { BrowserNesPlayer } from './nes-core-player.js';
 import { resolveNesCore } from './nes-engine.js';
+import { EmulatorJsNesPlayer } from './emulatorjs-nes-player.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -162,31 +163,27 @@ async function startGame(id) {
       $('#player-status').textContent = 'Oturum durduruldu';
     };
 
-    if (requestedNesCore() === 'jsnes') {
-      // JSNES is the fast default; @nesjs/core remains available for graphics A/B testing.
-      const browser = new NesBrowser({
-        container: $('#player-screen'),
-        onError: reportError
-      });
-      // Keep emulated time tied to the display clock. JSNES otherwise runs two
-      // extra frames whenever the audio worklet underruns, which can make games
-      // run visibly faster on mobile devices with intermittent audio scheduling.
+    const engine = requestedNesCore();
+    if (engine === 'emulatorjs') {
+      const player = new EmulatorJsNesPlayer($('#player-screen'), { onError: reportError });
+      activeEmulator = player;
+      activeEmulator.romInfo = validation;
+      await player.loadROM(bytes, game.title);
+      if (activeGameId !== game.id) {
+        player.destroy();
+        return;
+      }
+    } else if (engine === 'jsnes') {
+      // Legacy engine retained only for explicit A/B comparison.
+      const browser = new NesBrowser({ container: $('#player-screen'), onError: reportError });
       if (browser._speakers) browser._speakers.onBufferUnderrun = null;
       activeEmulator = {
-        engineName: 'JSNES (hızlı varsayılan)',
-        romInfo: validation,
+        engineName: 'JSNES (karşılaştırma)', romInfo: validation,
         destroy: () => browser.destroy(),
-        pause: () => browser.stop(),
-        resume: () => browser.start(),
+        pause: () => browser.stop(), resume: () => browser.start(),
         fitInParent: () => browser.fitInParent(),
-        pressButton: name => {
-          const button = NesController[name];
-          if (button !== undefined) browser.nes.buttonDown(1, button);
-        },
-        releaseButton: name => {
-          const button = NesController[name];
-          if (button !== undefined) browser.nes.buttonUp(1, button);
-        }
+        pressButton: name => { const button = NesController[name]; if (button !== undefined) browser.nes.buttonDown(1, button); },
+        releaseButton: name => { const button = NesController[name]; if (button !== undefined) browser.nes.buttonUp(1, button); }
       };
       browser.loadROM(bytes);
     } else {
@@ -210,6 +207,7 @@ async function startGame(id) {
     await saveGame(game);
     await refreshGames();
   } catch (error) {
+    if (activeGameId !== game.id) return;
     if (activeEmulator) {
       try { activeEmulator.destroy(); } catch {}
       activeEmulator = null;

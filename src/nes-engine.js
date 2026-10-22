@@ -1,8 +1,7 @@
-// Select the default engine centrally so the performance fallback stays testable.
-// JSNES is the default because the current @nesjs/core software-rendering path
-// is too expensive on lower-powered mobile devices. Keep the newer core opt-in
-// for visual comparison until its frame pipeline is optimized.
+// Keep engine selection explicit. EmulatorJS/FCEUmm is the primary core;
+// lightweight JavaScript engines remain available only for A/B diagnosis.
 export function resolveNesCore(search = '') {
-  const params = new URLSearchParams(search);
-  return params.get('nescore') === 'nesjs' ? 'nesjs' : 'jsnes';
+  const requested = new URLSearchParams(search).get('nescore');
+  if (requested === 'jsnes' || requested === 'nesjs') return requested;
+  return 'emulatorjs';
 }

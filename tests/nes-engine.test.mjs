@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveNesCore } from '../src/nes-engine.js';
 
-test('fast JSNES engine is selected by default', () => {
-  assert.equal(resolveNesCore(''), 'jsnes');
-  assert.equal(resolveNesCore('?view=game'), 'jsnes');
-  assert.equal(resolveNesCore('?nescore=jsnes'), 'jsnes');
+test('EmulatorJS/FCEUmm is the default NES engine', () => {
+  assert.equal(resolveNesCore(''), 'emulatorjs');
+  assert.equal(resolveNesCore('?view=game'), 'emulatorjs');
+  assert.equal(resolveNesCore('?nescore=emulatorjs'), 'emulatorjs');
 });
 
-test('new NES core requires explicit opt-in for A/B testing', () => {
+test('legacy engines remain explicitly selectable for A/B comparison', () => {
+  assert.equal(resolveNesCore('?nescore=jsnes'), 'jsnes');
   assert.equal(resolveNesCore('?nescore=nesjs'), 'nesjs');
-  assert.equal(resolveNesCore('?nescore=nesjs&view=game'), 'nesjs');
-  assert.equal(resolveNesCore('?nescore=unknown'), 'jsnes');
+  assert.equal(resolveNesCore('?nescore=unknown'), 'emulatorjs');
 });
