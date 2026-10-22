@@ -42,3 +42,44 @@ test('EmulatorJS bootstrap selects supported system identifiers without acceptin
   assert.ok(buildEmulatorDocument('blob:rom', 'Mega Drive test', 'segaMD').includes('window.EJS_core = "segaMD"'));
   assert.throws(() => buildEmulatorDocument('blob:rom', 'Invalid', 'unknown-core'), /Unsupported EmulatorJS system/);
 });
+
+
+test('EmulatorJS receives a stable game ID and configured save-update callback', () => {
+  const html = buildEmulatorDocument('blob:rom', 'Test save data', 'nes', 123456);
+  assert.ok(html.includes('window.EJS_gameID = 123456'));
+  assert.ok(html.includes('window.EJS_fixedSaveInterval = 15000'));
+  assert.ok(html.includes('window.EJS_onSaveUpdate = event'));
+});
+
+test('save update callback clones the SRAM buffer before posting it to the host app', () => {
+  const messages = [];
+  const transfers = [];
+  const context = {
+    document: {
+      head: { appendChild: () => {} },
+      createElement: () => ({})
+    },
+    parent: {
+      postMessage: (message, target, transfer) => {
+        messages.push(message);
+        transfers.push(transfer);
+      }
+    },
+    addEventListener: () => {}
+  };
+  context.window = context;
+  const html = buildEmulatorDocument('blob:rom', 'Save callback', 'nes', 123);
+  const open = html.indexOf('<script>') + '<script>'.length;
+  const close = html.indexOf('</script>', open);
+  runInNewContext(html.slice(open, close), context);
+  const saveData = runInNewContext('new Uint8Array([10, 20, 30])', context);
+  context.EJS_onSaveUpdate({ hash: 'save-hash', save: saveData });
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].source, 'retroplay-emulatorjs');
+  assert.equal(messages[0].type, 'save-update');
+  assert.equal(messages[0].hash, 'save-hash');
+  assert.ok(messages[0].saveBuffer instanceof ArrayBuffer);
+  assert.deepEqual([...new Uint8Array(messages[0].saveBuffer)], [10, 20, 30]);
+  assert.equal(transfers[0].length, 1);
+});
