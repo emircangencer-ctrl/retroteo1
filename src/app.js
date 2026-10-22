@@ -168,6 +168,10 @@ async function startGame(id) {
         container: $('#player-screen'),
         onError: reportError
       });
+      // Keep emulated time tied to the display clock. JSNES otherwise runs two
+      // extra frames whenever the audio worklet underruns, which can make games
+      // run visibly faster on mobile devices with intermittent audio scheduling.
+      if (browser._speakers) browser._speakers.onBufferUnderrun = null;
       activeEmulator = {
         engineName: 'JSNES (hızlı varsayılan)',
         romInfo: validation,
