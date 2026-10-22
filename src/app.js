@@ -239,6 +239,7 @@ async function startGame(id) {
       const player = new EmulatorJsPlayer($('#player-screen'), {
         onError: reportError,
         systemId: system.emulatorJsSystemId,
+        coreId: system.emulatorJsCoreId,
         systemLabel: system.shortLabel,
         gameId: emulatorGameId(game),
         onSaveUpdate: update => {
@@ -354,6 +355,7 @@ async function toggleGameFullscreen() {
 }
 function setupFullscreen() {
   $('#fullscreen-game')?.addEventListener('click', toggleGameFullscreen);
+  $('#immersive-exit')?.addEventListener('click', toggleGameFullscreen);
   const onChange = () => {
     if (fullscreenElement(document) !== $('#player-modal') && fullscreenFallback) setFullscreenFallback(false);
     updateFullscreenButton();
