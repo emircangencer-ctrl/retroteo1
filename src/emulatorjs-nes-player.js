@@ -12,7 +12,9 @@ export function buildEmulatorDocument(gameUrl, gameName) {
     "window.addEventListener('unhandledrejection', event => notify('error', { message: String(event.reason && event.reason.message || event.reason || 'Emülatör başlatılamadı.') }));",
     "window.EJS_player = '#ejs-player';",
     'window.EJS_startOnLoaded = true;',
-    "window.EJS_core = 'fceumm';",
+    "// EJS_core expects a system identifier ("nes"), not a libretro core ID.
+    // EmulatorJS resolves this system to its NES core list (FCEUmm by default).
+    window.EJS_core = 'nes';",
     'window.EJS_pathtodata = ' + literal(DATA_PATH) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
     'window.EJS_gameName = ' + literal(gameName) + ';',
@@ -27,7 +29,7 @@ export function buildEmulatorDocument(gameUrl, gameName) {
 }
 export class EmulatorJsNesPlayer {
   constructor(container, { onError = () => {} } = {}) {
-    this.container=container; this.onError=onError; this.engineName='EmulatorJS · FCEUmm'; this.romInfo=null;
+    this.container=container; this.onError=onError; this.engineName='EmulatorJS · NES'; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons();
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);

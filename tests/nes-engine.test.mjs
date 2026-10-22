@@ -16,14 +16,14 @@ test('legacy engines remain explicitly selectable for A/B comparison', () => {
 
 import { buildEmulatorDocument, EMULATORJS_INPUT_INDEX } from '../src/emulatorjs-nes-player.js';
 
-test('EmulatorJS bootstrap script is valid and starts FCEUmm automatically', () => {
+test('EmulatorJS bootstrap script is valid and uses the NES system ID and starts the default NES core', () => {
   const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Super Mario Bros. 3');
   const open = html.indexOf('<script>') + '<script>'.length;
   const close = html.indexOf('</script>', open);
   assert.ok(open >= 8 && close > open, 'bootstrap script should exist in iframe HTML');
   const script = html.slice(open, close);
   assert.doesNotThrow(() => new Function(script), 'generated iframe JavaScript should parse');
-  assert.ok(script.includes("window.EJS_core = 'fceumm'"));
+  assert.ok(script.includes("window.EJS_core = 'nes'"));
   assert.ok(script.includes('window.EJS_startOnLoaded = true'));
   assert.ok(script.includes('window.EJS_gameUrl = "blob:'));
 });
