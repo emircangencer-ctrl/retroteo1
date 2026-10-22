@@ -29,6 +29,10 @@
 .touch-controls button.pressed,.touch-controls button:active{transform:translateY(2px);background:#36577a}
 .action-pad{display:flex;align-items:center;gap:12px;transform:rotate(-12deg)}
 .action-pad button{width:58px;height:58px;border-radius:50%;background:linear-gradient(180deg,#8b4256,#54283c);border-color:#b16a7d}
+#touch-controls[data-platform="SNES"] .action-pad,#touch-controls[data-platform="MD"] .action-pad{display:grid;grid-template-columns:repeat(3,minmax(38px,1fr));gap:6px;transform:none;align-self:center}
+#touch-controls[data-platform="SNES"] .action-pad button,#touch-controls[data-platform="MD"] .action-pad button{width:100%;height:48px;min-width:38px;min-height:42px;border-radius:12px;font-size:13px}
+#touch-controls[data-platform="SNES"] .action-pad button[data-nes-button="BUTTON_A"],#touch-controls[data-platform="MD"] .action-pad button[data-nes-button="BUTTON_A"]{transform:none}
+#touch-controls[data-platform="MD"] .action-pad button[data-nes-button="BUTTON_A"],#touch-controls[data-platform="SNES"] .action-pad button[data-nes-button="BUTTON_A"]{background:linear-gradient(180deg,#2b7b76,#194c50);border-color:#50aaa2}
 .action-pad button[data-nes-button="BUTTON_A"]{transform:translateY(-14px);background:linear-gradient(180deg,#2b7b76,#194c50);border-color:#50aaa2}
 .system-pad{grid-column:1/-1;display:flex;justify-content:center;gap:12px}
 .system-pad button{min-width:90px;min-height:34px;border-radius:20px;font-size:10px;letter-spacing:1px}
