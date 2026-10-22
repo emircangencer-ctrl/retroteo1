@@ -64,7 +64,7 @@ function createServiceWorkerHarness() {
 
 test('service worker caches EmulatorJS runtime requests and serves them without network later', async () => {
   const worker = createServiceWorkerHarness();
-  const url = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+  const url = 'https://cdn.emulatorjs.org/4.2.3/data/loader.js';
 
   const first = await worker.request(url);
   assert.equal(first.intercepted, true);
@@ -83,7 +83,7 @@ test('service worker caches EmulatorJS runtime requests and serves them without 
 test('service worker does not cache unrelated CDN paths or third-party origins', async () => {
   const worker = createServiceWorkerHarness();
   const unrelated = await worker.request('https://cdn.emulatorjs.org/ads/script.js');
-  const otherHost = await worker.request('https://example.invalid/stable/data/loader.js');
+  const otherHost = await worker.request('https://example.invalid/4.2.3/data/loader.js');
   assert.equal(unrelated.intercepted, false);
   assert.equal(otherHost.intercepted, false);
 });
