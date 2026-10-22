@@ -29,7 +29,7 @@ export class EmulatorJsNesPlayer {
   constructor(container, { onError = () => {} } = {}) {
     this.container=container; this.onError=onError; this.engineName='EmulatorJS · NES'; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
-    this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons();
+    this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
   }
   loadROM(bytes, gameName='NES game') {
@@ -38,7 +38,7 @@ export class EmulatorJsNesPlayer {
     const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
     this.romUrl=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
     const frame=document.createElement('iframe'); frame.title=gameName+' — NES emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
-    this.frame=frame; this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
+    this.frame=frame; frame.addEventListener('load',this.boundFrameLoad,{once:true}); this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
     return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('NES çekirdeği 75 saniye içinde başlamadı. İnternet bağlantısını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName); });
   }
   handleMessage(event) {
@@ -60,6 +60,8 @@ export class EmulatorJsNesPlayer {
     const name = KEY_TO_BUTTON[event.code] || (event.key === 'Control' && event.location === 2 ? 'BUTTON_SELECT' : null);
     if (!name) return;
     event.preventDefault();
+    // The iframe's own default keyboard handler must not process the same key a second time.
+    event.stopPropagation?.();
     if (pressed) this.pressButton(name, 'keyboard'); else this.releaseButton(name, 'keyboard');
   }
   pressButton(name, source = 'pointer') {
@@ -89,6 +91,10 @@ export class EmulatorJsNesPlayer {
     document.removeEventListener('keydown', this.boundKeyDown);
     document.removeEventListener('keyup', this.boundKeyUp);
     window.removeEventListener('blur', this.boundBlur);
+    this.frame?.removeEventListener('load', this.boundFrameLoad);
+    this.frameWindow?.removeEventListener('keydown', this.boundKeyDown, true);
+    this.frameWindow?.removeEventListener('keyup', this.boundKeyUp, true);
+    this.frameWindow = null;
     const reject = this.rejectStart; this.resolveStart = null; this.rejectStart = null;
     if (!this.started) reject?.(new Error('Oyun açılışı iptal edildi.'));
     try { this.frame?.contentWindow?.EJS_emulator?.pause(); } catch {}
