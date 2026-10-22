@@ -9,12 +9,19 @@ const legacyDecoder = new TextDecoder('windows-1252');
 function u16(v, o) { if (o < 0 || o + 2 > v.byteLength) throw new Error('ZIP arşivi bozuk veya kesik.'); return v.getUint16(o, true); }
 function u32(v, o) { if (o < 0 || o + 4 > v.byteLength) throw new Error('ZIP arşivi bozuk veya kesik.'); return v.getUint32(o, true); }
 function extOf(name) { const i = name.lastIndexOf('.'); return i < 0 ? '' : name.slice(i + 1).toLowerCase(); }
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let value = 0; value < 256; value++) {
+    let crc = value;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    table[value] = crc >>> 0;
+  }
+  return table;
+})();
+
 function crc32(bytes) {
   let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-  }
+  for (const byte of bytes) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
 function sameBytes(a, b) {
