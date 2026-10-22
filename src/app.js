@@ -1,4 +1,5 @@
 import { inspectNesRom } from './nes-rom.js';
+import { PLATFORM, platformInfo } from './platforms.js';
 import { extractRomFilesFromZip } from './zip-rom.js';
 import { safeCoverColor, validBackup } from './library-backup.js';
 import { Browser as NesBrowser, Controller as NesController } from 'jsnes';
@@ -8,15 +9,6 @@ const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const DB_NAME = 'retroplay-local-v1';
 const DB_VERSION = 1;
 const STORE = 'games';
-const PLATFORM = {
-  NES: { label: 'Nintendo Entertainment System', short: 'NES', logo: 'NES', color: '#284e78', glow: '#3b9bca', ext: ['nes'] },
-  SNES: { label: 'Super Nintendo', short: 'SNES', logo: 'SNES', color: '#44336c', glow: '#9b78ff', ext: ['sfc','smc'] },
-  MD: { label: 'Sega Mega Drive', short: 'Mega Drive', logo: 'MD', color: '#285b52', glow: '#40dcaa', ext: ['md','gen'] },
-  N64: { label: 'Nintendo 64', short: 'N64', logo: 'N64', color: '#6b4934', glow: '#e6ad5b', ext: ['z64','n64','v64'] },
-  CPS1: { label: 'Capcom Play System 1', short: 'CPS1', logo: 'CPS1', color: '#7b3a4b', glow: '#ff8c9c', ext: [] },
-  CPS2: { label: 'Capcom Play System 2', short: 'CPS2', logo: 'CPS2', color: '#3b477d', glow: '#8bb4ff', ext: [] },
-  NEOGEO: { label: 'Neo Geo', short: 'Neo Geo', logo: 'NG', color: '#6a512d', glow: '#f2c56f', ext: [] }
-};
 const DEMO_GAMES = [
   {id:'demo-mario',title:'Super Mario Bros. 3',platform:'NES',year:1988,genre:'Platform',symbol:'M',coverBg:'#244a78',coverGlow:'#e15b45',sizeLabel:'384 KB',demo:true,favorite:true,addedAt:5},
   {id:'demo-zelda',title:'The Legend of Zelda',platform:'NES',year:1986,genre:'Adventure',symbol:'Z',coverBg:'#5b4525',coverGlow:'#e2b65c',sizeLabel:'128 KB',demo:true,favorite:false,addedAt:4},
@@ -41,7 +33,7 @@ function saveGame(game){return new Promise((resolve,reject)=>{const tx=db.transa
 function deleteGame(id){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function showToast(message,type='success'){const el=$('#toast');el.textContent=message;el.className=`toast show ${type}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className='toast',3600);}
-function platformInfo(key){return PLATFORM[key]||{label:'Bilinmeyen sistem',short:key||'Bilinmiyor',logo:'?',color:'#344158',glow:'#8b9ab0',ext:[]};}
+
 function getFileExt(name){const i=name.lastIndexOf('.');return i>=0?name.slice(i+1).toLowerCase():'';}
 async function sha256File(file){if(!globalThis.crypto?.subtle||file.size>256*1024*1024)return null;const bytes=await file.arrayBuffer();const digest=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');}
 function storageErrorMessage(error){if(error?.name==='QuotaExceededError')return 'Tarayıcı depolama alanı dolu';if(error?.name==='DataCloneError')return 'Dosya tarayıcı depolamasına aktarılamadı';return error?.message||'Bilinmeyen depolama hatası';}
