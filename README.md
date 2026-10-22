@@ -87,3 +87,19 @@ Before the multi-system branch is marked release-ready, test at least one known-
 - Accepts ordinary non-encrypted ZIP archives and extracts supported ROM entries in memory without uploading them.
 - Supports ZIP methods 0 (stored) and 8 (deflate); checks end-of-central-directory and directory bounds; compares local and central file names, CRCs and sizes; and verifies CRC-32. Decompression is streamed into a bounded buffer so a forged uncompressed-size field cannot trigger unbounded output allocation. Limits: 512 MiB compressed archive, 1,000 entries, 256 MiB per ROM, 512 MiB total expanded ROM data.
 - ZIP64, multi-volume, encrypted archives, unsupported compression methods and nested ZIPs are not supported. If the browser lacks `DecompressionStream('deflate-raw')`, use a current browser or extract the ROM first.
+
+## Optional Google Drive game archive
+
+Google Drive support is opt-in. To enable it on a personal Netlify deployment:
+
+1. In Google Cloud Console, create/select a project, enable **Google Drive API**, and configure the OAuth consent screen.
+2. Create an OAuth client ID of type **Web application**. Add the exact RetroPlay Netlify domain under **Authorized JavaScript origins** (also add your local development origin if needed). Do not create or place a client secret in the frontend.
+3. Add the build environment variable `VITE_GOOGLE_CLIENT_ID` in Netlify and trigger a new deploy. The value is the OAuth **client ID**, not a client secret.
+4. If the consent screen is in testing mode, add the Google account you will use as a test user.
+5. Open **Oyun ekle → Google Drive arşivin → Drive'a bağlan**. Authorize read-only Drive access, navigate folders, and select a supported ROM or ZIP. Only the selected file is downloaded into this browser's local library.
+
+The integration requests the read-only `drive.readonly` scope. Google may require consent-screen verification for an app offered to the public; for personal use, keep the app restricted to your account/test users. Access tokens remain in memory and are not written to local storage. ROM data is fetched directly from Google Drive to the browser; RetroPlay does not relay ROMs through its server. Large downloads still consume device memory/storage and network data. Files are not available offline until downloaded into the local library.
+
+## Performance notes
+
+The initial page no longer eagerly imports the legacy NES diagnostic engines; those are dynamically loaded only when the corresponding diagnostic route is selected. Library search is scheduled to the next animation frame and updates only the library result area rather than rebuilding every view for every keystroke. These changes reduce avoidable startup and interaction work, but actual speed improvements must be measured on representative low-end mobile devices and with a large library. Do not treat a passing build as a Lighthouse or real-device performance result.
