@@ -31,10 +31,11 @@ test('Super Mario Bros. 3 with an incorrect mapper is rejected before launch', (
 
 test('Super Mario Bros. 3 refuses an unrecognized PRG/CHR fingerprint rather than launching corrupted graphics', () => {
   const bytes = ines({ prg: 16, chr: 16, mapper: 4 });
-  const result = diagnoseSuperMarioBros3Rom(bytes, 'SMB3 (USA).nes');
+  const result = diagnoseSuperMarioBros3Rom(bytes, 'Super Mario Bros. 3 (U) (PRG 1) [h2].nes');
   assert.equal(result.status, 'unsupported-build');
   assert.match(result.message, /CRC32/);
   assert.match(result.message, /başlatılması engellendi/);
+  assert.match(result.message, /\\[h2\\]/);
   assert.equal(result.payloadCrc32, crc32(bytes.subarray(16)));
   assert.equal(result.recognizedRelease, null);
 });
