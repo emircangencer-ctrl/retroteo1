@@ -42,3 +42,15 @@ test('SMB3-specific diagnostic does not run for unrelated filenames', () => {
   const bytes = ines({ prg: 1, chr: 1, mapper: 0 });
   assert.equal(diagnoseSuperMarioBros3Rom(bytes, 'Kirby.nes'), null);
 });
+
+test('Super Mario Bros. 3 NES 2.0 dumps require review when the reference fingerprint cannot be checked', () => {
+  const bytes = ines({ prg: 16, chr: 16, mapper: 4 });
+  bytes[7] = (bytes[7] & 0xf3) | 0x08;
+  const inspection = inspectNesRom(bytes);
+  const result = diagnoseSuperMarioBros3Rom(bytes, 'Super Mario Bros. 3.nes', inspection);
+  assert.equal(inspection.format, 'NES 2.0');
+  assert.equal(result.status, 'review');
+  assert.match(result.message, /NES 2\.0/);
+  assert.match(result.message, /parmak izini güvenilir biçimde doğrulamıyor/);
+  assert.equal(result.matchesUsaRevisionA, false);
+});
