@@ -1,5 +1,5 @@
-const CACHE_NAME = 'retroplay-shell-v11';
-const EMULATORJS_CACHE_NAME = 'retroplay-emulatorjs-runtime-v3';
+const CACHE_NAME = 'retroplay-shell-v12';
+const EMULATORJS_CACHE_NAME = 'retroplay-emulatorjs-runtime-v4';
 const EMULATORJS_ORIGIN = 'https://cdn.emulatorjs.org';
 const EMULATORJS_DATA_PREFIX = '/4.2.3/data/';
 const CACHE_PREFIX = 'retroplay-shell-';
