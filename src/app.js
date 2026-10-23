@@ -362,11 +362,16 @@ async function toggleGameFullscreen() {
     setFullscreenFallback(true);
     return;
   }
-  if (result.error) {
-    // Some mobile browsers expose the Fullscreen API but reject it for the
-    // current embedding/context. Keep the play view usable via immersive fallback.
+  if (result.error || !result.entered) {
+    // Some mobile browsers expose the Fullscreen API but reject it or resolve
+    // without actually entering fullscreen. Keep play usable with visual fallback.
     setFullscreenFallback(true);
-    showToast('Tarayıcı gerçek tam ekranı engelledi; oyun alanı genişletilmiş görünümde açıldı.', 'error');
+    showToast(
+      result.error
+        ? 'Tarayıcı gerçek tam ekranı engelledi; oyun alanı genişletilmiş görünümde açıldı.'
+        : 'Tarayıcı tam ekran geçişini doğrulamadı; oyun alanı genişletilmiş görünümde açıldı.',
+      'error'
+    );
     return;
   }
   activeEmulator?.setImmersive?.(true);
