@@ -210,3 +210,13 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 
 
 - Additional fullscreen guard: if a Fullscreen API promise resolves but the browser does not actually report the player as fullscreen, the app now activates the edge-to-edge fallback instead of claiming the transition worked. A regression test covers this branch.
+
+
+## Stage 24 — block unrecognized Super Mario Bros. 3 payloads (2026-10-23)
+
+- Investigated the user's Android screenshot: the file is titled `Super Mario Bros. 3 (U) (PRG 1) [h2]` and the app reports PRG+CHR CRC-32 `7388BEBD`, which does not match the known cartridge payload profiles. The `[h2]` filename tag is conventionally used for a hack/modified ROM.
+- Replaced the former warning-and-confirm override with fail-closed SMB3 verification. Known payload signatures are registered for the U.S. original release (`A0B0B742`), U.S. Rev-A (`2E6301ED`), Japan (`52E2B5E0`) and Europe/PAL (`1ED5C801`), each with the expected iNES Mapper 4 and 256 KiB PRG + 128 KiB CHR layout.
+- If the SMB3 title matches but the ROM header/size/format or PRG+CHR signature is not in the known profiles, the player now refuses to start the emulator, hides the empty game canvas and leaves a readable explanation. There is no “play anyway” bypass that would reproduce the user's black-screen/sprite-corruption path. The uploaded ROM bytes are never modified or silently replaced.
+- Added regression coverage for incorrect mapper, unknown fingerprint, the `[h2]` filename tag, all four known signatures, an explicitly unrecognized `7388BEBD` signature, NES 2.0 uncertainty and the absence of the old confirmation bypass.
+- CI run https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39906821275 passed: **99/99 tests**, syntax checks, production build and output-artifact checks.
+- Scope note: automated checks validate the rejection path; the user's actual ROM binary was not uploaded and therefore was not tested byte-for-byte outside the CRC value shown in the screenshot. A clean supported SMB3 dump must be imported to play the standard game. The multi-system PR remains draft/unmerged and main is unchanged.
