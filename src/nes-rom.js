@@ -39,7 +39,7 @@ export function identifySuperMarioBros3Release(inspection, payloadCrc32) {
 
 export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesRom(input)) {
   const originalName = String(name || '');
-  const compactName = originalName.normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const compactName = originalName.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!compactName.includes('supermariobros3') && !compactName.includes('smb3')) return null;
 
   if (!inspection?.valid) {
@@ -82,7 +82,7 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
   if (inspection.prgBytes !== 256 * 1024 || inspection.chrBytes !== 128 * 1024) details.push('PRG/CHR boyutları bilinen 256 KiB PRG + 128 KiB CHR düzeniyle eşleşmiyor');
   if (payloadCrc32 === null) details.push('PRG+CHR içeriğinin tam parmak izi hesaplanamadı');
   else details.push(`PRG+CHR CRC32 ${payloadCrc32.toString(16).padStart(8, '0').toUpperCase()} doğrulanmış SMB3 referanslarından hiçbiriyle eşleşmiyor (ABD ilk sürüm A0B0B742, ABD Rev-A 2E6301ED, Japonya 52E2B5E0, Avrupa/PAL 1ED5C801)`);
-  const taggedHack = /\\[h\\d+[a-z]?\\]/i.test(originalName);
+  const taggedHack = /\[h\d+[a-z]?\]/i.test(originalName);
   if (taggedHack) details.push('dosya adındaki [h2] benzeri etiket değiştirilmiş/hack ROM olabileceğini gösteriyor');
   details.push('oyun ekranında grafik bozulması oluştuğu için bu dosyanın başlatılması engellendi');
   return {
