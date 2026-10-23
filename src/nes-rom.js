@@ -88,23 +88,7 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
   const taggedHack = /\[h\d+[a-z]?\]/i.test(originalName);
   if (taggedHack) details.push('dosya adındaki [h2] benzeri etiket değiştirilmiş/hack ROM olabileceğini gösteriyor');
 
-  // Unknown payloads with the standard mapper and exact retail layout may be
-  // legitimate hacks/revisions; try a different mature core instead of silently
-  // treating them as stock or refusing every modified game.
-  if (expectedMapper && expectedSizes && payloadCrc32 !== null) {
-    details.push('başlık, Mapper 4 ve PRG/CHR boyutları tutarlı; farklı çizim/mapper davranışını karşılaştırmak için FCEUmm uyumluluk çekirdeği denenecek');
-    return {
-      status: 'compatibility-fallback',
-      message: details.join('. ') + '. Bu imza bilinen temiz perakende sürüm olduğunu kanıtlamaz; bozuk veya değiştirilmiş oyun verisini hiçbir çekirdek düzeltemez.',
-      mapper: inspection.mapper,
-      payloadCrc32,
-      matchesUsaRevisionA: false,
-      recognizedRelease: null,
-      fallbackCore: 'fceumm'
-    };
-  }
-
-  details.push('ROM başlığı, mapper veya boyut yapısı güvenilir biçimde doğrulanamadığı için oyun başlatılması engellendi');
+  details.push('PRG+CHR parmak izi bilinen temiz SMB3 referanslarıyla eşleşmedi; grafik uyumluluğu doğrulanamadığı için başlatma engellendi');
   return {
     status: 'unsupported-build',
     message: details.join('. ') + '. Temiz ve doğrulanmış bir Super Mario Bros. 3 ROM dosyasını içe aktar; mevcut dosya değiştirilmedi.',
@@ -116,10 +100,9 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
 }
 
 export function isSuperMarioBros3LaunchAllowed(diagnostic) {
-  // Non-SMB3 ROMs have no diagnostic and remain unaffected. SMB3 may use the
-  // default core for a known payload or a bounded alternate-core fallback when
-  // its iNES mapper and payload layout are structurally consistent.
-  return diagnostic == null || diagnostic.status === 'reference-match' || diagnostic.status === 'compatibility-fallback';
+  // Non-SMB3 games have no diagnostic and remain unaffected. For SMB3, only
+  // independently recognized clean release fingerprints may start.
+  return diagnostic == null || diagnostic.status === 'reference-match';
 }
 
 export function inspectNesRom(input, { totalSize } = {}) {
