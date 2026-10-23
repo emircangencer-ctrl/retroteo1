@@ -87,8 +87,10 @@ test('fullscreen requests hide browser navigation UI when supported and rejected
   assert.match(app, /setFullscreenFallback\(true\);[\s\S]*?oyun alanı genişletilmiş görünümde açıldı/);
   assert.match(styles, /#player-modal:fullscreen #player-screen iframe[\s\S]*?height:\s*100%\s*!important/);
   assert.match(styles, /#player-modal:fullscreen \.touch-controls button[\s\S]*?pointer-events:\s*auto\s*!important/);
-  assert.match(app, /Super Mario Bros\. 3 başlatılmadı; önce ROM dosyasını doğrula/);
-  assert.match(app, /if \(!proceed\)[\s\S]*?closePlayer\(\)/);
+  assert.match(app, /smb3Diagnostic\?\.status === 'unsupported-build'/);
+  assert.match(app, /Grafik bozulmasını önlemek için doğrulanmamış SMB3 ROM’u engellendi/);
+  assert.match(app, /\$\('#player-screen'\)\.style\.display = 'none'/);
+  assert.doesNotMatch(app, /const proceed = confirm\(/);
 });
 
 
