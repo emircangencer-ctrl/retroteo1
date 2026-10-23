@@ -7,6 +7,7 @@ test('EmulatorJS/FCEUmm is the default NES engine', () => {
   assert.equal(resolveNesCore(''), 'emulatorjs');
   assert.equal(resolveNesCore('?view=game'), 'emulatorjs');
   assert.equal(resolveNesCore('?nescore=emulatorjs'), 'emulatorjs');
+  assert.equal(resolveNesCore('?nescore=fceumm'), 'emulatorjs', 'FCEUmm remains within the EmulatorJS player; the app chooses it explicitly');
 });
 
 test('legacy engines remain explicitly selectable for A/B comparison', () => {
