@@ -88,7 +88,7 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
   const taggedHack = /\[h\d+[a-z]?\]/i.test(originalName);
   if (taggedHack) details.push('dosya adındaki [h2] benzeri etiket değiştirilmiş/hack ROM olabileceğini gösteriyor');
 
-  details.push('PRG+CHR parmak izi bilinen temiz SMB3 referanslarıyla eşleşmedi; grafik uyumluluğu doğrulanamadığı için başlatma engellendi');
+  details.push('Bu dosyanın bilinen temiz bir SMB3 perakende sürümü olduğu doğrulanamadı; grafik uyumluluğu garanti edilemediği için başlatma engellendi');
   return {
     status: 'unsupported-build',
     message: details.join('. ') + '. Temiz ve doğrulanmış bir Super Mario Bros. 3 ROM dosyasını içe aktar; mevcut dosya değiştirilmedi.',

@@ -1,5 +1,7 @@
 # Stage 05 — test report
 
+> **Current state:** Stage 27 below supersedes the historical SMB3 fallback behavior described in Stages 25–26. In the current launch policy, unknown SMB3 payload fingerprints are blocked before any emulator player is constructed. Do not treat earlier stage notes as the current launch policy.
+
 ## Passed locally
 
 - `node --test tests/*.test.mjs`: ROM validator unit tests pass.
@@ -236,3 +238,12 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - GitHub Actions passed on commit `92b367e630650810af39a56342bd9e84a67b2f87`: **104/104 tests passed**, syntax checks passed, production build passed, and output-artifact checks passed. Run: https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39912730590.
 - Netlify Deploy Preview reported ready for the same commit: https://deploy-preview-2--retroteo1.netlify.app. PR #2 remains draft/unmerged; `main` is unchanged.
 - **Visual acceptance remains open:** the supplied screenshot gives a PRG+CHR CRC (`7388BEBD`) but not the ROM bytes. CI proves the unknown-signature route selects FCEUmm and deploys the fresh app/runtime cache, but it cannot prove this specific hack/ROM payload renders correctly on the user's Android phone. A real run of the updated preview is still required to confirm the actual frame output.
+
+
+## Stage 27 — fail closed on unverified SMB3 payloads (2026-10-23)
+
+- Changed the SMB3 identity gate so only a full PRG+CHR CRC-32 match to a known clean release profile is allowed to launch. The supplied screenshot's `7388BEBD` signature is not a known clean profile and is blocked before `EmulatorJsPlayer` construction.
+- Removed the automatic FCEUmm fallback for unknown-but-structurally-plausible ROMs. FCEUmm is available only as an explicit controlled A/B selection via `?nescore=fceumm`; use this with a fingerprint-matched clean SMB3 ROM so ROM integrity and emulator-core behavior can be distinguished.
+- Updated ROM decision, core-selection, fullscreen and player-wiring regression tests. On code commit `99e1efc`, GitHub Actions reported success for JavaScript syntax, unit tests, production build and output-artifact checks. The overall workflow had not closed at the time this report was written; see the [Actions run](https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39916950809) for its final state.
+- Netlify commit status for `99e1efc` reported **Deploy Preview ready**: https://deploy-preview-2--retroteo1.netlify.app.
+- **Still open:** no verified clean SMB3 ROM has been run and visually compared on the user's Android device in this session. Automated tests and successful deployment do not prove the reported black/corrupt gameplay frame is fixed. Keep PR #2 draft and do not merge to `main` before real-device acceptance.
