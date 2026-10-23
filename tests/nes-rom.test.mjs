@@ -60,8 +60,8 @@ test('Super Mario Bros. 3 NES 2.0 dumps are blocked when the reference fingerpri
   const inspection = inspectNesRom(bytes);
   const result = diagnoseSuperMarioBros3Rom(bytes, 'Super Mario Bros. 3.nes', inspection);
   assert.equal(inspection.format, 'NES 2.0');
-  assert.equal(result.status, 'review');
+  assert.equal(result.status, 'unsupported-build');
   assert.match(result.message, /NES 2\.0/);
-  assert.match(result.message, /parmak izini güvenilir biçimde doğrulamıyor/);
+  assert.match(result.message, /parmak izi doğrulanamadığından/);
   assert.equal(result.matchesUsaRevisionA, false);
 });
