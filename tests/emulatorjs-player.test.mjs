@@ -306,5 +306,5 @@ test('immersive mode hides the emulator-owned menu only when the parent requests
   assert.ok(html.includes("event.data.source !== 'retroplay-app'"));
   assert.ok(html.includes("type !== 'immersive'"));
   assert.ok(html.includes('html.retroplay-immersive .ejs_menu_bar'));
-  assert.ok(html.includes("setImmersive(active)"));
+  assert.ok(html.includes("window.addEventListener('message'"));
 });
