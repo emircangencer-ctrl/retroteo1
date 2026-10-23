@@ -96,6 +96,12 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
   };
 }
 
+export function isSuperMarioBros3LaunchAllowed(diagnostic) {
+  // Non-SMB3 ROMs have no diagnostic and remain unaffected. SMB3 must match
+  // a documented clean cartridge payload; every uncertain status fails closed.
+  return diagnostic == null || diagnostic.status === 'reference-match';
+}
+
 export function inspectNesRom(input, { totalSize } = {}) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   // Callers may pass only the header bytes for preflight. In that case, supply
