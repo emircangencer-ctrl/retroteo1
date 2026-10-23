@@ -288,3 +288,14 @@ test('save updates are accepted only from the emulator iframe and forwarded to t
     restore();
   }
 });
+
+
+test('EmulatorJS canvas scales to the largest centered 4:3 area and keeps Nestopia selected for NES', () => {
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Super Mario Bros. 3', 'nes', 8, 'nestopia');
+  assert.ok(html.includes('window.EJS_core = "nestopia";'));
+  assert.ok(html.includes('aspect-ratio:4/3!important'));
+  assert.ok(html.includes('object-fit:fill!important'));
+  assert.ok(html.includes('133.333dvh'));
+  assert.ok(html.includes('75dvw'));
+  assert.ok(html.includes('overflow:hidden!important'));
+});
