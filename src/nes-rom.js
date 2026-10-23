@@ -116,8 +116,9 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
 }
 
 export function isSuperMarioBros3LaunchAllowed(diagnostic) {
-  // Non-SMB3 ROMs have no diagnostic and remain unaffected. SMB3 must match
-  // a documented clean cartridge payload; every uncertain status fails closed.
+  // Non-SMB3 ROMs have no diagnostic and remain unaffected. SMB3 may use the
+  // default core for a known payload or a bounded alternate-core fallback when
+  // its iNES mapper and payload layout are structurally consistent.
   return diagnostic == null || diagnostic.status === 'reference-match' || diagnostic.status === 'compatibility-fallback';
 }
 
