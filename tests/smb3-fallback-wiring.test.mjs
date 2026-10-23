@@ -11,7 +11,7 @@ test('SMB3 unknown-but-structurally-valid payload is wired to the real FCEUmm co
   assert.match(app, /const useSmb3FceummFallback = smb3Diagnostic\?\.status === 'compatibility-fallback'/);
   assert.match(app, /coreId: useSmb3FceummFallback \? 'fceumm' : system\.emulatorJsCoreId/);
   assert.match(app, /systemLabel: useSmb3FceummFallback \? \x60\$\{system\.shortLabel\} \/ FCEUmm uyumluluk modu\x60 : system\.shortLabel/);
-  assert.match(player, /'nes': new Set\(\['nes', 'fceumm', 'nestopia'\]\)/);
+  assert.match(player, /nes: new Set\(\['nes', 'fceumm', 'nestopia'\]\)/);
   assert.match(player, /window\.EJS_core = /);
 });
 
