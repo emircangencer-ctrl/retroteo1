@@ -169,3 +169,54 @@
 
 .grid-load-more{display:flex;margin:18px auto 4px;min-width:190px}
 .grid-load-more[hidden]{display:none}
+
+
+/* Stage 22: prioritize the emulated picture in immersive mode; keep controls as an overlay. */
+#player-modal:fullscreen,
+#player-modal.is-immersive-fallback {
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: #000 !important;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+#player-modal:fullscreen .player-screen-frame,
+#player-modal.is-immersive-fallback .player-screen-frame,
+#player-modal:fullscreen .player-screen,
+#player-modal.is-immersive-fallback .player-screen {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  background: #000 !important;
+  overflow: hidden !important;
+}
+#player-modal:fullscreen #player-screen,
+#player-modal.is-immersive-fallback #player-screen {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  aspect-ratio: auto !important;
+}
+#player-modal:fullscreen #player-screen iframe,
+#player-modal.is-immersive-fallback #player-screen iframe {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+#player-modal:fullscreen .touch-controls,
+#player-modal.is-immersive-fallback .touch-controls {
+  bottom: max(10px, env(safe-area-inset-bottom)) !important;
+  z-index: 30 !important;
+  pointer-events: none !important;
+}
+#player-modal:fullscreen .touch-controls button,
+#player-modal.is-immersive-fallback .touch-controls button {
+  pointer-events: auto !important;
+  -webkit-tap-highlight-color: transparent;
+}
