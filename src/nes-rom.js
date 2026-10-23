@@ -1,12 +1,11 @@
 /** Conservative iNES/NES 2.0 ROM container validation. This does not prove game compatibility. */
 
-const SMB3_USA_REV_A = Object.freeze({
-  mapper: 4,
-  prgBytes: 256 * 1024,
-  chrBytes: 128 * 1024,
-  // PRG+CHR combined CRC-32 from the documented US Rev-A cartridge profile.
-  payloadCrc32: 0x2e6301ed
-});
+const SMB3_RELEASES = Object.freeze([
+  Object.freeze({ label: 'ABD ilk sürüm', region: 'USA', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0xa0b0b742 }),
+  Object.freeze({ label: 'ABD Rev-A', region: 'USA', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0x2e6301ed }),
+  Object.freeze({ label: 'Japonya', region: 'Japan', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0x52e2b5e0 }),
+  Object.freeze({ label: 'Avrupa/PAL', region: 'Europe/PAL', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0x1ed5c801 })
+]);
 const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
@@ -24,60 +23,75 @@ export function crc32(input) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+/**
+ * Identifies a known unmodified SMB3 cartridge payload. A title/header match
+ * alone cannot establish that PRG/CHR data is safe to launch.
+ */
+export function identifySuperMarioBros3Release(inspection, payloadCrc32) {
+  if (!inspection?.valid || inspection.format !== 'iNES' ||
+      inspection.mapper !== 4 ||
+      inspection.prgBytes !== 256 * 1024 ||
+      inspection.chrBytes !== 128 * 1024 ||
+      !Number.isInteger(payloadCrc32)) return null;
+  const release = SMB3_RELEASES.find(entry => entry.payloadCrc32 === (payloadCrc32 >>> 0));
+  return release ? { label: release.label, region: release.region, payloadCrc32: release.payloadCrc32 } : null;
+}
+
 export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesRom(input)) {
-  const compactName = String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const originalName = String(name || '');
+  const compactName = originalName.normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!compactName.includes('supermariobros3') && !compactName.includes('smb3')) return null;
 
   if (!inspection?.valid) {
-    return { status: 'review', message: 'Super Mario Bros. 3 adını taşıyan dosya NES başlık doğrulamasından geçmedi. Dosya değiştirilmadi; kaynak ROM dosyasını kontrol et.' };
+    return { status: 'unsupported-build', message: 'Super Mario Bros. 3 adı verilen dosya NES başlık doğrulamasından geçmedi. Grafik bozulmasını önlemek için başlatma engellendi; temiz ve doğrulanmış bir ROM dosyasını içe aktar.' };
   }
 
-  const warnings = [];
-  if (inspection.format === 'NES 2.0') {
-    warnings.push('ROM NES 2.0 biçiminde. Bu denetleyici, bu başlık için ABD Rev-A PRG+CHR parmak izini güvenilir biçimde doğrulamıyor; bilinen ve temiz bir ROM kaynağıyla karşılaştırmadan önce grafik uyumluluğu garanti edilemez.');
-  }
-  if (inspection.mapper !== SMB3_USA_REV_A.mapper) {
-    warnings.push(`ROM başlığı Mapper ${inspection.mapper} bildiriyor; standart Super Mario Bros. 3 kartuşu Mapper 4 (MMC3) kullanır.`);
-  }
-
-  let payloadCrc32 = null;
-  let matchesUsaRevisionA = false;
-  if (inspection.format === 'iNES' && Number.isInteger(inspection.prgBytes) && Number.isInteger(inspection.chrBytes)) {
-    if (inspection.prgBytes !== SMB3_USA_REV_A.prgBytes || inspection.chrBytes !== SMB3_USA_REV_A.chrBytes) {
-      warnings.push('PRG/CHR boyutları bilinen ABD Rev-A sürümünün 256 KiB PRG + 128 KiB CHR düzeniyle eşleşmiyor.');
-    } else {
-      const start = 16 + (inspection.trainerBytes || 0);
-      const end = start + inspection.prgBytes + inspection.chrBytes;
-      const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
-      if (bytes.length < end) {
-        warnings.push('PRG/CHR verisi beklenen sınırdan kısa; dosya kesilmiş olabilir.');
-      } else {
-        payloadCrc32 = crc32(bytes.subarray(start, end));
-        matchesUsaRevisionA = payloadCrc32 === SMB3_USA_REV_A.payloadCrc32;
-        if (!matchesUsaRevisionA) {
-          warnings.push(`PRG+CHR CRC32 ${payloadCrc32.toString(16).padStart(8, '0').toUpperCase()} bilinen ABD Rev-A referansı 2E6301ED ile eşleşmiyor. Başka bir bölge/revizyon veya ROM hack'i olabilir; hasarlı döküm ihtimali de dışlanamaz.`);
-        }
-      }
-    }
-  }
-
-  if (warnings.length) {
+  if (inspection.format !== 'iNES') {
     return {
-      status: 'review',
-      message: warnings.join(' '),
+      status: 'unsupported-build',
+      message: 'Super Mario Bros. 3 dosyası NES 2.0 başlığı kullanıyor. Bu sürüm için güvenilir PRG+CHR parmak izi doğrulanamadığından grafik uyumluluğu doğrulanamıyor. Başlatma engellendi; klasik iNES biçimindeki doğrulanmış temiz bir ROM kullan.',
       mapper: inspection.mapper,
-      payloadCrc32,
+      payloadCrc32: null,
       matchesUsaRevisionA: false
     };
   }
+
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  const start = 16 + (inspection.trainerBytes || 0);
+  const end = start + inspection.prgBytes + inspection.chrBytes;
+  let payloadCrc32 = null;
+  if (Number.isInteger(inspection.prgBytes) && Number.isInteger(inspection.chrBytes) &&
+      inspection.prgBytes > 0 && inspection.chrBytes >= 0 && bytes.length >= end) {
+    payloadCrc32 = crc32(bytes.subarray(start, end));
+  }
+
+  const release = identifySuperMarioBros3Release(inspection, payloadCrc32);
+  if (release) {
+    return {
+      status: 'reference-match',
+      message: `ROM içeriği bilinen temiz Super Mario Bros. 3 ${release.label} profiliyle eşleşti.`,
+      mapper: inspection.mapper,
+      payloadCrc32,
+      matchesUsaRevisionA: payloadCrc32 === 0x2e6301ed,
+      recognizedRelease: release.label
+    };
+  }
+
+  const details = [];
+  if (inspection.mapper !== 4) details.push(`başlık Mapper ${inspection.mapper} bildiriyor; SMB3 kartuşu Mapper 4 (MMC3) kullanır`);
+  if (inspection.prgBytes !== 256 * 1024 || inspection.chrBytes !== 128 * 1024) details.push('PRG/CHR boyutları bilinen 256 KiB PRG + 128 KiB CHR düzeniyle eşleşmiyor');
+  if (payloadCrc32 === null) details.push('PRG+CHR içeriğinin tam parmak izi hesaplanamadı');
+  else details.push(`PRG+CHR CRC32 ${payloadCrc32.toString(16).padStart(8, '0').toUpperCase()} doğrulanmış SMB3 referanslarından hiçbiriyle eşleşmiyor (ABD ilk sürüm A0B0B742, ABD Rev-A 2E6301ED, Japonya 52E2B5E0, Avrupa/PAL 1ED5C801)`);
+  const taggedHack = /\\[h\\d+[a-z]?\\]/i.test(originalName);
+  if (taggedHack) details.push('dosya adındaki [h2] benzeri etiket değiştirilmiş/hack ROM olabileceğini gösteriyor');
+  details.push('oyun ekranında grafik bozulması oluştuğu için bu dosyanın başlatılması engellendi');
   return {
-    status: matchesUsaRevisionA ? 'reference-match' : 'mapper-ok',
-    message: matchesUsaRevisionA
-      ? 'Super Mario Bros. 3 ROM içeriği bilinen ABD Rev-A CRC32 referansıyla eşleşti.'
-      : 'Mapper kontrolü geçti. ROM başlığı tek başına bütün grafik uyumluluğunu kanıtlamaz.',
+    status: 'unsupported-build',
+    message: details.join('. ') + '. Temiz ve doğrulanmış bir Super Mario Bros. 3 ROM dosyasını içe aktar; mevcut dosya değiştirilmedi.',
     mapper: inspection.mapper,
     payloadCrc32,
-    matchesUsaRevisionA
+    matchesUsaRevisionA: false,
+    recognizedRelease: null
   };
 }
 
