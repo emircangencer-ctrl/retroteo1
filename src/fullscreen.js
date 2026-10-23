@@ -12,7 +12,7 @@ export async function enterFullscreen(element, documentLike = globalThis.documen
   const request = element.requestFullscreen || element.webkitRequestFullscreen;
   if (typeof request !== 'function') return { supported: false, entered: false };
   try {
-    await request.call(element);
+    await request.call(element, { navigationUI: 'hide' });
     return { supported: true, entered: isFullscreen(documentLike, element) };
   } catch (error) {
     return { supported: true, entered: false, error };
