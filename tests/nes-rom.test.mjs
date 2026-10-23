@@ -29,15 +29,16 @@ test('Super Mario Bros. 3 with an incorrect mapper is rejected before launch', (
   assert.equal(result.matchesUsaRevisionA, false);
 });
 
-test('Super Mario Bros. 3 tries FCEUmm for an unrecognized but structurally valid PRG/CHR payload', () => {
+test('Super Mario Bros. 3 blocks an unrecognized but structurally valid PRG/CHR payload', () => {
   const bytes = ines({ prg: 16, chr: 16, mapper: 4 });
   const result = diagnoseSuperMarioBros3Rom(bytes, 'Super Mario Bros. 3 (U) (PRG 1) [h2].nes');
-  assert.equal(result.status, 'compatibility-fallback');
+  assert.equal(result.status, 'unsupported-build');
   assert.match(result.message, /CRC32/);
-  assert.match(result.message, /FCEUmm uyumluluk çekirdeği denenecek/);
   assert.match(result.message, /\[h2\]/);
+  assert.match(result.message, /başlatma engellendi/);
   assert.equal(result.payloadCrc32, crc32(bytes.subarray(16)));
   assert.equal(result.recognizedRelease, null);
+  assert.equal(isSuperMarioBros3LaunchAllowed(result), false);
 });
 
 test('SMB3 cartridge signature registry recognizes known clean region/revision fingerprints', () => {
@@ -69,10 +70,10 @@ test('Super Mario Bros. 3 NES 2.0 dumps are blocked when the reference fingerpri
 });
 
 
-test('SMB3 launch decision allows recognized or structurally consistent fallback payloads and leaves unrelated games untouched', () => {
+test('SMB3 launch decision only allows known clean fingerprints and leaves unrelated games untouched', () => {
   assert.equal(isSuperMarioBros3LaunchAllowed(null), true, 'unrelated games have no SMB3 diagnostic');
   assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'reference-match' }), true);
-  assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'compatibility-fallback' }), true, 'structurally valid nonstandard ROMs can try the alternate core');
+  assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'compatibility-fallback' }), false, 'unknown payloads must not launch via a fallback');
   assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'unsupported-build' }), false);
-  assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'review' }), false, 'future uncertainty states fail closed');
+  assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'review' }), false, 'uncertain states fail closed');
 });
