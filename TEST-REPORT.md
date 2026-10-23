@@ -200,3 +200,10 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 
 
 - Follow-up: immersive state is now sent to the isolated EmulatorJS iframe through a source-checked parent message. Emulator-owned menus/toolbars are hidden only while immersive mode is active, then restored on exit; touch controls remain in the parent overlay.
+
+
+## Stage 23 — SMB3 NES 2.0 fingerprint uncertainty
+
+- Closed a diagnostic gap: when a filename identifies Super Mario Bros. 3 but the ROM uses the NES 2.0 header format, the current diagnostic cannot safely compare its encoded payload against the USA Rev-A reference profile. It now emits a review warning rather than treating the mapper check as sufficient.
+- Added a regression test that exercises the NES 2.0 path and asserts that the warning is non-blocking at the diagnostic layer. In the player UI, a review status requires explicit confirmation before game startup.
+- Automated verification for this addition is running on the current branch head; real ROM/browser visual acceptance is still outstanding.
