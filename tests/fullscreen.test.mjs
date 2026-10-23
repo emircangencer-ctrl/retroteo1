@@ -66,3 +66,27 @@ test('player UI exposes fullscreen and updates after browser fullscreen changes'
   assert.match(styles, /#player-modal:fullscreen/);
   assert.match(styles, /\.player-backdrop\.is-immersive-fallback/);
 });
+
+
+test('fullscreen requests hide browser navigation UI when supported and rejected API uses visual fallback', async () => {
+  const documentLike = { fullscreenElement: null };
+  let options;
+  const element = {
+    async requestFullscreen(value) {
+      options = value;
+      documentLike.fullscreenElement = element;
+    }
+  };
+  const entered = await enterFullscreen(element, documentLike);
+  assert.equal(entered.entered, true);
+  assert.deepEqual(options, { navigationUI: 'hide' });
+  const [app, styles] = await Promise.all([
+    readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+  ]);
+  assert.match(app, /setFullscreenFallback\(true\);[\s\S]*?oyun alanı genişletilmiş görünümde açıldı/);
+  assert.match(styles, /#player-modal:fullscreen #player-screen iframe[\s\S]*?height:\s*100%\s*!important/);
+  assert.match(styles, /#player-modal:fullscreen \.touch-controls button[\s\S]*?pointer-events:\s*auto\s*!important/);
+  assert.match(app, /Super Mario Bros\. 3 başlatılmadı; önce ROM dosyasını doğrula/);
+  assert.match(app, /if \(!proceed\)[\s\S]*?closePlayer\(\)/);
+});
