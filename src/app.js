@@ -243,15 +243,8 @@ async function startGame(id) {
       showToast('ROM yapısı güvenilir biçimde doğrulanamadı; başlatma engellendi.', 'error');
       return;
     }
-    const useSmb3FceummFallback = smb3Diagnostic?.status === 'compatibility-fallback'
-      && !['jsnes', 'nesjs'].includes(new URLSearchParams(window.location.search).get('nescore'));
-    if (smb3Diagnostic?.status === 'compatibility-fallback') {
-      const selectedCore = useSmb3FceummFallback
-        ? 'FCEUmm uyumluluk çekirdeği'
-        : 'seçili tanılama çekirdeği';
-      $('#player-error').textContent = `ROM sürümü uyarısı: ${smb3Diagnostic.message} ${selectedCore} ile deneniyor.`;
-      showToast('SMB3 ROM imzası standart değil; alternatif çekirdekle uyumluluk deneniyor.', 'error');
-    }
+    const useFceummComparison = game.platform === 'NES'
+      && new URLSearchParams(window.location.search).get('nescore') === 'fceumm';
 
     const reportError = error => {
       if (session !== emulatorSession || activeGameId !== game.id) return;
@@ -265,8 +258,8 @@ async function startGame(id) {
       const player = new EmulatorJsPlayer($('#player-screen'), {
         onError: reportError,
         systemId: system.emulatorJsSystemId,
-        coreId: useSmb3FceummFallback ? 'fceumm' : system.emulatorJsCoreId,
-        systemLabel: useSmb3FceummFallback ? `${system.shortLabel} / FCEUmm uyumluluk modu` : system.shortLabel,
+        coreId: useFceummComparison ? 'fceumm' : system.emulatorJsCoreId,
+        systemLabel: useFceummComparison ? `${system.shortLabel} / FCEUmm karşılaştırma modu` : system.shortLabel,
         gameId: emulatorGameId(game),
         onSaveUpdate: update => {
           saveBatteryBackup(game, update).then(saved => {
