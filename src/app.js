@@ -231,6 +231,16 @@ async function startGame(id) {
       : null;
     if (smb3Diagnostic?.status === 'review') {
       $('#player-error').textContent = `ROM denetimi uyarısı: ${smb3Diagnostic.message}`;
+      const proceed = confirm(
+        'Super Mario Bros. 3 ROM denetimi uyarı verdi. Bu durum farklı bölge/revizyon veya ROM hack’i olabilir; bozuk dosya ihtimali de dışlanamaz.\n\n' +
+        smb3Diagnostic.message +
+        '\n\nOyunu yine de başlatmak istiyor musun? En güvenlisi, doğrulanmış ve temiz bir ROM kullanmaktır.'
+      );
+      if (!proceed) {
+        closePlayer();
+        showToast('Super Mario Bros. 3 başlatılmadı; önce ROM dosyasını doğrula.', 'error');
+        return;
+      }
     }
 
     const reportError = error => {
@@ -352,7 +362,10 @@ async function toggleGameFullscreen() {
     return;
   }
   if (result.error) {
-    showToast('Tarayıcı tam ekrana geçişi engelledi. Tarayıcı izinlerini kontrol et.', 'error');
+    // Some mobile browsers expose the Fullscreen API but reject it for the
+    // current embedding/context. Keep the play view usable via immersive fallback.
+    setFullscreenFallback(true);
+    showToast('Tarayıcı gerçek tam ekranı engelledi; oyun alanı genişletilmiş görünümde açıldı.', 'error');
     return;
   }
   updateFullscreenButton();
