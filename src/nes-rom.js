@@ -3,7 +3,8 @@
 const SMB3_RELEASES = Object.freeze([
   Object.freeze({ label: 'ABD ilk sürüm', region: 'USA', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0xa0b0b742 }),
   Object.freeze({ label: 'ABD Rev-A', region: 'USA', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0x2e6301ed }),
-  Object.freeze({ label: 'Japonya', region: 'Japan', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0x52e2b5e0 }),
+  Object.freeze({ label: 'Japonya', region: 'Japan', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0xe7ddfee3 }),
+  Object.freeze({ label: 'Japonya Rev-A', region: 'Japan', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0x52e2b5e0 }),
   Object.freeze({ label: 'Avrupa/PAL', region: 'Europe/PAL', mapper: 4, prgBytes: 256 * 1024, chrBytes: 128 * 1024, payloadCrc32: 0x1ed5c801 })
 ]);
 const CRC32_TABLE = (() => {
@@ -81,7 +82,7 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
   if (inspection.mapper !== 4) details.push(`başlık Mapper ${inspection.mapper} bildiriyor; SMB3 kartuşu Mapper 4 (MMC3) kullanır`);
   if (inspection.prgBytes !== 256 * 1024 || inspection.chrBytes !== 128 * 1024) details.push('PRG/CHR boyutları bilinen 256 KiB PRG + 128 KiB CHR düzeniyle eşleşmiyor');
   if (payloadCrc32 === null) details.push('PRG+CHR içeriğinin tam parmak izi hesaplanamadı');
-  else details.push(`PRG+CHR CRC32 ${payloadCrc32.toString(16).padStart(8, '0').toUpperCase()} doğrulanmış SMB3 referanslarından hiçbiriyle eşleşmiyor (ABD ilk sürüm A0B0B742, ABD Rev-A 2E6301ED, Japonya 52E2B5E0, Avrupa/PAL 1ED5C801)`);
+  else details.push(`PRG+CHR CRC32 ${payloadCrc32.toString(16).padStart(8, '0').toUpperCase()} doğrulanmış SMB3 referanslarından hiçbiriyle eşleşmiyor (ABD A0B0B742, ABD Rev-A 2E6301ED, Japonya E7DDFEE3, Japonya Rev-A 52E2B5E0, Avrupa/PAL 1ED5C801)`);
   const taggedHack = /\[h\d+[a-z]?\]/i.test(originalName);
   if (taggedHack) details.push('dosya adındaki [h2] benzeri etiket değiştirilmiş/hack ROM olabileceğini gösteriyor');
   details.push('oyun ekranında grafik bozulması oluştuğu için bu dosyanın başlatılması engellendi');
