@@ -188,3 +188,12 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - A mismatch never edits, blocks or silently replaces the user's ROM. It presents a non-blocking warning because another region/revision or a ROM hack can be legitimate; a mismatch is not conclusive proof of corruption.
 - CRC-32 implementation has a canonical test vector; tests cover mapper mismatch, payload-fingerprint mismatch and avoiding unrelated file names.
 - Reference profile: https://nescartdb.com/profile/view/870/super-mario-bros-3. Automated tests still cannot replace playing the user's ROM in Android/desktop browsers and comparing actual scrolling/graphics to a known-good reference.
+
+
+## Stage 22 — immersive game viewport and SMB3 ROM guard (2026-10-23)
+
+- Fullscreen requests now ask browsers to hide navigation UI where supported. If the Fullscreen API exists but rejects the request, the app switches to its visual immersive fallback instead of leaving the user in the ordinary modal.
+- Immersive layout keeps the emulator iframe edge-to-edge, removes frame padding, and retains touch controls as an overlay with safe-area-aware placement.
+- EmulatorJS canvas CSS now clamps the picture to a centered 4:3 viewport using dynamic viewport units and clamps overflow. The canvas is intentionally sized to the NES display aspect ratio; this is not a claim that every game's ROM/render output has been verified against original hardware.
+- Super Mario Bros. 3 ROMs that do not match the known USA Rev-A fingerprint or show mapper/size anomalies now require an explicit confirmation before launch. Alternate regions/revisions and hacks can trigger this warning, so it does not automatically reject them.
+- Regression tests added for fullscreen navigation UI request/fallback, immersive iframe/control layout, and the SMB3 Nestopia/4:3 configuration. Actual browser fullscreen behavior, touch controls, and gameplay still require manual acceptance on the target phone.
