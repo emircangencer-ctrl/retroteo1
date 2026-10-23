@@ -207,3 +207,6 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - Closed a diagnostic gap: when a filename identifies Super Mario Bros. 3 but the ROM uses the NES 2.0 header format, the current diagnostic cannot safely compare its encoded payload against the USA Rev-A reference profile. It now emits a review warning rather than treating the mapper check as sufficient.
 - Added a regression test that exercises the NES 2.0 path and asserts that the warning is non-blocking at the diagnostic layer. In the player UI, a review status requires explicit confirmation before game startup.
 - Automated verification passed on the current change set: **97/97 tests passed, 0 failures**, JavaScript syntax checks and production build passed. CI: https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39905211539. Netlify preview is ready; real ROM/browser visual acceptance is still outstanding.
+
+
+- Additional fullscreen guard: if a Fullscreen API promise resolves but the browser does not actually report the player as fullscreen, the app now activates the edge-to-edge fallback instead of claiming the transition worked. A regression test covers this branch.
