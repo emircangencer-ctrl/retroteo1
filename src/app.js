@@ -203,6 +203,8 @@ async function startGame(id) {
   emulatorPaused = false;
   $('#player-title').textContent = game.title;
   renderTouchControls(game.platform);
+  $('#touch-controls').style.display = '';
+  $('#gamepad-status').style.display = '';
   updateGamepadStatus();
   $('#player-status').textContent = 'ROM yükleniyor…';
   $('#player-error').textContent = '';
@@ -231,15 +233,24 @@ async function startGame(id) {
       ? diagnoseSuperMarioBros3Rom(bytes, `${game.fileName || ''} ${game.title}`, validation)
       : null;
     if (!isSuperMarioBros3LaunchAllowed(smb3Diagnostic)) {
-      // Fail closed for SMB3 content that is not a known clean cartridge payload.
-      // The reported ROM produced severe corruption after the former override flow,
-      // so there is intentionally no confirm-and-continue bypass for unknown builds.
+      // Fail closed when header, mapper, format or payload length is not plausible.
       $('#player-screen').style.display = 'none';
+      $('#touch-controls').style.display = 'none';
+      $('#gamepad-status').style.display = 'none';
       $('#player-status').textContent = 'ROM doğrulanamadı · başlatma engellendi';
       $('#player-error').textContent = `Super Mario Bros. 3 başlatılmadı. ${smb3Diagnostic.message}`;
       $('#pause-game').disabled = true;
-      showToast('Grafik bozulmasını önlemek için doğrulanmamış SMB3 ROM’u engellendi.', 'error');
+      showToast('ROM yapısı güvenilir biçimde doğrulanamadı; başlatma engellendi.', 'error');
       return;
+    }
+    const useSmb3FceummFallback = smb3Diagnostic?.status === 'compatibility-fallback'
+      && !['jsnes', 'nesjs'].includes(new URLSearchParams(window.location.search).get('nescore'));
+    if (smb3Diagnostic?.status === 'compatibility-fallback') {
+      const selectedCore = useSmb3FceummFallback
+        ? 'FCEUmm uyumluluk çekirdeği'
+        : 'seçili tanılama çekirdeği';
+      $('#player-error').textContent = `ROM sürümü uyarısı: ${smb3Diagnostic.message} ${selectedCore} ile deneniyor.`;
+      showToast('SMB3 ROM imzası standart değil; alternatif çekirdekle uyumluluk deneniyor.', 'error');
     }
 
     const reportError = error => {
@@ -254,8 +265,8 @@ async function startGame(id) {
       const player = new EmulatorJsPlayer($('#player-screen'), {
         onError: reportError,
         systemId: system.emulatorJsSystemId,
-        coreId: system.emulatorJsCoreId,
-        systemLabel: system.shortLabel,
+        coreId: useSmb3FceummFallback ? 'fceumm' : system.emulatorJsCoreId,
+        systemLabel: useSmb3FceummFallback ? `${system.shortLabel} / FCEUmm uyumluluk modu` : system.shortLabel,
         gameId: emulatorGameId(game),
         onSaveUpdate: update => {
           saveBatteryBackup(game, update).then(saved => {
