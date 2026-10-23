@@ -69,7 +69,7 @@ test('Super Mario Bros. 3 NES 2.0 dumps are blocked when the reference fingerpri
 });
 
 
-test('SMB3 launch gate allows only identified clean payloads and leaves unrelated games untouched', () => {
+test('SMB3 launch decision allows recognized or structurally consistent fallback payloads and leaves unrelated games untouched', () => {
   assert.equal(isSuperMarioBros3LaunchAllowed(null), true, 'unrelated games have no SMB3 diagnostic');
   assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'reference-match' }), true);
   assert.equal(isSuperMarioBros3LaunchAllowed({ status: 'compatibility-fallback' }), true, 'structurally valid nonstandard ROMs can try the alternate core');
