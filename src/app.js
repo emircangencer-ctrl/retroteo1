@@ -207,6 +207,7 @@ async function startGame(id) {
   $('#player-status').textContent = 'ROM yükleniyor…';
   $('#player-error').textContent = '';
   $('#player-modal').classList.remove('hidden');
+  $('#player-screen').style.display = '';
   $('#player-screen').replaceChildren();
   $('#pause-game').textContent = 'Ⅱ Duraklat';
   $('#pause-game').disabled = true;
@@ -229,18 +230,16 @@ async function startGame(id) {
     const smb3Diagnostic = game.platform === 'NES'
       ? diagnoseSuperMarioBros3Rom(bytes, `${game.fileName || ''} ${game.title}`, validation)
       : null;
-    if (smb3Diagnostic?.status === 'review') {
-      $('#player-error').textContent = `ROM denetimi uyarısı: ${smb3Diagnostic.message}`;
-      const proceed = confirm(
-        'Super Mario Bros. 3 ROM denetimi uyarı verdi. Bu durum farklı bölge/revizyon veya ROM hack’i olabilir; bozuk dosya ihtimali de dışlanamaz.\n\n' +
-        smb3Diagnostic.message +
-        '\n\nOyunu yine de başlatmak istiyor musun? En güvenlisi, doğrulanmış ve temiz bir ROM kullanmaktır.'
-      );
-      if (!proceed) {
-        closePlayer();
-        showToast('Super Mario Bros. 3 başlatılmadı; önce ROM dosyasını doğrula.', 'error');
-        return;
-      }
+    if (smb3Diagnostic?.status === 'unsupported-build') {
+      // Fail closed for SMB3 content that is not a known clean cartridge payload.
+      // The reported ROM produced severe corruption after the former override flow,
+      // so there is intentionally no confirm-and-continue bypass for unknown builds.
+      $('#player-screen').style.display = 'none';
+      $('#player-status').textContent = 'ROM doğrulanamadı · başlatma engellendi';
+      $('#player-error').textContent = `Super Mario Bros. 3 başlatılmadı. ${smb3Diagnostic.message}`;
+      $('#pause-game').disabled = true;
+      showToast('Grafik bozulmasını önlemek için doğrulanmamış SMB3 ROM’u engellendi.', 'error');
+      return;
     }
 
     const reportError = error => {
