@@ -90,6 +90,7 @@ test('fullscreen requests hide browser navigation UI when supported and rejected
   assert.match(app, /!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)/);
   assert.match(app, /Grafik bozulmasını önlemek için doğrulanmamış SMB3 ROM’u engellendi/);
   assert.match(app, /\$\('#player-screen'\)\.style\.display = 'none'/);
+  assert.match(app, /\$\('#player-screen'\)\.style\.display = ''/, 'the emulator screen is restored for the next game after a blocked ROM');
   assert.doesNotMatch(app, /const proceed = confirm\(/);
 });
 
