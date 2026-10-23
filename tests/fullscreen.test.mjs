@@ -101,3 +101,10 @@ test('fullscreen change tells the emulator iframe to hide its own menus and rest
   assert.match(player, /setImmersive\(active\)/);
   assert.match(player, /postMessage\(\{source:'retroplay-app',type:'immersive',active:Boolean\(active\)\}/);
 });
+
+
+test('fullscreen handler falls back if the API promise resolves without entering fullscreen', async () => {
+  const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app, /if \(result\.error \|\| !result\.entered\)/);
+  assert.match(app, /result\.error[\s\S]*?Tarayıcı tam ekran geçişini doğrulamadı/);
+});
