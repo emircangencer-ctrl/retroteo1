@@ -1,4 +1,4 @@
-import { inspectNesRom, diagnoseSuperMarioBros3Rom } from './nes-rom.js';
+import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllowed } from './nes-rom.js';
 import { PLATFORM, platformInfo } from './platforms.js';
 import { safeCoverColor, validBackup } from './library-backup.js';
 import { extractRomFilesFromZip } from './zip-rom.js';
@@ -230,7 +230,7 @@ async function startGame(id) {
     const smb3Diagnostic = game.platform === 'NES'
       ? diagnoseSuperMarioBros3Rom(bytes, `${game.fileName || ''} ${game.title}`, validation)
       : null;
-    if (smb3Diagnostic?.status === 'unsupported-build') {
+    if (!isSuperMarioBros3LaunchAllowed(smb3Diagnostic)) {
       // Fail closed for SMB3 content that is not a known clean cartridge payload.
       // The reported ROM produced severe corruption after the former override flow,
       // so there is intentionally no confirm-and-continue bypass for unknown builds.
