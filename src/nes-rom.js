@@ -33,6 +33,9 @@ export function diagnoseSuperMarioBros3Rom(input, name, inspection = inspectNesR
   }
 
   const warnings = [];
+  if (inspection.format === 'NES 2.0') {
+    warnings.push('ROM NES 2.0 biçiminde. Bu denetleyici, bu başlık için ABD Rev-A PRG+CHR parmak izini güvenilir biçimde doğrulamıyor; bilinen ve temiz bir ROM kaynağıyla karşılaştırmadan önce grafik uyumluluğu garanti edilemez.');
+  }
   if (inspection.mapper !== SMB3_USA_REV_A.mapper) {
     warnings.push(`ROM başlığı Mapper ${inspection.mapper} bildiriyor; standart Super Mario Bros. 3 kartuşu Mapper 4 (MMC3) kullanır.`);
   }
