@@ -299,3 +299,12 @@ test('EmulatorJS canvas scales to the largest centered 4:3 area and keeps Nestop
   assert.ok(html.includes('75dvw'));
   assert.ok(html.includes('overflow:hidden!important'));
 });
+
+
+test('immersive mode hides the emulator-owned menu only when the parent requests it', () => {
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Test ROM', 'nes', 9, 'nestopia');
+  assert.ok(html.includes("event.data.source !== 'retroplay-app'"));
+  assert.ok(html.includes("type !== 'immersive'"));
+  assert.ok(html.includes('html.retroplay-immersive .ejs_menu_bar'));
+  assert.ok(html.includes("setImmersive(active)"));
+});
