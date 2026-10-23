@@ -4,7 +4,7 @@ RetroPlay is a static PWA intended for Netlify. ROM files are imported into the 
 
 | System | Accepted gameplay extensions | EmulatorJS system ID | Default core |
 |---|---|---|---|
-| NES | `.nes` | `nes` | FCEUmm |
+| NES | `.nes` | `nes` | Nestopia (FCEUmm fallback for structurally valid nonstandard SMB3 payloads) |
 | SNES | `.sfc`, `.smc` | `snes` | Snes9x |
 | Sega Mega Drive / Genesis | `.md`, `.gen` | `segaMD` | Genesis Plus GX |
 
@@ -43,6 +43,8 @@ Netlify runs `npm install`, `npm run check`, `npm test`, and `npm run build` in 
 6. The player also shows whether the browser currently detects a controller. If it does not appear, connect it, press a button once, and choose **Yeniden tara**. This status is a browser-level detection check only; it does not replace testing actual in-game buttons. For the hands-on check, follow [`docs/gamepad-acceptance-checklist.md`](docs/gamepad-acceptance-checklist.md).
 
 On NES, append `?nescore=jsnes` to compare the legacy JSNES player or `?nescore=nesjs` to compare `@nesjs/core`; remove the parameter to use the default EmulatorJS system. Those diagnostic routes apply to NES only.
+
+For Super Mario Bros. 3, RetroPlay checks the PRG+CHR payload against known clean retail fingerprints rather than trusting the filename alone. Known profiles use Nestopia by default. If the iNES header, Mapper 4 and expected 256 KiB PRG + 128 KiB CHR layout are structurally consistent but the payload signature is not recognized (for example, a ROM hack), RetroPlay automatically tries EmulatorJS FCEUmm as an alternate compatibility core and displays a warning. An invalid header, wrong mapper/layout, or unverifiable NES 2.0 SMB3 file is blocked before the core starts. No emulator can repair corrupted or intentionally changed game data.
 
 ROMs remain in local browser storage. Use only ROM files you own or are authorized to use. A recognized header or accepted extension is not proof that a game dump is complete or compatible.
 
