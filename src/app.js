@@ -338,6 +338,7 @@ function setFullscreenFallback(active) {
   fullscreenFallback = active;
   $('#player-modal')?.classList.toggle('is-immersive-fallback', active);
   $('#player-modal')?.parentElement?.classList.toggle('is-immersive-fallback', active);
+  activeEmulator?.setImmersive?.(active);
   updateFullscreenButton();
   if (active) showToast('Geniş ekran görünümü açıldı. Tarayıcı tam ekran API’sini desteklemediği için adres çubuğu gizlenmeyebilir.');
   requestAnimationFrame(() => {
@@ -368,6 +369,7 @@ async function toggleGameFullscreen() {
     showToast('Tarayıcı gerçek tam ekranı engelledi; oyun alanı genişletilmiş görünümde açıldı.', 'error');
     return;
   }
+  activeEmulator?.setImmersive?.(true);
   updateFullscreenButton();
   requestAnimationFrame(() => {
     try { activeEmulator?.fitInParent?.(); } catch {}
@@ -378,6 +380,7 @@ function setupFullscreen() {
   $('#immersive-exit')?.addEventListener('click', toggleGameFullscreen);
   const onChange = () => {
     if (fullscreenElement(document) !== $('#player-modal') && fullscreenFallback) setFullscreenFallback(false);
+    activeEmulator?.setImmersive?.(isFullscreen(document, $('#player-modal')) || fullscreenFallback);
     updateFullscreenButton();
     requestAnimationFrame(() => {
       try { activeEmulator?.fitInParent?.(); } catch {}
