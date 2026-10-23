@@ -308,3 +308,10 @@ test('immersive mode hides the emulator-owned menu only when the parent requests
   assert.ok(html.includes('html.retroplay-immersive .ejs_menu_bar'));
   assert.ok(html.includes("window.addEventListener('message'"));
 });
+
+
+test('SMB3 compatibility fallback accepts FCEUmm while keeping NES controls', () => {
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Super Mario Bros. 3 (U) (PRG 1) [h2]', 'nes', 11, 'fceumm');
+  assert.ok(html.includes('window.EJS_core = "fceumm";'));
+  assert.ok(html.includes('window.EJS_controlScheme = "nes";'));
+});
