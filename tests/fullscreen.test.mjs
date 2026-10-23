@@ -90,3 +90,14 @@ test('fullscreen requests hide browser navigation UI when supported and rejected
   assert.match(app, /Super Mario Bros\. 3 başlatılmadı; önce ROM dosyasını doğrula/);
   assert.match(app, /if \(!proceed\)[\s\S]*?closePlayer\(\)/);
 });
+
+
+test('fullscreen change tells the emulator iframe to hide its own menus and restore them on exit', async () => {
+  const [app, player] = await Promise.all([
+    readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/emulatorjs-nes-player.js', import.meta.url), 'utf8')
+  ]);
+  assert.match(app, /setImmersive\?\.\(isFullscreen\(document, \$\('#player-modal'\)\) \|\| fullscreenFallback\)/);
+  assert.match(player, /setImmersive\(active\)/);
+  assert.match(player, /postMessage\(\{source:'retroplay-app',type:'immersive',active:Boolean\(active\)\}/);
+});
