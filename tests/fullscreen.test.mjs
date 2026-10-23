@@ -88,7 +88,11 @@ test('fullscreen requests hide browser navigation UI when supported and rejected
   assert.match(styles, /#player-modal:fullscreen #player-screen iframe[\s\S]*?height:\s*100%\s*!important/);
   assert.match(styles, /#player-modal:fullscreen \.touch-controls button[\s\S]*?pointer-events:\s*auto\s*!important/);
   assert.match(app, /!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)/);
-  assert.match(app, /Grafik bozulmasını önlemek için doğrulanmamış SMB3 ROM’u engellendi/);
+  assert.match(app, /ROM yapısı güvenilir biçimde doğrulanamadı; başlatma engellendi/);
+  assert.match(app, /status === 'compatibility-fallback'[\s\S]*?FCEUmm uyumluluk çekirdeği/);
+  assert.match(app, /coreId: useSmb3FceummFallback \? 'fceumm' : system\.emulatorJsCoreId/);
+  assert.match(app, /\$\('#touch-controls'\)\.style\.display = 'none'/);
+  assert.match(app, /\$\('#touch-controls'\)\.style\.display = ''/);
   assert.match(app, /\$\('#player-screen'\)\.style\.display = 'none'/);
   assert.match(app, /\$\('#player-screen'\)\.style\.display = ''/, 'the emulator screen is restored for the next game after a blocked ROM');
   assert.doesNotMatch(app, /const proceed = confirm\(/);
