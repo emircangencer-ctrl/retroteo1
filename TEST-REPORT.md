@@ -197,3 +197,6 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - EmulatorJS canvas CSS now clamps the picture to a centered 4:3 viewport using dynamic viewport units and clamps overflow. The canvas is intentionally sized to the NES display aspect ratio; this is not a claim that every game's ROM/render output has been verified against original hardware.
 - Super Mario Bros. 3 ROMs that do not match the known USA Rev-A fingerprint or show mapper/size anomalies now require an explicit confirmation before launch. Alternate regions/revisions and hacks can trigger this warning, so it does not automatically reject them.
 - Regression tests added for fullscreen navigation UI request/fallback, immersive iframe/control layout, and the SMB3 Nestopia/4:3 configuration. Actual browser fullscreen behavior, touch controls, and gameplay still require manual acceptance on the target phone.
+
+
+- Follow-up: immersive state is now sent to the isolated EmulatorJS iframe through a source-checked parent message. Emulator-owned menus/toolbars are hidden only while immersive mode is active, then restored on exit; touch controls remain in the parent overlay.
