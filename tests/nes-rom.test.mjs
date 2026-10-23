@@ -35,7 +35,7 @@ test('Super Mario Bros. 3 refuses an unrecognized PRG/CHR fingerprint rather tha
   assert.equal(result.status, 'unsupported-build');
   assert.match(result.message, /CRC32/);
   assert.match(result.message, /başlatılması engellendi/);
-  assert.match(result.message, /\\[h2\\]/);
+  assert.match(result.message, /\[h2\]/);
   assert.equal(result.payloadCrc32, crc32(bytes.subarray(16)));
   assert.equal(result.recognizedRelease, null);
 });
