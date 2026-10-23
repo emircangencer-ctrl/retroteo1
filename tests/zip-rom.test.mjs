@@ -34,7 +34,7 @@ test('extracts supported ROMs from a standard ZIP and ignores unrelated files',a
   assert.deepEqual(Buffer.from(await files[0].arrayBuffer()),sampleNes);
 });
 test('rejects invalid ZIP bytes with a readable error',async()=>{
-  await assert.rejects(()=>extractRomFilesFromZip(new File(['not a zip'],'bad.zip')),/ZIP/);
+  await assert.rejects(()=>extractRomFilesFromZip(new File(['not a zip'],'bad.zip')),/ZIP|Geçerli ZIP/);
 });
 test('reports when ZIP has no supported ROM entries',async()=>{
   await assert.rejects(()=>extractRomFilesFromZip(storedZip([{name:'readme.txt',data:'hello'}])),/desteklenen ROM/);
@@ -56,4 +56,54 @@ test('extracts a deflate-compressed ZIP entry',async()=>{
   const files=await extractRomFilesFromZip(storedZip([{name:'compressed.nes',data:sampleNes,method:8}]));
   assert.equal(files.length,1);
   assert.deepEqual(Buffer.from(await files[0].arrayBuffer()),sampleNes);
+});
+
+test('rejects a forged small uncompressed size before accepting deflated output',async()=>{
+  const zip=storedZip([{name:'bomb.nes',data:sampleNes,method:8}]);
+  const bytes=Buffer.from(await zip.arrayBuffer());
+  const endOffset=bytes.length-22;
+  const centralOffset=bytes.readUInt32LE(endOffset+16);
+  bytes.writeUInt32LE(64,22); // Local header: uncompressed size.
+  bytes.writeUInt32LE(64,centralOffset+24); // Central directory: uncompressed size.
+  await assert.rejects(
+    ()=>extractRomFilesFromZip(new File([bytes],'forged-size.zip')),
+    /bildirilen boyutu/
+  );
+});
+
+test('rejects a mismatch between local and central-directory filenames',async()=>{
+  const zip=storedZip([{name:'mismatch.nes',data:sampleNes}]);
+  const bytes=Buffer.from(await zip.arrayBuffer());
+  bytes[30] = 'x'.charCodeAt(0); // Change only the local-header filename.
+  await assert.rejects(
+    ()=>extractRomFilesFromZip(new File([bytes],'mismatched-name.zip')),
+    /dosya adları uyuşmuyor/
+  );
+});
+
+test('rejects trailing bytes after the ZIP end-of-central-directory record',async()=>{
+  const zip=storedZip([{name:'trailing.nes',data:sampleNes}]);
+  const bytes=Buffer.concat([Buffer.from(await zip.arrayBuffer()),Buffer.from('junk')]);
+  await assert.rejects(
+    ()=>extractRomFilesFromZip(new File([bytes],'trailing-bytes.zip')),
+    /bitiş kaydı/
+  );
+});
+
+test('rejects inconsistent local CRC/size fields when no data descriptor is used', async () => {
+  const zip = storedZip([{ name: 'header-mismatch.nes', data: sampleNes }]);
+  const bytes = Buffer.from(await zip.arrayBuffer());
+  bytes.writeUInt32LE(sampleNes.length - 1, 22); // Local uncompressed-size field only.
+  await assert.rejects(
+    () => extractRomFilesFromZip(new File([bytes], 'header-mismatch.zip')),
+    /CRC veya boyut alanları/
+  );
+});
+
+test('rejects an archive that exceeds the configured compressed-input cap before reading it', async () => {
+  const oversized = { size: 512 * 1024 * 1024 + 1, name: 'oversized.zip' };
+  await assert.rejects(
+    () => extractRomFilesFromZip(oversized),
+    /512 MiB sınırını/
+  );
 });
