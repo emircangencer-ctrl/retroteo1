@@ -262,3 +262,13 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - **Text corrections:** settings (default NES core is Nestopia), systems page and home tiles for playable systems, README and remediation doc; backup files carry the real app version (0.7.0).
 - **Tests:** unit tests 122/122 locally. New browser E2E suite (`e2e/`, 7 scenarios) runs the production build with EmulatorJS 4.2.3 served from npm; 7/7 pass on this change and 0/7 on the previous commit (control run), i.e. the suite detects every fixed defect. Added as a CI job.
 - **Not verified here:** real Android device behavior (save on app switch, back button in an installed PWA, wake lock). PR #2 stays draft; `main` unchanged.
+
+
+## Stage 29 — save states and resume (2026-10-26)
+
+- User report: there was no way to save during play. Battery saves only help games with their own save menus; the EmulatorJS save-state buttons were hidden by the app.
+- Added `EmulatorJsPlayer.saveState/loadState/supportsStates` (host-owned copies of the core's state). The player now has **Kaydet / Yükle** (quick save state) in the toolbar and in fullscreen, with an in-player notice that stays visible in fullscreen.
+- Closing a game, backgrounding the page or unloading it stores a resume point; the next launch continues from it when the core matches and offers **Baştan başla**. Library cards show **Devam et**.
+- IndexedDB version 2 → 3 adds a `saveStates` store only; existing stores and records are untouched. Removing a game removes its states.
+- Tests: unit 123/123. E2E 10/10, including quick save/load (the saved moment is restored after a reset) and close/reopen resume (the machine state at close is restored; "Baştan başla" resets).
+- Not verified here: real Android device behavior, state size/performance on SNES and Mega Drive games.

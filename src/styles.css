@@ -220,3 +220,17 @@
   pointer-events: auto !important;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Stage 29: save states — in-player notice and immersive save/load buttons. */
+.player-notice{position:absolute;left:50%;top:max(14px,env(safe-area-inset-top));transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;max-width:calc(100% - 120px);padding:10px 14px;border:1px solid #3b4b65;border-radius:12px;background:rgba(14,21,34,.94);color:#eef4ff;font-size:14px;font-weight:600;box-shadow:0 12px 40px #0009}
+.player-notice[hidden]{display:none}
+.player-notice button{min-height:36px;padding:0 12px;border:1px solid #6d5bc4;border-radius:9px;background:#2a2152;color:#fff;font-weight:700;font-size:13px;white-space:nowrap}
+.immersive-actions{display:none}
+#player-modal:fullscreen .immersive-actions,
+#player-modal.is-immersive-fallback .immersive-actions{display:flex;gap:8px;position:absolute;z-index:40;top:max(10px,env(safe-area-inset-top));left:max(10px,env(safe-area-inset-left))}
+.immersive-actions button{min-width:64px;height:42px;padding:0 12px;border:1px solid #71809a88;border-radius:21px;background:rgba(12,20,33,.72);color:#fff;font-weight:700;font-size:13px;backdrop-filter:blur(6px)}
+.immersive-actions button:disabled{opacity:.45}
+#player-modal:fullscreen .player-notice,
+#player-modal.is-immersive-fallback .player-notice{top:calc(max(10px,env(safe-area-inset-top)) + 56px);max-width:calc(100% - 24px)}
+.player-notice{width:max-content}
+.player-notice span{min-width:0}

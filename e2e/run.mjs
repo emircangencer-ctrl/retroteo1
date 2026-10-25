@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, waitFor, DIST } from './harness.mjs';
+import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST } from './harness.mjs';
 import { batteryTestRom, megaDriveBinStub } from './fixtures/make-roms.mjs';
 
 if (!fs.existsSync(path.join(DIST, 'index.html'))) {
@@ -57,6 +57,8 @@ await scenario('the app copy is restored into the core even when the emulator st
   const first = await waitFor(async () => (await appBatterySaves(page))[0] || null);
   const bootCount = first.bytes[2];
   await deleteEmulatorSaveStore(page);
+  await deleteAppSaveStates(page); // isolate battery-save restore from the resume point
+  await page.reload({ waitUntil: 'networkidle' });
   await play(page, 'battery test');
   await page.waitForTimeout(2500);
   await page.evaluate(() => document.querySelector('#player-close').click());
@@ -66,6 +68,42 @@ await scenario('the app copy is restored into the core even when the emulator st
   });
   // Restored save + soft reset → boot counter advances from the saved value. A blank start would repeat it.
   assert.equal(second?.bytes[2], (bootCount + 1) & 0xff);
+});
+
+await scenario('quick save and quick load return the game to the saved moment', async page => {
+  await importFile(page, batteryRom);
+  await play(page, 'battery test');
+  await page.waitForTimeout(1500);
+  const before = (await liveSram(page))[2];
+  await page.evaluate(() => document.querySelector('#quick-save').click());
+  await page.waitForFunction(() => /Kaydedildi/.test(document.querySelector('#player-notice-text')?.textContent || ''), null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => document.querySelector('#quick-load').disabled), false);
+  await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager.restart());
+  await page.waitForTimeout(500);
+  assert.equal((await liveSram(page))[2], (before + 1) & 0xff, 'the reset advanced the boot counter');
+  await page.evaluate(() => document.querySelector('#quick-load').click());
+  await page.waitForFunction(() => /yüklendi/.test(document.querySelector('#player-notice-text')?.textContent || ''), null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  assert.equal((await liveSram(page))[2], before, 'loading the state restored the saved moment');
+});
+
+await scenario('closing and reopening continues where the player left off', async page => {
+  await importFile(page, batteryRom);
+  await play(page, 'battery test');
+  await page.waitForTimeout(1500);
+  const atClose = (await liveSram(page))[2];
+  await page.evaluate(() => document.querySelector('#player-close').click());
+  const states = await waitFor(async () => { const all = await appSaveStates(page); return all.some(state => state.slot === 'auto') ? all : null; });
+  assert.ok(states, 'a resume point is stored on close');
+  await page.evaluate(() => document.querySelector('[data-view="library"]').click());
+  assert.match(await page.evaluate(() => document.querySelector('#library-games [data-play]').textContent), /Devam et/);
+  await play(page, 'battery test');
+  await page.waitForFunction(() => /Kaldığın yerden/.test(document.querySelector('#player-notice-text')?.textContent || ''), null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  assert.equal((await liveSram(page))[2], atClose, 'the machine state at close was restored');
+  await page.evaluate(() => document.querySelector('#player-notice-action').click());
+  await page.waitForTimeout(500);
+  assert.equal((await liveSram(page))[2], (atClose + 1) & 0xff, '"Baştan başla" resets the game');
 });
 
 await scenario('a non-fatal runtime rejection does not mark the running game as stopped', async page => {

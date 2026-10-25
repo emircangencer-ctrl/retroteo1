@@ -116,6 +116,41 @@ export class EmulatorJsPlayer {
     gm.loadSaveFiles();
     return true;
   }
+  /** True when the running core can serialize its full machine state. */
+  supportsStates() {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (!this.started || this.destroyed || !gm) return false;
+    try { return typeof gm.supportsStates === 'function' ? Boolean(gm.supportsStates()) : typeof gm.getState === 'function'; } catch { return false; }
+  }
+  /**
+   * Returns a host-owned copy of the full machine state (a "save state"), or null.
+   * The runtime returns a view into emulator memory, so it is copied before returning.
+   */
+  saveState() {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (!this.started || this.destroyed || typeof gm?.getState !== 'function') return null;
+    try {
+      const state = gm.getState();
+      return state && state.length ? new Uint8Array(state) : null;
+    } catch (error) {
+      try { this.onWarning(`Kayıt noktası alınamadı: ${error?.message || error}`); } catch {}
+      return null;
+    }
+  }
+  /** Loads a save state previously produced by saveState() for the same core. */
+  loadState(bytes) {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    const data = bytes instanceof Uint8Array ? bytes : (ArrayBuffer.isView(bytes) || bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : null);
+    if (!this.started || this.destroyed || typeof gm?.loadState !== 'function' || !data?.length) return false;
+    try {
+      this.releaseAllButtons();
+      gm.loadState(new Uint8Array(data));
+      return true;
+    } catch (error) {
+      try { this.onWarning(`Kayıt noktası yüklenemedi: ${error?.message || error}`); } catch {}
+      return false;
+    }
+  }
   /** Soft-resets the running game; battery-backed RAM is preserved by the core. */
   restartGame() {
     const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;

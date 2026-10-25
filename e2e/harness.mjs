@@ -108,3 +108,36 @@ export async function waitFor(fn, { timeout = 8000, interval = 200 } = {}) {
   }
   return last;
 }
+
+export function deleteAppSaveStates(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('retroplay-local-v1');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const tx = request.result.transaction('saveStates', 'readwrite');
+      tx.objectStore('saveStates').clear();
+      tx.oncomplete = () => { request.result.close(); resolve(true); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+}
+
+export function appSaveStates(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('retroplay-local-v1');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const read = request.result.transaction('saveStates').objectStore('saveStates').getAll();
+      read.onsuccess = () => { resolve(read.result.map(state => ({ id: state.id, slot: state.slot, coreId: state.coreId, byteLength: state.byteLength }))); request.result.close(); };
+      read.onerror = () => reject(read.error);
+    };
+  }));
+}
+
+/** Current battery RAM of the running core (live, flushed), as a plain array. */
+export function liveSram(page) {
+  return page.evaluate(() => {
+    const data = document.querySelector('#player-screen iframe')?.contentWindow?.EJS_emulator?.gameManager?.getSaveFile();
+    return data ? Array.from(data.slice(0, 8)) : null;
+  });
+}

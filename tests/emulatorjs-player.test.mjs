@@ -331,6 +331,36 @@ test('a host-owned save is written into the core file system and reloaded, then 
   }
 });
 
+test('save states are copied out of emulator memory and loaded back through the runtime', () => {
+  const restore = installFakeBrowser();
+  let player;
+  try {
+    const runtime = fakeSaveRuntime();
+    const heap = new Uint8Array([0, 11, 22, 33, 0]);
+    const loaded = [];
+    runtime.gameManager.supportsStates = () => true;
+    runtime.gameManager.getState = () => heap.subarray(1, 4);
+    runtime.gameManager.loadState = state => loaded.push([...state]);
+    player = playerWithRuntime(runtime);
+    assert.equal(player.supportsStates(), true);
+    const state = player.saveState();
+    assert.deepEqual([...state], [11, 22, 33]);
+    heap[1] = 99;
+    assert.deepEqual([...state], [11, 22, 33], 'the state must not alias emulator memory');
+    assert.equal(player.loadState(state), true);
+    assert.deepEqual(loaded, [[11, 22, 33]]);
+    assert.equal(player.loadState(new Uint8Array(0)), false);
+    runtime.gameManager.getState = () => { throw new Error('unsupported'); };
+    assert.equal(player.saveState(), null);
+    player.started = false;
+    assert.equal(player.supportsStates(), false);
+    assert.equal(player.loadState(state), false);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
 test('runtime warnings are reported without failing a running session', () => {
   const restore = installFakeBrowser();
   const warnings = [];
