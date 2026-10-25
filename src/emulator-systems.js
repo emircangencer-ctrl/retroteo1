@@ -39,7 +39,8 @@ export const EMULATED_SYSTEMS = Object.freeze({
     platform: 'MD',
     label: 'Sega Mega Drive',
     shortLabel: 'Mega Drive',
-    extensions: Object.freeze(['md', 'gen']),
+    // `.bin` reaches the player only after import verified the SEGA header (see rom-detect.js).
+    extensions: Object.freeze(['md', 'gen', 'bin']),
     emulatorJsSystemId: 'segaMD',
     emulatorJsCoreId: 'segaMD',
     supportsLegacyComparison: false,
@@ -48,8 +49,8 @@ export const EMULATED_SYSTEMS = Object.freeze({
       makeButton('X', 'BUTTON_L'),
       makeButton('Z', 'BUTTON_R'),
       makeButton('B', 'BUTTON_B'),
-      makeButton('C', 'BUTTON_Y'),
-      makeButton('A', 'BUTTON_A')
+      makeButton('C', 'BUTTON_A'),
+      makeButton('A', 'BUTTON_Y')
     ]),
     showSelect: false,
     showStart: true

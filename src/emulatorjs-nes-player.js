@@ -17,8 +17,13 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   const startup = [
     '(() => {',
     "const notify = (type, details = {}, transfer = []) => parent.postMessage({ source: 'retroplay-emulatorjs', type, ...details }, '*', transfer);",
-    "window.addEventListener('error', event => notify('error', { message: event && event.message ? event.message : 'Emülatör betiği yüklenemedi.' }));",
-    "window.addEventListener('unhandledrejection', event => notify('error', { message: String(event.reason && event.reason.message || event.reason || 'Emülatör başlatılamadı.') }));",
+    // Before the game starts, a script error means the runtime failed to boot. After start,
+    // EmulatorJS/RetroArch can reject non-essential promises (for example a denied screen wake
+    // lock); those must not be reported as a stopped session while the game keeps running.
+    "let gameStarted = false;",
+    "const report = message => notify(gameStarted ? 'warning' : 'error', { message });",
+    "window.addEventListener('error', event => report(event && event.message ? event.message : 'Emülatör betiği yüklenemedi.'));",
+    "window.addEventListener('unhandledrejection', event => report(String(event.reason && event.reason.message || event.reason || 'Emülatör başlatılamadı.')));",
     "window.EJS_player = '#ejs-player';",
     'window.EJS_startOnLoaded = true;',
     'window.EJS_core = ' + literal(coreId) + ';',
@@ -28,11 +33,9 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
     'window.EJS_gameName = ' + literal(gameName) + ';',
     'window.EJS_gameID = ' + String(gameId) + ';',
-    'window.EJS_fixedSaveInterval = 15000;',
-    "window.EJS_onSaveUpdate = event => { if (!event || event.save == null) return; const send = buffer => { const copy = buffer.slice(0); notify('save-update', { hash: String(event.hash || ''), saveBuffer: copy }, [copy]); }; const save = event.save; if (save instanceof ArrayBuffer) send(save); else if (ArrayBuffer.isView(save)) send(save.buffer.slice(save.byteOffset, save.byteOffset + save.byteLength)); else if (typeof Blob !== 'undefined' && save instanceof Blob) save.arrayBuffer().then(send).catch(error => notify('error', { message: 'Oyun kaydı okunamadı: ' + String(error && error.message || error) })); };",
     'window.EJS_volume = 0.7;',
     'window.EJS_Buttons = ' + literal(HIDDEN_BUTTONS) + ';',
-    "window.EJS_onGameStart = () => { const emu = window.EJS_emulator; const missing = []; if (typeof emu?.gameManager?.simulateInput !== 'function') missing.push('kontrol desteği'); if (typeof emu?.pause !== 'function') missing.push('duraklatma'); if (typeof emu?.play !== 'function') missing.push('devam etme'); if (missing.length) { notify('error', { message: 'EmulatorJS yüklendi ancak gerekli API eksik: ' + missing.join(', ') + '. Çalışma zamanı ile kontrol katmanı uyumsuz.' }); return; } const css = document.createElement('style'); css.textContent = 'html,body,#ejs-player{margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;overflow:hidden!important;background:#000!important}#ejs-player .ejs_parent{position:relative!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;background:#000!important;overflow:hidden!important}#ejs-player .ejs_canvas_parent{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;background:#000!important}#ejs-player canvas{display:block!important;flex:0 0 auto!important;width:min(100%,133.333vh)!important;height:min(100%,75vw)!important;width:min(100%,133.333dvh)!important;height:min(100%,75dvw)!important;max-width:100%!important;max-height:100%!important;aspect-ratio:4/3!important;object-fit:fill!important;image-rendering:pixelated!important;image-rendering:crisp-edges!important}#ejs-player .ejs_canvas_parent canvas{margin:auto!important}.ejs_virtualGamepad_parent,.ejs_virtualGamepad_open,.ejs_volume_parent,.ejs_bottom_bar,.ejs_start_button,.ejs_contextMenu{display:none!important}html.retroplay-immersive .ejs_menu_bar,html.retroplay-immersive .ejs_menu,html.retroplay-immersive .ejs_settings,html.retroplay-immersive .ejs_overlay,html.retroplay-immersive .ejs_toolbar,html.retroplay-immersive .ejs_gamepad_settings{display:none!important}'; document.head.appendChild(css); notify('started'); };",
+    "window.EJS_onGameStart = () => { const emu = window.EJS_emulator; const missing = []; if (typeof emu?.gameManager?.simulateInput !== 'function') missing.push('kontrol desteği'); if (typeof emu?.pause !== 'function') missing.push('duraklatma'); if (typeof emu?.play !== 'function') missing.push('devam etme'); if (missing.length) { notify('error', { message: 'EmulatorJS yüklendi ancak gerekli API eksik: ' + missing.join(', ') + '. Çalışma zamanı ile kontrol katmanı uyumsuz.' }); return; } const css = document.createElement('style'); css.textContent = 'html,body,#ejs-player{margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;overflow:hidden!important;background:#000!important}#ejs-player .ejs_parent{position:relative!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;background:#000!important;overflow:hidden!important}#ejs-player .ejs_canvas_parent{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;background:#000!important}#ejs-player canvas{display:block!important;flex:0 0 auto!important;width:min(100%,133.333vh)!important;height:min(100%,75vw)!important;width:min(100%,133.333dvh)!important;height:min(100%,75dvw)!important;max-width:100%!important;max-height:100%!important;aspect-ratio:4/3!important;object-fit:fill!important;image-rendering:pixelated!important;image-rendering:crisp-edges!important}#ejs-player .ejs_canvas_parent canvas{margin:auto!important}.ejs_virtualGamepad_parent,.ejs_virtualGamepad_open,.ejs_volume_parent,.ejs_bottom_bar,.ejs_start_button,.ejs_contextMenu{display:none!important}html.retroplay-immersive .ejs_menu_bar,html.retroplay-immersive .ejs_menu,html.retroplay-immersive .ejs_settings,html.retroplay-immersive .ejs_overlay,html.retroplay-immersive .ejs_toolbar,html.retroplay-immersive .ejs_gamepad_settings{display:none!important}'; document.head.appendChild(css); gameStarted = true; notify('started'); };",
     "window.EJS_onExit = () => notify('exit');",
     "window.addEventListener('message', event => { if (event.source !== parent || !event.data || event.data.source !== 'retroplay-app' || event.data.type !== 'immersive') return; document.documentElement.classList.toggle('retroplay-immersive', Boolean(event.data.active)); });",
     "const loader = document.createElement('script'); loader.src = " + literal(DATA_PATH + 'loader.js') + "; loader.onerror = () => notify('error', { message: 'EmulatorJS yüklenemedi. İnternet bağlantısını kontrol et.' }); document.head.appendChild(loader);",
@@ -41,11 +44,11 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay EmulatorJS runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsPlayer {
-  constructor(container, { onError = () => {}, onSaveUpdate = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId } = {}) {
+  constructor(container, { onError = () => {}, onWarning = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId } = {}) {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
-    this.container=container; this.onError=onError; this.onSaveUpdate=onSaveUpdate; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
+    this.container=container; this.onError=onError; this.onWarning=onWarning; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
@@ -55,7 +58,7 @@ export class EmulatorJsPlayer {
     if(this.frame) return Promise.reject(new Error('Bu oynatıcıda zaten bir ROM yükleniyor.'));
     const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
     this.romUrl=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
-    const frame=document.createElement('iframe'); frame.title=gameName+' — '+this.systemLabel+' emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
+    const frame=document.createElement('iframe'); frame.title=gameName+' — '+this.systemLabel+' emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad; screen-wake-lock'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
     this.frame=frame; frame.addEventListener('load',this.boundFrameLoad); this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
     return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('Emülatör çekirdeği 75 saniye içinde başlamadı. İnternet bağlantısını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName,this.systemId,this.gameId,this.coreId); });
   }
@@ -64,18 +67,8 @@ export class EmulatorJsPlayer {
     const data=event.data;
     if(data.type==='started'){ this.started=true; window.clearTimeout(this.timer); this.timer=null; const resolve=this.resolveStart; this.resolveStart=null; this.rejectStart=null; resolve?.(true); }
     else if(data.type==='error') this.fail(new Error(data.message||'EmulatorJS başlatılamadı.'));
-    else if(data.type==='save-update' && data.saveBuffer instanceof ArrayBuffer) {
-      try {
-        this.onSaveUpdate({
-          hash: String(data.hash || ''),
-          bytes: new Uint8Array(data.saveBuffer),
-          updatedAt: Date.now(),
-          gameId: this.gameId,
-          systemId: this.systemId
-        });
-      } catch(error) {
-        this.onError(error instanceof Error ? error : new Error(String(error)));
-      }
+    else if(data.type==='warning') {
+      try { this.onWarning(String(data.message || 'Emülatör uyarısı')); } catch {}
     }
     else if(data.type==='exit'&&!this.destroyed)this.onError(new Error('Emülatör oturumu kapandı.'));
   }
@@ -84,6 +77,52 @@ export class EmulatorJsPlayer {
   fitInParent(){try{this.frame?.contentWindow?.EJS_emulator?.frontend?.handleResize?.();}catch{}}
   pause(){const e=this.frame?.contentWindow?.EJS_emulator;if(!this.started||!e)throw new Error('Emülatör henüz hazır değil.');this.releaseAllButtons();e.pause();}
   resume(){const e=this.frame?.contentWindow?.EJS_emulator;if(!this.started||!e)throw new Error('Emülatör henüz hazır değil.');e.play();}
+  /**
+   * Returns a copy of the game's battery save (SRAM) owned by the host app, or null when the
+   * running core has none. With flush=true the core first writes its live SRAM to the virtual
+   * file system; with flush=false only the file the core loaded at startup is read.
+   * EmulatorJS 4.2.3 itself persists this file only every 5 minutes, so the app must copy it.
+   */
+  readSaveData({ flush = true } = {}) {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (!this.started || this.destroyed || !gm?.FS || typeof gm.getSaveFilePath !== 'function') return null;
+    try {
+      if (flush) gm.saveSaveFiles();
+      const path = gm.getSaveFilePath();
+      if (!path || !gm.FS.analyzePath(path).exists) return null;
+      const data = gm.FS.readFile(path);
+      if (!data || !data.length) return null;
+      return new Uint8Array(data);
+    } catch (error) {
+      try { this.onWarning(`Oyun kaydı okunamadı: ${error?.message || error}`); } catch {}
+      return null;
+    }
+  }
+  /** Writes a host-owned battery save into the running core and asks it to reload SRAM. */
+  writeSaveData(bytes) {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    const data = bytes instanceof Uint8Array ? bytes : (ArrayBuffer.isView(bytes) || bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : null);
+    if (!this.started || this.destroyed || !gm?.FS || !data?.length) return false;
+    const path = gm.getSaveFilePath();
+    if (!path) return false;
+    let dir = '';
+    for (const part of path.split('/').slice(0, -1)) {
+      if (!part) continue;
+      dir += `/${part}`;
+      if (!gm.FS.analyzePath(dir).exists) gm.FS.mkdir(dir);
+    }
+    if (gm.FS.analyzePath(path).exists) gm.FS.unlink(path);
+    gm.FS.writeFile(path, new Uint8Array(data));
+    gm.loadSaveFiles();
+    return true;
+  }
+  /** Soft-resets the running game; battery-backed RAM is preserved by the core. */
+  restartGame() {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (!this.started || this.destroyed || typeof gm?.restart !== 'function') return false;
+    gm.restart();
+    return true;
+  }
   handleKey(event, pressed) {
     if (!this.started || this.destroyed || this.container.closest('#player-modal')?.classList.contains('hidden')) return;
     if (event.altKey || event.metaKey || (event.ctrlKey && event.code !== 'ControlRight')) return;

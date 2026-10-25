@@ -5,6 +5,9 @@ import { extractRomFilesFromZip } from './zip-rom.js';
 import { EmulatorJsPlayer } from './emulatorjs-nes-player.js';
 import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './emulator-systems.js';
 import { createBatterySaveRecord, emulatorGameId } from './save-data.js';
+import { createSaveCapture, decideSaveRestore } from './save-sync.js';
+import { classifyImport } from './import-match.js';
+import { detectRomPlatform } from './rom-detect.js';
 import { inspectGamepads, describeGamepads } from './gamepad-status.js';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from './fullscreen.js';
 import { getDriveClientId, loadGoogleIdentity, requestDriveAccessToken, listDriveFiles, downloadDriveFile, isDriveFolder, isSupportedDriveGame } from './google-drive.js';
@@ -44,6 +47,12 @@ let driveFolderStack = [{ id: 'root', name: 'Drive' }];
 let driveNextPageToken = '';
 let driveVisibleFiles = [];
 let driveListingGeneration = 0;
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-dev';
+const SAVE_CAPTURE_INTERVAL_MS = 30000;
+const SYSTEM_CORE_LABELS = Object.freeze({ NES: 'Nestopia', SNES: 'Snes9x', MD: 'Genesis Plus GX' });
+let saveCapture = null;
+let saveTimer = 0;
+let autoPaused = false;
 
 function openDB(){return new Promise((resolve,reject)=>{if(!('indexedDB' in window)){reject(new Error('Bu tarayıcı IndexedDB desteklemiyor.'));return;}const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE)){const st=d.createObjectStore(STORE,{keyPath:'id'});st.createIndex('addedAt','addedAt');st.createIndex('platform','platform');}if(!d.objectStoreNames.contains(SAVE_STORE))d.createObjectStore(SAVE_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('Yerel veritabanı açılamadı.'));});}
 function txStore(mode='readonly'){return db.transaction(STORE,mode).objectStore(STORE)}
@@ -73,11 +82,10 @@ function showToast(message,type='success'){const el=$('#toast');el.textContent=m
 function getFileExt(name){const i=name.lastIndexOf('.');return i>=0?name.slice(i+1).toLowerCase():'';}
 async function sha256File(file){if(!globalThis.crypto?.subtle||file.size>256*1024*1024)return null;const bytes=await file.arrayBuffer();const digest=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');}
 function storageErrorMessage(error){if(error?.name==='QuotaExceededError')return 'Tarayıcı depolama alanı dolu';if(error?.name==='DataCloneError')return 'Dosya tarayıcı depolamasına aktarılamadı';return error?.message||'Bilinmeyen depolama hatası';}
-function guessPlatform(file){const ext=getFileExt(file.name);return Object.entries(PLATFORM).find(([,p])=>p.ext.includes(ext))?.[0]||'UNKNOWN';}
 function renderCard(g){const p=platformInfo(g.platform);const bg=safeCoverColor(g.coverBg,p.color);const glow=safeCoverColor(g.coverGlow,p.glow);const fav=g.favorite?' favorited':'';const size=g.sizeLabel||formatBytes(g.size||0);const canPlay=!g.demo&&isPlayablePlatform(g.platform)&&!g.restoredMetadataOnly&&g.blob instanceof Blob;const actions=g.demo?'':`<div class="game-card-actions">${canPlay?`<button class="button primary small" data-play="${esc(g.id)}">▶ Oyna</button>`:''}${batterySaveIds.has(g.id)?`<button class="text-button" data-export-sram="${esc(g.id)}">SRAM yedeği indir</button>`:''}${g.restoredMetadataOnly?'':`<button class="text-button" data-export-rom="${esc(g.id)}">ROM dışa aktar</button>`}<button class="text-button remove-game" data-remove="${esc(g.id)}">Kütüphaneden kaldır</button></div>`;const fileLabel=g.demo?'Örnek içerik':g.restoredMetadataOnly?'Yedek kaydı · ROM yok':canPlay?`${p.short} · Oynatılabilir dosya`:'Yerel dosya';return `<article class="game-card" data-game-id="${esc(g.id)}"><div class="game-cover" style="--cover-bg:${esc(bg)};--cover-glow:${esc(glow)}"><span class="cover-tag">${esc(p.short.toUpperCase())}</span><span class="cover-symbol">${esc(g.symbol||p.logo)}</span><button class="favorite-button${fav}" data-favorite="${esc(g.id)}" aria-label="${g.favorite?'Favorilerden çıkar':'Favorilere ekle'}" title="${g.favorite?'Favorilerden çıkar':'Favorilere ekle'}">${g.favorite?'♥':'♡'}</button></div><div class="game-info"><h3 class="game-title" title="${esc(g.title)}">${esc(g.title)}</h3><div class="game-meta"><span>${esc(g.year||'Yıl bilinmiyor')}</span><span class="platform-pill">${esc(p.short)}</span></div><div class="game-foot"><span>${fileLabel}</span><span class="status">${esc(size)}</span></div>${actions}</div></article>`;}
 function formatBytes(n){if(!Number.isFinite(n)||n<=0)return '—';const units=['B','KB','MB','GB'];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),units.length-1);return `${(n/Math.pow(1024,i)).toFixed(i?1:0)} ${units[i]}`;}
-function renderSystemTile(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key).length;return `<button class="system-tile" data-system-filter="${key}"><span class="system-logo">${esc(p.logo)}</span><span><strong>${esc(p.short)}</strong><small>${count?`${count} kütüphane kaydı`:'Platform hazır değil'}</small></span></button>`;}
-function renderSystemRow(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key&&!g.demo).length;return `<article class="system-row"><span class="system-logo">${esc(p.logo)}</span><div class="system-row-copy"><strong>${esc(p.short)} <span style="color:#8291aa;font-weight:500">· ${esc(p.label)}</span></strong><p>${key==='N64'?'Uyumluluk oyun ve cihaz bazında ayrıca test edilecek.':key==='CPS1'||key==='CPS2'||key==='NEOGEO'?'Arcade dosyaları için çekirdek ve doğru dosya seti gereklidir.':'İlk sürüm platform adayı; emülatör entegrasyonu henüz eklenmedi.'}</p></div><span class="system-row-count">${count} yerel oyun</span></article>`;}
+function renderSystemTile(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key).length;return `<button class="system-tile" data-system-filter="${key}"><span class="system-logo">${esc(p.logo)}</span><span><strong>${esc(p.short)}</strong><small>${isPlayablePlatform(key)?(count?`${count} kütüphane kaydı`:'Oynatmaya hazır'):'Yakında'}</small></span></button>`;}
+function renderSystemRow(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key&&!g.demo).length;return `<article class="system-row"><span class="system-logo">${esc(p.logo)}</span><div class="system-row-copy"><strong>${esc(p.short)} <span style="color:#8291aa;font-weight:500">· ${esc(p.label)}</span></strong><p>${SYSTEM_CORE_LABELS[key]?`Oynatıcı hazır · EmulatorJS / ${SYSTEM_CORE_LABELS[key]}. Oyun uyumluluğu oyun bazında doğrulanır.`:key==='N64'?'Henüz oynatılamaz. Uyumluluk oyun ve cihaz bazında ayrıca test edilecek.':key==='CPS1'||key==='CPS2'||key==='NEOGEO'?'Henüz oynatılamaz. Arcade için çekirdek ve doğru dosya seti gereklidir.':'Henüz oynatılamaz.'}</p></div><span class="system-row-count">${count} yerel oyun</span></article>`;}
 function filteredGames({favorites=false,recent=false}={}){let result=[...games];if(favorites)result=result.filter(g=>g.favorite);if(recent)result=result.filter(g=>!g.demo&&g.lastPlayed).sort((a,b)=>(b.lastPlayed||0)-(a.lastPlayed||0));const q=($('#search-input')?.value||'').trim().toLocaleLowerCase('tr-TR');if(q&&$('#view-library').classList.contains('active'))result=result.filter(g=>`${g.title} ${platformInfo(g.platform).short} ${g.fileName||''}`.toLocaleLowerCase('tr-TR').includes(q));if($('#view-library').classList.contains('active')&&selectedPlatform!=='ALL')result=result.filter(g=>g.platform===selectedPlatform);const sort=$('#sort-select')?.value||'recent';if(sort==='name')result.sort((a,b)=>a.title.localeCompare(b.title,'tr'));else if(sort==='platform')result.sort((a,b)=>platformInfo(a.platform).short.localeCompare(platformInfo(b.platform).short)||a.title.localeCompare(b.title,'tr'));else result.sort((a,b)=>(b.addedAt||0)-(a.addedAt||0));return result;}
 function fillGrid(el,items){if(!el)return;el.innerHTML=items.map(renderCard).join('');el.classList.toggle('list-layout',layoutMode==='list');}
 function renderLibraryResults(){
@@ -114,8 +122,8 @@ function renderAll(){
 }
 function renderFilters(){const list=[['ALL','Tümü'],...Object.keys(PLATFORM).map(k=>[k,platformInfo(k).short])];$('#platform-filters').innerHTML=list.map(([key,label])=>`<button class="filter-chip ${selectedPlatform===key?'selected':''}" data-filter="${key}">${esc(label)}</button>`).join('');}
 function setView(name){const target=$(`#view-${name}`);if(!target)return;$$('.view').forEach(v=>v.classList.toggle('active',v===target));$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===name));const labels={home:'Ana Sayfa',library:'Kütüphane',systems:'Sistemler',favorites:'Favoriler',recent:'Son oynananlar',settings:'Ayarlar',help:'Yardım'};$('#breadcrumb').innerHTML=`${esc(labels[name]||'RetroPlay')} <span>/</span> ${name==='library'?'Koleksiyonun':name==='systems'?'Platform rehberi':'Kişisel retro merkez'}`;if(name==='library')renderAll();window.scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}
-function openImport(){const m=$('#import-modal');m.classList.remove('hidden');$('#import-results').textContent='';$('#import-progress').classList.add('hidden');$('#modal-file-input').value='';$('#choose-files').focus();}
-function closeImport(){ $('#import-modal').classList.add('hidden'); }
+function openImport(){const m=$('#import-modal');if(m.classList.contains('hidden'))pushOverlayState('import');m.classList.remove('hidden');$('#import-results').textContent='';$('#import-progress').classList.add('hidden');$('#modal-file-input').value='';$('#choose-files').focus();}
+function closeImport({viaHistory=false}={}){const m=$('#import-modal');if(m.classList.contains('hidden'))return;m.classList.add('hidden');if(!viaHistory)leaveOverlayState('import');}
 async function handleFiles(fileList){
   const selected=[...fileList];if(!selected.length)return;
   $('#import-modal').classList.remove('hidden');$('#import-progress').classList.remove('hidden');$('#import-results').textContent='';
@@ -157,10 +165,23 @@ async function handleFiles(fileList){
         if(!romValidation.valid){skipped++;$('#import-results').textContent+=`Atlandı: ${file.name} — NES doğrulaması başarısız: ${romValidation.reason}\n`;continue;}
       }
       const hash=await sha256File(file);
-      if(hash&&games.some(g=>!g.demo&&g.contentHash===hash)){
+      const match=classifyImport(games,hash);
+      if(match.action==='duplicate'){
         skipped++;$('#import-results').textContent+=`Atlandı: ${file.name} — aynı içerik kütüphanede zaten var\n`;continue;
       }
-      const platform=guessPlatform(file);
+      const headerBytes=new Uint8Array(await file.slice(0,0x200).arrayBuffer());
+      const detectedPlatform=detectRomPlatform(file.name,headerBytes);
+      if(match.action==='relink'){
+        // A metadata-only record restored from a backup gets its ROM back; favourites,
+        // play history and the record ID (and therefore its saves) are kept.
+        const previous=match.game;
+        const platform=previous.platform&&previous.platform!=='UNKNOWN'?previous.platform:detectedPlatform;
+        const relinked={...previous,platform,fileName:file.name,size:file.size,sizeLabel:formatBytes(file.size),blob:file,romValidation,restoredMetadataOnly:false,status:platform==='UNKNOWN'?'platform-unknown':'imported'};
+        await saveGame(relinked);
+        const index=games.indexOf(previous);if(index>=0)games[index]=relinked;
+        success++;$('#import-results').textContent+=`Yedek kaydına bağlandı: ${file.name}\n`;continue;
+      }
+      const platform=detectedPlatform;
       const id=`rom-${crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(16).slice(2)}`;
       const title=file.name.replace(/\.[^.]+$/,'').replace(/[._-]+/g,' ').trim()||file.name;
       const game={id,title,platform,year:null,genre:'Bilinmiyor',symbol:platformInfo(platform).logo,coverBg:platformInfo(platform).color,coverGlow:platformInfo(platform).glow,fileName:file.name,size:file.size,sizeLabel:formatBytes(file.size),contentHash:hash,blob:file,romValidation,addedAt:Date.now(),favorite:false,demo:false,playable:false,status:platform==='UNKNOWN'?'platform-unknown':'imported'};
@@ -194,6 +215,7 @@ async function startGame(id) {
     return;
   }
   const session = ++emulatorSession;
+  endSaveSession('switch');
   if (activeEmulator) {
     try { activeEmulator.destroy(); } catch {}
     activeEmulator = null;
@@ -201,6 +223,7 @@ async function startGame(id) {
 
   activeGameId = game.id;
   emulatorPaused = false;
+  autoPaused = false;
   $('#player-title').textContent = game.title;
   renderTouchControls(game.platform);
   $('#touch-controls').style.display = '';
@@ -208,7 +231,9 @@ async function startGame(id) {
   updateGamepadStatus();
   $('#player-status').textContent = 'ROM yükleniyor…';
   $('#player-error').textContent = '';
+  const playerWasHidden = $('#player-modal').classList.contains('hidden');
   $('#player-modal').classList.remove('hidden');
+  if (playerWasHidden) pushOverlayState('player');
   $('#player-screen').style.display = '';
   $('#player-screen').replaceChildren();
   $('#pause-game').textContent = 'Ⅱ Duraklat';
@@ -261,16 +286,9 @@ async function startGame(id) {
         coreId: useFceummComparison ? 'fceumm' : system.emulatorJsCoreId,
         systemLabel: useFceummComparison ? `${system.shortLabel} / FCEUmm karşılaştırma modu` : system.shortLabel,
         gameId: emulatorGameId(game),
-        onSaveUpdate: update => {
-          saveBatteryBackup(game, update).then(saved => {
-            if (!saved) return;
-            batterySaveIds.add(game.id);
-            if (session === emulatorSession && activeGameId === game.id) renderAll();
-          }).catch(error => {
-            if (session !== emulatorSession || activeGameId !== game.id) return;
-            $('#player-error').textContent = `Oyun içi batarya kaydı yerel yedeğe yazılamadı: ${error?.message || error}`;
-          });
-        }
+        // Non-fatal runtime messages (for example a denied screen wake lock) are logged only;
+        // they must not mark a running game as stopped.
+        onWarning: message => console.warn('[RetroPlay] EmulatorJS uyarısı:', message)
       });
       activeEmulator = player;
       activeEmulator.romInfo = validation;
@@ -280,6 +298,13 @@ async function startGame(id) {
         player.destroy();
         return;
       }
+      const saveSync = await syncSaveOnStart(game, player);
+      if (session !== emulatorSession || activeGameId !== game.id) {
+        player.destroy();
+        return;
+      }
+      if (saveSync.ok) beginSaveSession(game, player, saveSync.primed);
+      else $('#player-error').textContent = `${saveSync.reason}. Mevcut kaydın korunması için bu oturumda oyun içi kayıt yedeği alınmıyor.`;
     } else if (engine === 'jsnes') {
       // Legacy engine retained only for explicit A/B comparison.
       const { Browser: NesBrowser, Controller: NesController } = await import('jsnes');
@@ -319,6 +344,7 @@ async function startGame(id) {
     await refreshGames();
   } catch (error) {
     if (session !== emulatorSession || activeGameId !== game.id) return;
+    void endSaveSession('error');
     if (activeEmulator) {
       try { activeEmulator.destroy(); } catch {}
       activeEmulator = null;
@@ -399,7 +425,77 @@ function setupFullscreen() {
   updateFullscreenButton();
 }
 
-function closePlayer() {
+/**
+ * Loads the app-owned battery save into the core when it differs from what EmulatorJS loaded,
+ * or adopts the emulator's own copy when the app has none yet. Returns { ok, primed }: primed is
+ * what the core holds afterwards (so unchanged SRAM is not rewritten). ok=false means an existing
+ * app save could not be loaded; capturing is then disabled for the session so that copy is
+ * never overwritten by SRAM that started blank.
+ */
+async function syncSaveOnStart(game, player) {
+  let record = null;
+  let readFailed = false;
+  try { record = await getBatterySave(game.id); } catch (error) { readFailed = true; console.warn('[RetroPlay] Kayıt okunamadı:', error); }
+  if (readFailed) return { ok: false, primed: null, reason: 'Kayıt veritabanı okunamadı' };
+  const appBytes = record?.bytes ? (record.bytes instanceof Uint8Array ? record.bytes : new Uint8Array(record.bytes)) : null;
+  const coreBytes = player.readSaveData({ flush: false });
+  const decision = decideSaveRestore({ appBytes, coreBytes });
+  if (decision === 'restore-app') {
+    let restored = false;
+    try { restored = player.writeSaveData(appBytes) && player.restartGame(); } catch (error) { console.warn('[RetroPlay] Kayıt geri yüklenemedi:', error); }
+    return restored ? { ok: true, primed: appBytes } : { ok: false, primed: null, reason: 'Kayıt emülatöre yüklenemedi' };
+  }
+  if (decision === 'adopt-core') {
+    try {
+      const saved = await saveBatteryBackup(game, { bytes: coreBytes, updatedAt: Date.now() });
+      if (saved) batterySaveIds.add(game.id);
+    } catch (error) { console.warn('[RetroPlay] Emülatör kaydı uygulamaya alınamadı:', error); }
+    return { ok: true, primed: coreBytes };
+  }
+  if (decision === 'in-sync') return { ok: true, primed: appBytes };
+  // No save anywhere yet: remember the initial SRAM so only real in-game saves are stored.
+  return { ok: true, primed: player.readSaveData({ flush: true }) };
+}
+function beginSaveSession(game, player, primedBytes) {
+  saveCapture = createSaveCapture({
+    read: () => (activeEmulator === player && typeof player.readSaveData === 'function' ? player.readSaveData({ flush: true }) : null),
+    persist: bytes => saveBatteryBackup(game, { bytes, updatedAt: Date.now() }).then(saved => {
+      if (saved) batterySaveIds.add(game.id);
+      return saved;
+    })
+  });
+  saveCapture.prime(primedBytes);
+  if (saveTimer) window.clearInterval(saveTimer);
+  saveTimer = window.setInterval(() => {
+    if (!emulatorPaused && document.visibilityState === 'visible') void captureActiveSave('interval');
+  }, SAVE_CAPTURE_INTERVAL_MS);
+}
+/** Copies the live SRAM out of the core synchronously, then persists it asynchronously. */
+function captureActiveSave(reason) {
+  if (!saveCapture) return Promise.resolve(null);
+  return saveCapture.capture(reason).then(result => {
+    if (result?.status === 'failed' && !$('#player-modal').classList.contains('hidden')) {
+      $('#player-error').textContent = `Oyun içi kayıt yerel yedeğe yazılamadı: ${result.error?.message || result.error}`;
+    }
+    return result;
+  });
+}
+function endSaveSession(reason) {
+  const pending = captureActiveSave(reason);
+  if (saveTimer) { window.clearInterval(saveTimer); saveTimer = 0; }
+  saveCapture = null;
+  return pending;
+}
+function pushOverlayState(kind) {
+  try { history.pushState({ retroplayOverlay: kind }, ''); } catch {}
+}
+function leaveOverlayState(kind) {
+  try { if (history.state?.retroplayOverlay === kind) history.back(); } catch {}
+}
+function closePlayer({ viaHistory = false } = {}) {
+  const wasOpen = !$('#player-modal').classList.contains('hidden');
+  // Read SRAM before the iframe is removed; the write to IndexedDB continues afterwards.
+  const pendingSave = endSaveSession('close');
   emulatorSession += 1;
   if (activeEmulator) {
     try { activeEmulator.destroy(); } catch {}
@@ -411,6 +507,13 @@ function closePlayer() {
   if (fullscreenFallback) setFullscreenFallback(false);
   $('#player-modal').classList.add('hidden');
   $('#player-screen').replaceChildren();
+  autoPaused = false;
+  if (wasOpen && !viaHistory) leaveOverlayState('player');
+  pendingSave.then(result => { if (result?.status === 'saved') renderAll(); });
+}
+function showPausedState(paused) {
+  $('#pause-game').textContent = paused ? '▶ Devam et' : 'Ⅱ Duraklat';
+  $('#player-status').textContent = playerStatus(paused ? 'Duraklatıldı' : 'Çalışıyor');
 }
 async function togglePause() {
   if (!activeEmulator) return;
@@ -418,16 +521,38 @@ async function togglePause() {
     if (emulatorPaused) {
       await activeEmulator.resume();
       emulatorPaused = false;
-      $('#pause-game').textContent = 'Ⅱ Duraklat';
-      $('#player-status').textContent = playerStatus('Çalışıyor');
+      autoPaused = false;
+      showPausedState(false);
     } else {
       await activeEmulator.pause();
       emulatorPaused = true;
-      $('#pause-game').textContent = '▶ Devam et';
-      $('#player-status').textContent = playerStatus('Duraklatıldı');
+      showPausedState(true);
+      void captureActiveSave('pause');
     }
   } catch (error) {
     $('#player-error').textContent = `Duraklatma/devam hatası: ${error?.message || error}`;
+  }
+}
+/** Backgrounding (app switch, screen off) saves and pauses; returning resumes an auto-pause. */
+async function handlePlayerVisibility() {
+  if (!activeEmulator || $('#player-modal').classList.contains('hidden')) return;
+  try {
+    if (document.visibilityState === 'hidden') {
+      void captureActiveSave('hidden');
+      if (!emulatorPaused) {
+        await activeEmulator.pause();
+        emulatorPaused = true;
+        autoPaused = true;
+        showPausedState(true);
+      }
+    } else if (autoPaused) {
+      autoPaused = false;
+      await activeEmulator.resume();
+      emulatorPaused = false;
+      showPausedState(false);
+    }
+  } catch (error) {
+    console.warn('[RetroPlay] Arka plan duraklatma hatası:', error);
   }
 }
 function renderTouchControls(platform) {
@@ -487,7 +612,7 @@ async function exportBatterySave(id){const game=games.find(g=>g.id===id&&!g.demo
 function safeFilename(name){return String(name||'retroplay').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,140)||'retroplay';}
 async function exportROM(id){const game=games.find(g=>g.id===id&&!g.demo);if(!game)return;if(!(game.blob instanceof Blob)){showToast('Bu oyun için yerel ROM içeriği bulunamadı. Dosyayı yeniden içe aktar.','error');return;}try{downloadBlob(game.blob,safeFilename(game.fileName||`${game.title}.rom`));showToast('ROM dışa aktarma başlatıldı.');}catch(e){showToast(`ROM dışa aktarılamadı: ${storageErrorMessage(e)}`,'error');}}
 function backupMetadata(game){const {blob,...metadata}=game;return metadata;}
-function exportLibraryBackup(){try{const payload={app:'RetroPlay',backupType:'library-metadata',schemaVersion:1,appVersion:'0.3.0',createdAt:new Date().toISOString(),gameCount:games.filter(g=>!g.demo).length,games:games.filter(g=>!g.demo).map(backupMetadata)};const json=JSON.stringify(payload,null,2);downloadBlob(new Blob([json],{type:'application/json'}),`RetroPlay-Library-${new Date().toISOString().slice(0,10)}-v0.3.0.json`);showToast('Kütüphane yedeği hazırlandı. ROM içerikleri bu dosyaya dahil değildir.');}catch(e){showToast(`Yedek oluşturulamadı: ${e.message}`,'error');}}
+function exportLibraryBackup(){try{const payload={app:'RetroPlay',backupType:'library-metadata',schemaVersion:1,appVersion:APP_VERSION,createdAt:new Date().toISOString(),gameCount:games.filter(g=>!g.demo).length,games:games.filter(g=>!g.demo).map(backupMetadata)};const json=JSON.stringify(payload,null,2);downloadBlob(new Blob([json],{type:'application/json'}),`RetroPlay-Library-${new Date().toISOString().slice(0,10)}-v${APP_VERSION}.json`);showToast('Kütüphane yedeği hazırlandı. ROM içerikleri bu dosyaya dahil değildir.');}catch(e){showToast(`Yedek oluşturulamadı: ${e.message}`,'error');}}
 
 async function restoreLibraryBackup(file){if(!file)return;try{if(file.size>20*1024*1024)throw new Error('Yedek 20 MB sınırını aşıyor.');const data=JSON.parse(await file.text());if(!validBackup(data))throw new Error('Yedek biçimi veya şema sürümü geçersiz. Mevcut kayıtlar değiştirilmedi.');const existing=new Set((await allStored()).map(g=>g.id));const candidates=data.games.filter(g=>!existing.has(g.id));const duplicateCount=data.games.length-candidates.length;const totalSize=candidates.reduce((n,g)=>n+(g.size||0),0);const preview=`Yedek önizlemesi\n\nYedek tarihi: ${data.createdAt||'Bilinmiyor'}\nYedekteki kayıt: ${data.games.length}\nYeni eklenebilecek kayıt: ${candidates.length}\nKimlik çakışması nedeniyle atlanacak: ${duplicateCount}\nİlişkili ROM boyutlarının toplamı: ${formatBytes(totalSize)}\n\nÖNEMLİ: Bu JSON yedeğinde ROM dosyalarının kendisi yoktur. Geri yüklenen kayıtlar, ROM dosyası tekrar eklenene kadar yalnızca metadata kaydıdır. Mevcut kayıtların üzerine yazılmayacak.\n\nBirleştirmeyi onaylıyor musun?`;
 if(!confirm(preview))return;let added=0,failed=0;for(const raw of candidates){const g={...raw,blob:undefined,restoredMetadataOnly:true,addedAt:Number(raw.addedAt)||Date.now()};try{await saveGame(g);added++;}catch(e){failed++;}}await refreshGames();showToast(`Geri yükleme tamamlandı: ${added} eklendi, ${duplicateCount} çakışma atlandı, ${failed} hata.`,failed?'error':'success');if(failed)alert('Bazı kayıtlar geri yüklenemedi. Sağlıklı kayıtlar korundu. İşlem sonucu: '+added+' eklendi, '+failed+' hata.');}catch(e){showToast(`Yedek geri yüklenemedi: ${e.message}`,'error');}}
@@ -627,8 +752,8 @@ function setupDrive(){
   }
 }
 
-function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',closeImport);$('#player-close').addEventListener('click',closePlayer);$('#player-modal').addEventListener('click',e=>{if(e.target===$('#player-modal'))closePlayer();});$('#pause-game').addEventListener('click',togglePause);$('#player-exit').addEventListener('click',closePlayer);wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
-window.addEventListener('pagehide',()=>{if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}});
+function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',()=>closeImport());$('#player-close').addEventListener('click',()=>closePlayer());$('#pause-game').addEventListener('click',togglePause);$('#player-exit').addEventListener('click',()=>closePlayer());wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});window.addEventListener('popstate',()=>{if(!$('#player-modal').classList.contains('hidden')){closePlayer({viaHistory:true});return;}if(!$('#import-modal').classList.contains('hidden'))closeImport({viaHistory:true});});document.addEventListener('visibilitychange',()=>{void handlePlayerVisibility();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
+window.addEventListener('pagehide',()=>{void endSaveSession('pagehide');if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}});
 function updateNetwork(){
   const online=navigator.onLine;
   $('#network-label').textContent=online?'Bağlantı mevcut':'Çevrimdışı';
@@ -649,5 +774,5 @@ async function registerSW(){
     console.warn('Service worker registration failed:',e);
   }
 }
-async function init(){setupEvents();updateNetwork();try{db=await openDB();await refreshGames();$('#storage-status').textContent='Bu cihazda saklanır';}catch(e){$('#storage-status').textContent='Depolama kullanılamıyor';showToast(`Yerel kütüphane başlatılamadı: ${e.message}`,'error');games=DEMO_GAMES.map(g=>({...g}));renderAll();}registerSW();if('storage'in navigator&&navigator.storage.persist){navigator.storage.persist().then(granted=>{if(!granted)$('#storage-status').textContent='Tarayıcı depolaması';}).catch(()=>{});}}
+async function init(){try{if(history.state?.retroplayOverlay)history.replaceState(null,'');}catch{}setupEvents();updateNetwork();try{db=await openDB();await refreshGames();$('#storage-status').textContent='Bu cihazda saklanır';}catch(e){$('#storage-status').textContent='Depolama kullanılamıyor';showToast(`Yerel kütüphane başlatılamadı: ${e.message}`,'error');games=DEMO_GAMES.map(g=>({...g}));renderAll();}registerSW();if('storage'in navigator&&navigator.storage.persist){navigator.storage.persist().then(granted=>{if(!granted)$('#storage-status').textContent='Tarayıcı depolaması';}).catch(()=>{});}}
 init();
