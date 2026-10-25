@@ -247,3 +247,18 @@ Actual emulation is connected for NES `.nes` files only. Other platforms remain 
 - Updated ROM decision, core-selection, fullscreen and player-wiring regression tests. On code commit `99e1efc`, GitHub Actions reported success for JavaScript syntax, unit tests, production build and output-artifact checks. The overall workflow had not closed at the time this report was written; see the [Actions run](https://github.com/emircangencer-ctrl/retroteo1/actions/runs/39916950809) for its final state.
 - Netlify commit status for `99e1efc` reported **Deploy Preview ready**: https://deploy-preview-2--retroteo1.netlify.app.
 - **Still open:** no verified clean SMB3 ROM has been run and visually compared on the user's Android device in this session. Automated tests and successful deployment do not prove the reported black/corrupt gameplay frame is fixed. Keep PR #2 draft and do not merge to `main` before real-device acceptance.
+
+
+## Stage 28 — Faz 0: save ownership, safe close, backup relink, Mega Drive fixes (2026-10-26)
+
+Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback that Stage 27 removed. They are kept as history; the current behavior is documented in README.md.
+
+- **Battery saves were being lost.** Measured with a self-authored battery-backed MMC1 test cartridge: closing the player with the app's own button left both EmulatorJS's store and the app's `batterySaves` store empty; in uninterrupted play EmulatorJS 4.2.3 first wrote SRAM at ~300 s. `EJS_onSaveUpdate`/`EJS_fixedSaveInterval` are not implemented in 4.2.3 (only on EmulatorJS's unreleased `main`), so the app's previous SRAM mirror never received data.
+- **Fix:** `EmulatorJsPlayer.readSaveData/writeSaveData/restartGame` plus `src/save-sync.js`. The app copies SRAM on pause, close (button/Esc/back), page hide/unload and every 30 s, skipping unchanged data, and restores its copy into the core on launch (soft reset). An emulator-only save is adopted, never discarded.
+- **False "Oturum durduruldu":** post-start runtime rejections (observed: denied screen wake lock) are now warnings; the iframe may request `screen-wake-lock`.
+- **Close safety:** tapping the backdrop no longer closes a game; the player and import dialog use History API entries, so Android/browser back closes them instead of leaving the app; every close path saves first. A running game auto-pauses (and saves) when the page is hidden and resumes when it returns.
+- **Backup relink:** re-importing a ROM that matches a restored metadata-only record attaches it to that record (`src/import-match.js`) instead of rejecting it as a duplicate.
+- **Mega Drive:** touch A/C were swapped relative to EmulatorJS's own `segaMD` layout (A=1, C=8); fixed and tested against the layout. `.bin` files with a `SEGA` header are imported as Mega Drive (`src/rom-detect.js`).
+- **Text corrections:** settings (default NES core is Nestopia), systems page and home tiles for playable systems, README and remediation doc; backup files carry the real app version (0.7.0).
+- **Tests:** unit tests 122/122 locally. New browser E2E suite (`e2e/`, 7 scenarios) runs the production build with EmulatorJS 4.2.3 served from npm; 7/7 pass on this change and 0/7 on the previous commit (control run), i.e. the suite detects every fixed defect. Added as a CI job.
+- **Not verified here:** real Android device behavior (save on app switch, back button in an installed PWA, wake lock). PR #2 stays draft; `main` unchanged.

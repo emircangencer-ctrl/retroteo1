@@ -4,13 +4,13 @@ RetroPlay is a static PWA intended for Netlify. ROM files are imported into the 
 
 | System | Accepted gameplay extensions | EmulatorJS system ID | Default core |
 |---|---|---|---|
-| NES | `.nes` | `nes` | Nestopia (FCEUmm fallback for structurally valid nonstandard SMB3 payloads) |
+| NES | `.nes` | `nes` | Nestopia (FCEUmm only via explicit `?nescore=fceumm` comparison) |
 | SNES | `.sfc`, `.smc` | `snes` | Snes9x |
-| Sega Mega Drive / Genesis | `.md`, `.gen` | `segaMD` | Genesis Plus GX |
+| Sega Mega Drive / Genesis | `.md`, `.gen`, `.bin` (only with a SEGA header) | `segaMD` | Genesis Plus GX |
 
 The system registry is in `src/emulator-systems.js`. It defines platform identity, supported extensions, EmulatorJS system IDs and per-system touch-button layouts. The player runtime is shared; per-platform configuration selects the system ID and controller layout. SNES and Mega Drive integration is a newly wired path and still needs real-ROM validation across representative games and devices before it should be considered release-ready. EmulatorJS is pinned to version `4.2.3` instead of the moving `stable` alias, so a CDN update cannot silently change gameplay behavior; upgrade it deliberately after regression tests.
 
-N64, CPS1, CPS2 and Neo Geo can appear in the library, but their gameplay emulators are not wired in this branch. Extension support in the import dialog alone does not imply that a file can be played. Generic `.bin` files are intentionally not auto-assigned to a system because that extension is ambiguous.
+N64, CPS1, CPS2 and Neo Geo can appear in the library, but their gameplay emulators are not wired in this branch. Extension support in the import dialog alone does not imply that a file can be played. A `.bin` file is assigned to Mega Drive only when its header carries the `SEGA` system name at offset `0x100` (`src/rom-detect.js`); other `.bin` files stay unassigned because the extension is ambiguous.
 
 ## Local development
 
@@ -44,7 +44,7 @@ Netlify runs `npm install`, `npm run check`, `npm test`, and `npm run build` in 
 
 On NES, append `?nescore=jsnes` to compare the legacy JSNES player or `?nescore=nesjs` to compare `@nesjs/core`; remove the parameter to use the default EmulatorJS system. Those diagnostic routes apply to NES only.
 
-For Super Mario Bros. 3, RetroPlay checks the PRG+CHR payload against known clean retail fingerprints rather than trusting the filename alone. Known profiles use Nestopia by default. If the iNES header, Mapper 4 and expected 256 KiB PRG + 128 KiB CHR layout are structurally consistent but the payload signature is not recognized (for example, a ROM hack), RetroPlay automatically tries EmulatorJS FCEUmm as an alternate compatibility core and displays a warning. An invalid header, wrong mapper/layout, or unverifiable NES 2.0 SMB3 file is blocked before the core starts. No emulator can repair corrupted or intentionally changed game data.
+For files whose name identifies Super Mario Bros. 3, RetroPlay checks the PRG+CHR payload against known clean retail fingerprints and starts only a recognized clean profile (Nestopia). Unknown fingerprints, an unverifiable NES 2.0 image or an invalid header are blocked before the core starts; there is no automatic FCEUmm fallback. This check is filename-scoped and will be replaced by a general hash-based game identity layer. No emulator can repair corrupted or intentionally changed game data.
 
 ROMs remain in local browser storage. Use only ROM files you own or are authorized to use. A recognized header or accepted extension is not proof that a game dump is complete or compatible.
 
@@ -58,13 +58,17 @@ The runtime and service-worker cache now both target EmulatorJS `4.2.3`; the ser
 
 ## Save-data status
 
-The app's library metadata, favorites and ROM blobs are stored in IndexedDB; an app-level JSON backup can restore library metadata, but it does not include ROM bytes. The app now also mirrors EmulatorJS's documented `EJS_onSaveUpdate` SRAM/battery-save events into a separate `batterySaves` object store. Save records are associated with the local game record and a stable numeric `EJS_gameID`; a 15-second save flush interval is configured so EmulatorJS can detect and emit changed save data.
+The app's library metadata, favorites and ROM blobs are stored in IndexedDB; an app-level JSON backup can restore library metadata, but it does not include ROM bytes. Re-importing a ROM whose content hash matches a restored metadata-only record relinks the ROM to that record (favourites, play history and saves are kept).
 
-This is a **local secondary backup feature**, not yet a complete save-management system. When EmulatorJS reports changed battery-backed save data, RetroPlay mirrors it in IndexedDB and exposes an **SRAM yedeği indir** action on that game's card to export a `.srm` file. Removing a game from the library also removes its local mirrored SRAM backup. Importing a `.srm` into RetroPlay, restoring the mirrored copy into a running core, cross-device sync and a first-class save-state UI are not implemented. The core's own save behavior remains separate. The callback and save bytes are tested at unit level, but the browser's real core/save pipeline still needs validation with games that actually use battery-backed SRAM.
+**Battery saves (SRAM) are owned by the app.** EmulatorJS 4.2.3 writes SRAM to its own IndexedDB only every 5 minutes and on page unload, and it does not implement `EJS_onSaveUpdate`/`EJS_fixedSaveInterval` (those exist only on EmulatorJS's unreleased `main` branch). RetroPlay therefore copies the live SRAM out of the core (`EmulatorJsPlayer.readSaveData`) when the player is paused, closed (button, Esc or back), when the page is hidden or unloaded, and every 30 seconds while playing; unchanged data is not rewritten (`src/save-sync.js`). The copy lives in the `batterySaves` store, keyed by the library record. When a game starts, an app copy that differs from what EmulatorJS loaded is written into the core and the game is soft-reset; if only EmulatorJS has a save (for example from before this change), it is adopted rather than discarded. Each game card then offers **SRAM yedeği indir**. Removing a game also removes its save record.
+
+Not implemented yet: save states / resume points, importing a `.srm` file, cross-device sync. Browser E2E tests (`e2e/`) verify capture on close and restore on relaunch with a battery-backed test cartridge; real-device validation on Android is still required.
 
 ## Automated verification and release guardrails
 
-GitHub Actions runs dependency installation, JavaScript syntax checks, unit tests and the Vite production build. Tests cover ROM/ZIP validation, the legacy mapper patch guard, the EmulatorJS bootstrap and startup handshake, input routing, and the system registry. They do not launch real games or compare rendered frames.
+GitHub Actions runs dependency installation, JavaScript syntax checks, unit tests and the Vite production build, then a browser E2E job (`e2e/`) that runs the production build in Chromium with the real EmulatorJS 4.2.3 runtime served locally from its npm packages. The E2E suite uses self-authored test cartridges only and covers save capture/restore, non-fatal runtime warnings, back-button and backdrop behavior, backup relinking and Mega Drive `.bin` detection. It does not compare commercial game frames; real-device acceptance remains manual.
+
+Run it locally: `npm run build`, then `cd e2e && npm install && npx playwright install chromium && npm test`.
 
 Before the multi-system branch is marked release-ready, test at least one known-good local ROM per system on desktop and Android Chrome, verify audio and pause/resume, and test close/reopen. The prior NES reports of graphics and speed issues should remain part of this regression pass. Do not claim visual accuracy based on a successful build alone.
 

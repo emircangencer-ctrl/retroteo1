@@ -1,6 +1,8 @@
 # NES emulator compatibility remediation
 
-Status: **migration spike under validation**. The branch now defaults to EmulatorJS/FCEUmm, but that does not prove the reported graphics or timing issues are fixed.
+Status: **migration spike under validation**. The branch defaults to EmulatorJS with the Nestopia core (FCEUmm only via explicit `?nescore=fceumm`), but that does not prove the reported graphics or timing issues are fixed.
+
+**2026-10-25 evidence:** blargg's public `mmc3_test_2` ROMs, run through the app's own import and EmulatorJS 4.2.3 pipeline in desktop Chromium, pass 6/6 with Nestopia (FCEUmm fails `4-scanline_timing` #2). The reported SMB3 payload CRC `7388BEBD` is absent from the libretro No-Intro NES database. A separate, game-independent issue was measured: the emulator canvas is rendered at CSS-pixel resolution and then scaled by the device pixel ratio with nearest-neighbour filtering, which produces uneven pixel widths on high-DPI phones. These findings point away from a core MMC3 defect; the user's latest screenshot is still needed to classify the reported symptom.
 
 ## Observed symptoms
 
