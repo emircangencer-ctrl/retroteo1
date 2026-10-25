@@ -272,3 +272,11 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - IndexedDB version 2 → 3 adds a `saveStates` store only; existing stores and records are untouched. Removing a game removes its states.
 - Tests: unit 123/123. E2E 10/10, including quick save/load (the saved moment is restored after a reset) and close/reopen resume (the machine state at close is restored; "Baştan başla" resets).
 - Not verified here: real Android device behavior, state size/performance on SNES and Mega Drive games.
+
+
+## Stage 30 — unverified SMB3 dump: explicit consent instead of a hard block (2026-10-26)
+
+- User report (Android, deploy preview): the user's own `Super Mario Bros. 3 (U) (PRG 1) [h2]` file (CRC32 `7388BEBD`) was refused with a long technical error, so the game could not be played or its graphics evaluated on the current Nestopia pipeline.
+- Policy change: an unrecognized SMB3 payload is still never started silently, but instead of blocking, the player shows a plain explanation (not a clean copy, likely a hack, graphics may differ) with **Yine de oyna / Vazgeç**, before any emulator is created. The choice is stored on the game record (`unverifiedDumpAccepted`) and a short reminder appears after start. Declining keeps the game closed with a one-line reason.
+- Disabled player buttons are now visibly disabled; the empty screen frame is hidden while the question is shown.
+- Tests: unit 123/123 (wiring tests updated to the new policy, ordering before player construction still asserted). E2E 12/12, including consent → start → remembered on relaunch, and decline → no emulator.

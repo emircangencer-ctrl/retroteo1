@@ -243,6 +243,7 @@ async function startGame(id) {
   const playerWasHidden = $('#player-modal').classList.contains('hidden');
   $('#player-modal').classList.remove('hidden');
   if (playerWasHidden) pushOverlayState('player');
+  $('.player-screen-frame').style.display = '';
   $('#player-screen').style.display = '';
   $('#player-screen').replaceChildren();
   $('#pause-game').textContent = 'Ⅱ Duraklat';
@@ -269,16 +270,27 @@ async function startGame(id) {
     const smb3Diagnostic = game.platform === 'NES'
       ? diagnoseSuperMarioBros3Rom(bytes, `${game.fileName || ''} ${game.title}`, validation)
       : null;
+    let unverifiedDump = false;
     if (!isSuperMarioBros3LaunchAllowed(smb3Diagnostic)) {
-      // Fail closed when header, mapper, format or payload length is not plausible.
-      $('#player-screen').style.display = 'none';
-      $('#touch-controls').style.display = 'none';
-      $('#gamepad-status').style.display = 'none';
-      $('#player-status').textContent = 'ROM doğrulanamadı · başlatma engellendi';
-      $('#player-error').textContent = `Super Mario Bros. 3 başlatılmadı. ${smb3Diagnostic.message}`;
-      $('#pause-game').disabled = true;
-      showToast('ROM yapısı güvenilir biçimde doğrulanamadı; başlatma engellendi.', 'error');
-      return;
+      // Not a recognised clean retail dump (often a ROM hack). It is never started silently:
+      // the player decides once per game, after being told why graphics may differ.
+      const accepted = game.unverifiedDumpAccepted === true || await askUnverifiedDumpConsent(smb3Diagnostic);
+      if (session !== emulatorSession || activeGameId !== game.id) return;
+      if (!accepted) {
+        $('.player-screen-frame').style.display = 'none';
+        $('#player-screen').style.display = 'none';
+        $('#touch-controls').style.display = 'none';
+        $('#gamepad-status').style.display = 'none';
+        $('#player-status').textContent = 'Başlatılmadı · doğrulanmamış döküm';
+        $('#player-error').textContent = 'Oyun başlatılmadı. Temiz bir Super Mario Bros. 3 kopyası eklersen doğrudan açılır.';
+        $('#pause-game').disabled = true;
+        return;
+      }
+      if (game.unverifiedDumpAccepted !== true) {
+        game.unverifiedDumpAccepted = true;
+        try { await saveGame(game); } catch (error) { console.warn('[RetroPlay] Seçim kaydedilemedi:', error); }
+      }
+      unverifiedDump = true;
     }
     const useFceummComparison = game.platform === 'NES'
       && new URLSearchParams(window.location.search).get('nescore') === 'fceumm';
@@ -318,7 +330,8 @@ async function startGame(id) {
       if (saveSync.ok) beginSaveSession(game, player, saveSync.primed);
       else $('#player-error').textContent = `${saveSync.reason}. Mevcut kaydın korunması için bu oturumda oyun içi kayıt yedeği alınmıyor.`;
       activeCoreId = useFceummComparison ? 'fceumm' : system.emulatorJsCoreId;
-      await resumeFromAutoState(game, player);
+      const resumed = await resumeFromAutoState(game, player);
+      if (unverifiedDump && !resumed) showPlayerNotice('Doğrulanmamış döküm · grafikler orijinalden farklı olabilir', { timeout: 4000 });
       if (session !== emulatorSession || activeGameId !== game.id) {
         player.destroy();
         return;
@@ -504,6 +517,37 @@ function endSaveSession(reason) {
   saveCapture = null;
   return pending;
 }
+let pendingConsent = null;
+/** Shows the unverified-dump explanation in the player and resolves with the player's choice. */
+function askUnverifiedDumpConsent(diagnostic) {
+  const panel = $('#player-consent');
+  if (!panel) return Promise.resolve(false);
+  pendingConsent?.(false);
+  $('.player-screen-frame').style.display = 'none';
+  $('#player-screen').style.display = 'none';
+  $('#touch-controls').style.display = 'none';
+  $('#gamepad-status').style.display = 'none';
+  $('#player-status').textContent = 'Onayın bekleniyor';
+  const crc = Number.isInteger(diagnostic?.payloadCrc32) ? diagnostic.payloadCrc32.toString(16).toUpperCase().padStart(8, '0') : '';
+  $('#player-consent-detail').textContent = crc ? `PRG+CHR CRC32 ${crc}${Number.isInteger(diagnostic?.mapper) ? ` · Mapper ${diagnostic.mapper}` : ''}` : String(diagnostic?.message || '');
+  panel.hidden = false;
+  return new Promise(resolve => {
+    const finish = value => {
+      if (pendingConsent !== finish) return;
+      pendingConsent = null;
+      panel.hidden = true;
+      $('.player-screen-frame').style.display = '';
+      $('#player-screen').style.display = '';
+      $('#touch-controls').style.display = '';
+      $('#gamepad-status').style.display = '';
+      resolve(value);
+    };
+    pendingConsent = finish;
+    $('#consent-play').onclick = () => finish(true);
+    $('#consent-cancel').onclick = () => finish(false);
+    $('#consent-play').focus();
+  });
+}
 function setStateButtons({ canSave, canLoad }) {
   for (const id of ['#quick-save', '#immersive-save']) { const el = $(id); if (el) el.disabled = !canSave; }
   for (const id of ['#quick-load', '#immersive-load']) { const el = $(id); if (el) el.disabled = !canLoad; }
@@ -586,6 +630,7 @@ function leaveOverlayState(kind) {
 }
 function closePlayer({ viaHistory = false } = {}) {
   const wasOpen = !$('#player-modal').classList.contains('hidden');
+  pendingConsent?.(false);
   // Read the resume point and SRAM before the iframe is removed; the IndexedDB writes continue afterwards.
   const pendingState = captureState('auto');
   const pendingSave = endSaveSession('close');

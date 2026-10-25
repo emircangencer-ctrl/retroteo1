@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom } from './fixtures/make-roms.mjs';
 
 if (!fs.existsSync(path.join(DIST, 'index.html'))) {
   console.error('dist/ is missing — run `npm run build` in the repository root first.');
@@ -17,6 +17,8 @@ const batteryRom = path.join(tmp, 'battery-test.nes');
 const mdBin = path.join(tmp, 'genesis-stub.bin');
 fs.writeFileSync(batteryRom, batteryTestRom());
 fs.writeFileSync(mdBin, megaDriveBinStub());
+const unverifiedRom = path.join(tmp, 'Super Mario Bros. 3 (U) (PRG 1) [h2].nes');
+fs.writeFileSync(unverifiedRom, unverifiedMmc3Rom());
 
 const { server, base } = await startServer();
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
@@ -150,6 +152,34 @@ await scenario('tapping outside the game no longer closes it', async page => {
   await page.mouse.click(5, 5);
   await page.waitForTimeout(300);
   assert.equal(await page.evaluate(() => document.querySelector('#player-modal').classList.contains('hidden')), false);
+});
+
+await scenario('an unverified SMB3 dump asks once; "Yine de oyna" starts it and is remembered', async page => {
+  await importFile(page, unverifiedRom);
+  await page.evaluate(() => document.querySelector('[data-view="library"]').click());
+  const id = await page.evaluate(() => document.querySelector('#library-games [data-play]').dataset.play);
+  await page.evaluate(gameId => document.querySelector(`#library-games [data-play="${gameId}"]`).click(), id);
+  await page.waitForFunction(() => !document.querySelector('#player-consent').hidden, null, { timeout: 10000 });
+  assert.match(await page.evaluate(() => document.querySelector('#player-consent-detail').textContent), /CRC32 [0-9A-F]{8} · Mapper 4/);
+  assert.equal(await page.evaluate(() => document.querySelector('#player-screen iframe')), null, 'no emulator before consent');
+  await page.evaluate(() => document.querySelector('#consent-play').click());
+  await page.waitForFunction(() => /Çalışıyor/.test(document.querySelector('#player-status').textContent), null, { timeout: 90000 });
+  await page.evaluate(() => document.querySelector('#player-close').click());
+  await page.waitForTimeout(800);
+  await page.evaluate(gameId => document.querySelector(`#library-games [data-play="${gameId}"]`).click(), id);
+  await page.waitForFunction(() => /Çalışıyor/.test(document.querySelector('#player-status').textContent), null, { timeout: 90000 });
+  assert.equal(await page.evaluate(() => document.querySelector('#player-consent').hidden), true, 'the choice is remembered');
+});
+
+await scenario('declining an unverified dump keeps it closed and shows why', async page => {
+  await importFile(page, unverifiedRom);
+  await page.evaluate(() => document.querySelector('[data-view="library"]').click());
+  await page.evaluate(() => document.querySelector('#library-games [data-play]').click());
+  await page.waitForFunction(() => !document.querySelector('#player-consent').hidden, null, { timeout: 10000 });
+  await page.evaluate(() => document.querySelector('#consent-cancel').click());
+  await page.waitForFunction(() => /Başlatılmadı/.test(document.querySelector('#player-status').textContent), null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => document.querySelector('#player-screen iframe')), null);
+  assert.equal(await page.evaluate(() => document.querySelector('#quick-save').disabled), true);
 });
 
 await scenario('a ROM can be re-added to a record restored from a metadata backup', async page => {

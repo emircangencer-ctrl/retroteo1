@@ -44,7 +44,7 @@ Netlify runs `npm install`, `npm run check`, `npm test`, and `npm run build` in 
 
 On NES, append `?nescore=jsnes` to compare the legacy JSNES player or `?nescore=nesjs` to compare `@nesjs/core`; remove the parameter to use the default EmulatorJS system. Those diagnostic routes apply to NES only.
 
-For files whose name identifies Super Mario Bros. 3, RetroPlay checks the PRG+CHR payload against known clean retail fingerprints and starts only a recognized clean profile (Nestopia). Unknown fingerprints, an unverifiable NES 2.0 image or an invalid header are blocked before the core starts; there is no automatic FCEUmm fallback. This check is filename-scoped and will be replaced by a general hash-based game identity layer. No emulator can repair corrupted or intentionally changed game data.
+For files whose name identifies Super Mario Bros. 3, RetroPlay checks the PRG+CHR payload against known clean retail fingerprints. A recognized clean profile starts directly (Nestopia). An unknown fingerprint (typically a ROM hack) or an unverifiable NES 2.0 image is never started silently: before any emulator is created, the player explains that graphics may differ and asks **Yine de oyna / Vazgeç**; the choice is remembered for that game. There is no automatic FCEUmm fallback. This check is filename-scoped and will be replaced by a general hash-based game identity layer. No emulator can repair corrupted or intentionally changed game data.
 
 ROMs remain in local browser storage. Use only ROM files you own or are authorized to use. A recognized header or accepted extension is not proof that a game dump is complete or compatible.
 

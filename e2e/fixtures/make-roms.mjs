@@ -38,3 +38,19 @@ export function megaDriveBinStub() {
   for (let i = 0; i < header.length; i++) rom[0x100 + i] = header.charCodeAt(i);
   return rom;
 }
+
+/**
+ * A self-authored cartridge with Super Mario Bros. 3's board layout (MMC3, 256 KiB PRG, 128 KiB CHR)
+ * but none of its content: its payload fingerprint is unknown, like a ROM hack. The last 8 KiB PRG
+ * bank (fixed at $E000) holds an endless loop and the vectors.
+ */
+export function unverifiedMmc3Rom() {
+  const prg = new Uint8Array(256 * 1024).fill(0xea);
+  const last = prg.length - 8192;
+  prg.set([0x78, 0xd8, 0x4c, 0x02, 0xe0], last);           // SEI, CLD, loop: JMP $E002
+  prg.set([0x02, 0xe0, 0x00, 0xe0, 0x02, 0xe0], prg.length - 6); // NMI $E002, RESET $E000, IRQ $E002
+  const rom = new Uint8Array(16 + prg.length + 128 * 1024);
+  rom.set([0x4e, 0x45, 0x53, 0x1a, 16, 16, 0x40, 0x00], 0); // iNES, mapper 4
+  rom.set(prg, 16);
+  return rom;
+}

@@ -7,13 +7,14 @@ const player = await readFile(new URL('../src/emulatorjs-nes-player.js', import.
 const publicWorker = await readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
 const rootWorker = await readFile(new URL('../service-worker.js', import.meta.url), 'utf8');
 
-test('unknown SMB3 payloads are rejected before any emulator player is created', () => {
+test('unknown SMB3 payloads never start without explicit consent, asked before any emulator player is created', () => {
   assert.match(app, /if \(!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)\) \{/);
+  assert.match(app, /game\.unverifiedDumpAccepted === true \|\| await askUnverifiedDumpConsent\(smb3Diagnostic\)/);
   assert.doesNotMatch(app, /compatibility-fallback|useSmb3FceummFallback|alternatif çekirdekle uyumluluk deneniyor/);
   assert.ok(
     app.indexOf('if (!isSuperMarioBros3LaunchAllowed(smb3Diagnostic))')
       < app.indexOf('new EmulatorJsPlayer'),
-    'the fail-closed ROM check must run before player construction'
+    'the ROM identity check and consent must run before player construction'
   );
 });
 
