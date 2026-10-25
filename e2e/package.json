@@ -1,0 +1,14 @@
+{
+  "name": "retroplay-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end tests that run the production build with the real EmulatorJS 4.2.3 runtime served locally from its npm packages.",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "@emulatorjs/core-nestopia": "4.2.3",
+    "@emulatorjs/emulatorjs": "4.2.3",
+    "playwright": "1.63.0"
+  }
+}

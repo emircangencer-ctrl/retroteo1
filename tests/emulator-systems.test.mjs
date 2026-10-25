@@ -6,6 +6,7 @@ import {
   isPlayablePlatform,
   supportsRomExtension
 } from '../src/emulator-systems.js';
+import { EMULATORJS_INPUT_INDEX } from '../src/emulatorjs-nes-player.js';
 
 test('NES, SNES and Mega Drive map to documented EmulatorJS system IDs', () => {
   assert.equal(EMULATED_SYSTEMS.NES.emulatorJsSystemId, 'nes');
@@ -30,7 +31,9 @@ test('supported ROM extensions are checked per system and case-insensitively', (
   assert.equal(supportsRomExtension('SNES', 'SFC'), true);
   assert.equal(supportsRomExtension('SNES', 'smc'), true);
   assert.equal(supportsRomExtension('MD', 'GEN'), true);
-  assert.equal(supportsRomExtension('MD', 'bin'), false);
+  // `.bin` is accepted for Mega Drive only because import assigns MD after checking the SEGA header.
+  assert.equal(supportsRomExtension('MD', 'bin'), true);
+  assert.equal(supportsRomExtension('NES', 'bin'), false);
   assert.equal(supportsRomExtension('N64', 'z64'), false);
 });
 
@@ -48,4 +51,20 @@ test('prototype-inherited names never resolve to playable emulator systems', () 
   }
   assert.equal(getEmulatedSystem({}), null);
   assert.equal(isPlayablePlatform({}), false);
+});
+
+
+test('Mega Drive touch buttons send the same RetroPad inputs as EmulatorJS\'s own segaMD layout', () => {
+  // EmulatorJS 4.2.3 virtual gamepad for segaMD: A=1, B=0, C=8, X=10, Y=9, Z=11.
+  const expected = { A: 1, B: 0, C: 8, X: 10, Y: 9, Z: 11 };
+  for (const button of EMULATED_SYSTEMS.MD.actionButtons) {
+    assert.equal(EMULATORJS_INPUT_INDEX[button.input], expected[button.label], `Mega Drive ${button.label}`);
+  }
+});
+
+test('SNES touch buttons send EmulatorJS\'s snes layout inputs', () => {
+  const expected = { A: 8, B: 0, X: 9, Y: 1, L: 10, R: 11 };
+  for (const button of EMULATED_SYSTEMS.SNES.actionButtons) {
+    assert.equal(EMULATORJS_INPUT_INDEX[button.input], expected[button.label], `SNES ${button.label}`);
+  }
 });

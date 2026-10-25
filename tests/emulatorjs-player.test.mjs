@@ -244,47 +244,133 @@ test('runtime reports started only when required controller and pause APIs exist
 });
 
 
-test('save updates are accepted only from the emulator iframe and forwarded to the app', () => {
-  const restore = installFakeBrowser();
+function fakeSaveRuntime(initialFiles = {}) {
+  const files = new Map(Object.entries(initialFiles));
+  const dirs = new Set(['/data', '/data/saves']);
   const calls = [];
-  const saves = [];
+  const FS = {
+    analyzePath: path => ({ exists: files.has(path) || dirs.has(path) }),
+    mkdir: path => { calls.push(['mkdir', path]); dirs.add(path); },
+    unlink: path => { calls.push(['unlink', path]); files.delete(path); },
+    writeFile: (path, data) => { calls.push(['writeFile', path]); files.set(path, new Uint8Array(data)); },
+    readFile: path => files.get(path)
+  };
+  const gameManager = {
+    FS,
+    simulateInput: () => {},
+    getSaveFilePath: () => '/data/saves/Nestopia/Test.srm',
+    saveSaveFiles: () => { calls.push(['saveSaveFiles']); if (gameManager.liveSram) files.set('/data/saves/Nestopia/Test.srm', new Uint8Array(gameManager.liveSram)); },
+    loadSaveFiles: () => calls.push(['loadSaveFiles']),
+    restart: () => calls.push(['restart']),
+    liveSram: null
+  };
+  return { files, calls, gameManager };
+}
+
+function playerWithRuntime(runtime, options) {
+  const player = makePlayer([], options);
+  player.frame.contentWindow.EJS_emulator.gameManager = runtime.gameManager;
+  player.started = true;
+  return player;
+}
+
+test('battery saves are copied out of the core, flushing live SRAM first when asked', () => {
+  const restore = installFakeBrowser();
   let player;
   try {
-    player = new EmulatorJsNesPlayer(
-      {
-        closest: () => ({ classList: { contains: () => false } })
-      },
-      { onSaveUpdate: update => saves.push(update) }
-    );
-    player.frame = new FakeFrame(calls);
-    const foreignBuffer = new Uint8Array([99]).buffer;
-    player.handleMessage({
-      source: new FakeFrameWindow(calls),
-      data: {
-        source: 'retroplay-emulatorjs',
-        type: 'save-update',
-        hash: 'foreign',
-        saveBuffer: foreignBuffer
-      }
-    });
-    assert.equal(saves.length, 0, 'ignore save data from another iframe');
+    const runtime = fakeSaveRuntime({ '/data/saves/Nestopia/Test.srm': new Uint8Array([1, 2, 3]) });
+    player = playerWithRuntime(runtime);
+    const loaded = player.readSaveData({ flush: false });
+    assert.deepEqual([...loaded], [1, 2, 3]);
+    assert.equal(runtime.calls.some(call => call[0] === 'saveSaveFiles'), false, 'flush:false must not overwrite the loaded file');
 
-    player.handleMessage({
-      source: player.frame.contentWindow,
-      data: {
-        source: 'retroplay-emulatorjs',
-        type: 'save-update',
-        hash: 'save-hash-1',
-        saveBuffer: new Uint8Array([1, 4, 9]).buffer
-      }
-    });
-    assert.equal(saves.length, 1);
-    assert.equal(saves[0].hash, 'save-hash-1');
-    assert.deepEqual([...saves[0].bytes], [1, 4, 9]);
-    assert.equal(saves[0].gameId, 1);
-    assert.equal(saves[0].systemId, 'nes');
+    runtime.gameManager.liveSram = new Uint8Array([7, 7]);
+    const live = player.readSaveData();
+    assert.deepEqual([...live], [7, 7]);
+    live[0] = 99;
+    assert.deepEqual([...runtime.files.get('/data/saves/Nestopia/Test.srm')], [7, 7], 'the returned bytes are a copy');
   } finally {
     try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('reading saves returns null before start, after destroy, or when the core has no SRAM file', () => {
+  const restore = installFakeBrowser();
+  let player;
+  try {
+    const runtime = fakeSaveRuntime();
+    player = playerWithRuntime(runtime);
+    assert.equal(player.readSaveData({ flush: false }), null);
+    player.started = false;
+    runtime.files.set('/data/saves/Nestopia/Test.srm', new Uint8Array([5]));
+    assert.equal(player.readSaveData(), null);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+  assert.equal(player.readSaveData(), null);
+});
+
+test('a host-owned save is written into the core file system and reloaded, then the game soft-resets', () => {
+  const restore = installFakeBrowser();
+  let player;
+  try {
+    const runtime = fakeSaveRuntime({ '/data/saves/Nestopia/Test.srm': new Uint8Array([0]) });
+    runtime.gameManager.FS.analyzePath = path => ({ exists: runtime.files.has(path) || path === '/data' || path === '/data/saves' });
+    player = playerWithRuntime(runtime);
+    assert.equal(player.writeSaveData(new Uint8Array([4, 5, 6])), true);
+    assert.deepEqual([...runtime.files.get('/data/saves/Nestopia/Test.srm')], [4, 5, 6]);
+    assert.deepEqual(runtime.calls.map(call => call[0]), ['mkdir', 'unlink', 'writeFile', 'loadSaveFiles']);
+    assert.equal(player.restartGame(), true);
+    assert.equal(runtime.calls.at(-1)[0], 'restart');
+    assert.equal(player.writeSaveData(new Uint8Array(0)), false, 'empty data is never written');
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('runtime warnings are reported without failing a running session', () => {
+  const restore = installFakeBrowser();
+  const warnings = [];
+  const errors = [];
+  let player;
+  try {
+    player = makePlayer([], { onWarning: message => warnings.push(message), onError: error => errors.push(error.message) });
+    player.started = true;
+    player.handleMessage({ source: new FakeFrameWindow([]), data: { source: 'retroplay-emulatorjs', type: 'warning', message: 'foreign' } });
+    player.handleMessage({ source: player.frame.contentWindow, data: { source: 'retroplay-emulatorjs', type: 'warning', message: 'Wake Lock permission request denied' } });
+    assert.deepEqual(warnings, ['Wake Lock permission request denied']);
+    assert.deepEqual(errors, []);
+    assert.equal(player.started, true);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('the emulator iframe may request a screen wake lock', () => {
+  const restore = installFakeBrowser();
+  let frame = null;
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  try {
+    globalThis.document.createElement = () => {
+      frame = { setAttribute(name, value) { this[name] = value; }, style: {}, addEventListener() {}, removeEventListener() {}, remove() {} };
+      return frame;
+    };
+    globalThis.window.setTimeout = () => 1;
+    URL.createObjectURL = () => 'blob:rom';
+    URL.revokeObjectURL = () => {};
+    const player = new EmulatorJsNesPlayer({ closest: () => null, replaceChildren: () => {} });
+    player.loadROM(new Uint8Array([1])).catch(() => {});
+    assert.match(frame.allow, /screen-wake-lock/);
+    assert.match(frame.allow, /gamepad/);
+    player.destroy();
+  } finally {
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
     restore();
   }
 });

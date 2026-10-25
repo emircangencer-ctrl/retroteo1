@@ -47,42 +47,45 @@ test('EmulatorJS bootstrap selects supported system identifiers without acceptin
 });
 
 
-test('EmulatorJS receives a stable game ID and configured save-update callback', () => {
+test('EmulatorJS receives a stable game ID and no save hooks that 4.2.3 does not implement', () => {
   const html = buildEmulatorDocument('blob:rom', 'Test save data', 'nes', 123456);
   assert.ok(html.includes('window.EJS_gameID = 123456'));
-  assert.ok(html.includes('window.EJS_fixedSaveInterval = 15000'));
-  assert.ok(html.includes('window.EJS_onSaveUpdate = event'));
+  // EJS_onSaveUpdate / EJS_fixedSaveInterval exist only on EmulatorJS's unreleased main branch.
+  // The pinned 4.2.3 runtime ignores them, so the app copies SRAM out of the core itself.
+  assert.ok(!html.includes('EJS_onSaveUpdate'));
+  assert.ok(!html.includes('EJS_fixedSaveInterval'));
 });
 
-test('save update callback clones the SRAM buffer before posting it to the host app', () => {
+function bootstrapContext() {
   const messages = [];
-  const transfers = [];
+  const listeners = {};
   const context = {
-    document: {
-      head: { appendChild: () => {} },
-      createElement: () => ({})
-    },
-    parent: {
-      postMessage: (message, target, transfer) => {
-        messages.push(message);
-        transfers.push(transfer);
-      }
-    },
-    addEventListener: () => {}
+    document: { head: { appendChild: () => {} }, createElement: () => ({}) },
+    parent: { postMessage: message => messages.push(message) },
+    addEventListener: (type, listener) => { (listeners[type] ||= []).push(listener); }
   };
   context.window = context;
-  const html = buildEmulatorDocument('blob:rom', 'Save callback', 'nes', 123);
+  const html = buildEmulatorDocument('blob:rom', 'Bootstrap', 'nes', 123);
   const open = html.indexOf('<script>') + '<script>'.length;
   const close = html.indexOf('</script>', open);
   runInNewContext(html.slice(open, close), context);
-  const saveData = runInNewContext('new Uint8Array([10, 20, 30])', context);
-  context.EJS_onSaveUpdate({ hash: 'save-hash', save: saveData });
+  return { context, messages, listeners };
+}
 
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].source, 'retroplay-emulatorjs');
-  assert.equal(messages[0].type, 'save-update');
-  assert.equal(messages[0].hash, 'save-hash');
-  assert.equal(Object.prototype.toString.call(messages[0].saveBuffer), '[object ArrayBuffer]');
-  assert.deepEqual([...new Uint8Array(messages[0].saveBuffer)], [10, 20, 30]);
-  assert.equal(transfers[0].length, 1);
+test('runtime errors before game start are fatal errors', () => {
+  const { messages, listeners } = bootstrapContext();
+  listeners.unhandledrejection[0]({ reason: new Error('core download failed') });
+  assert.equal(messages.at(-1).type, 'error');
+  assert.equal(messages.at(-1).message, 'core download failed');
+});
+
+test('runtime rejections after game start are warnings, not a stopped session', () => {
+  const { context, messages, listeners } = bootstrapContext();
+  context.EJS_emulator = { gameManager: { simulateInput: () => {} }, pause: () => {}, play: () => {} };
+  context.EJS_onGameStart();
+  assert.equal(messages.at(-1).type, 'started');
+  listeners.unhandledrejection[0]({ reason: new Error('Wake Lock permission request denied') });
+  assert.equal(messages.at(-1).type, 'warning');
+  listeners.error[0]({ message: 'late script error' });
+  assert.equal(messages.at(-1).type, 'warning');
 });
