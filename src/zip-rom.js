@@ -66,6 +66,51 @@ async function inflateRaw(bytes, expectedSize, name) {
   return output;
 }
 
+/**
+ * Lists a ZIP's files (name, size, CRC32) from its central directory without decompressing
+ * anything. Used to recognise arcade ROM sets, which must stay zipped.
+ */
+export async function readZipDirectory(file) {
+  if (!file || !Number.isSafeInteger(file.size) || file.size < 22) throw new Error('Geçerli ZIP dosyası seçilmedi veya dosya çok kısa.');
+  if (file.size > MAX_ARCHIVE_BYTES) throw new Error(`ZIP arşivi ${Math.round(MAX_ARCHIVE_BYTES / 1024 / 1024)} MiB sınırını aşıyor.`);
+  // The end-of-central-directory record is within the last 64 KiB + 22 bytes.
+  const tailStart = Math.max(0, file.size - 22 - 65535);
+  const tail = new Uint8Array(await file.slice(tailStart).arrayBuffer());
+  const tailView = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+  let eocd = -1;
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (u32(tailView, i) !== 0x06054b50) continue;
+    if (i + 22 + u16(tailView, i + 20) === tail.length) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('Geçerli ZIP bitiş kaydı bulunamadı. Dosya bozuk veya ZIP64 biçiminde olabilir.');
+  const entriesTotal = u16(tailView, eocd + 10);
+  const centralSize = u32(tailView, eocd + 12), centralOffset = u32(tailView, eocd + 16);
+  if (u16(tailView, eocd + 4) !== 0 || u16(tailView, eocd + 6) !== 0 || u16(tailView, eocd + 8) !== entriesTotal) throw new Error('Çok parçalı ZIP arşivleri desteklenmiyor.');
+  if (entriesTotal === 0xffff || centralOffset === 0xffffffff || centralSize === 0xffffffff) throw new Error('ZIP64 arşivleri bu sürümde desteklenmiyor. Standart ZIP olarak yeniden sıkıştır.');
+  if (entriesTotal > MAX_ENTRIES) throw new Error(`ZIP içinde çok fazla dosya var (sınır ${MAX_ENTRIES}).`);
+  if (centralOffset + centralSize > tailStart + eocd) throw new Error('ZIP dizin bilgileri dosya sınırlarının dışında.');
+  const central = new Uint8Array(await file.slice(centralOffset, centralOffset + centralSize).arrayBuffer());
+  const view = new DataView(central.buffer, central.byteOffset, central.byteLength);
+  const entries = [];
+  let cursor = 0;
+  for (let i = 0; i < entriesTotal; i++) {
+    if (cursor + 46 > central.length || u32(view, cursor) !== 0x02014b50) throw new Error('ZIP dosya dizini bozuk.');
+    const flags = u16(view, cursor + 8);
+    const crc = u32(view, cursor + 16), size = u32(view, cursor + 24);
+    const nameLength = u16(view, cursor + 28), extraLength = u16(view, cursor + 30), commentLength = u16(view, cursor + 32);
+    const end = cursor + 46 + nameLength + extraLength + commentLength;
+    if (end > central.length) throw new Error('ZIP dosya adı veya dizin kaydı kesilmiş.');
+    const rawName = central.subarray(cursor + 46, cursor + 46 + nameLength);
+    let name;
+    try { name = (flags & 0x0800) ? decoder.decode(rawName) : legacyDecoder.decode(rawName); }
+    catch { throw new Error('ZIP içinde geçersiz dosya adı kodlaması var.'); }
+    cursor = end;
+    if (!name || name.endsWith('/') || name.endsWith('\\')) continue;
+    entries.push({ name: name.replace(/\\/g, '/').split('/').pop(), path: name, size, crc: crc.toString(16).padStart(8, '0'), encrypted: Boolean(flags & 0x0041) });
+  }
+  return entries;
+}
+
 /** Extracts supported ROM files from a standard, non-encrypted ZIP in memory. No files are written to disk. */
 export async function extractRomFilesFromZip(file) {
   if (!file || !Number.isSafeInteger(file.size) || file.size < 22) throw new Error('Geçerli ZIP dosyası seçilmedi veya dosya çok kısa.');

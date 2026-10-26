@@ -57,7 +57,7 @@ export async function play(page, titleIncludes) {
     .find(card => card.querySelector('.game-title')?.textContent.includes(title))?.querySelector('[data-play]')?.dataset.play, titleIncludes);
   if (!id) throw new Error(`no playable card for ${titleIncludes}`);
   await page.evaluate(gameId => document.querySelector(`#library-games [data-play="${gameId}"]`).click(), id);
-  await page.waitForFunction(() => /Çalışıyor|Başlatılamadı|engellendi|durduruldu/.test(document.querySelector('#player-status')?.textContent || ''), null, { timeout: 90000 });
+  await page.waitForFunction(() => /Çalışıyor|Başlatılamadı|engellendi|durduruldu|açamadı/.test(document.querySelector('#player-status')?.textContent || ''), null, { timeout: 90000 });
   return page.evaluate(() => ({ status: document.querySelector('#player-status').textContent, error: document.querySelector('#player-error').textContent }));
 }
 

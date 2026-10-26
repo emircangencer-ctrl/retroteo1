@@ -91,7 +91,7 @@ test('fullscreen requests hide browser navigation UI when supported and rejected
   assert.match(app, /Başlatılmadı · doğrulanmamış döküm/);
   assert.doesNotMatch(app, /compatibility-fallback|useSmb3FceummFallback/);
   assert.match(app, /if \(!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)\)/);
-  assert.match(app, /coreId: useFceummComparison \? 'fceumm' : system\.emulatorJsCoreId/);
+  assert.match(app, /coreId: candidate\.coreId/);
   assert.match(app, /\$\('#touch-controls'\)\.style\.display = 'none'/);
   assert.match(app, /\$\('#touch-controls'\)\.style\.display = ''/);
   assert.match(app, /\$\('#player-screen'\)\.style\.display = 'none'/);

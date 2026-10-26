@@ -117,8 +117,9 @@ export class EmulatorJsPlayer {
   loadROM(bytes, gameName='RetroPlay game') {
     if(this.destroyed) return Promise.reject(new Error('Oynatıcı kapatıldı.'));
     if(this.frame) return Promise.reject(new Error('Bu oynatıcıda zaten bir ROM yükleniyor.'));
-    const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
-    this.romUrl=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
+    // A Blob (an arcade zip) is handed over as it is; bytes are wrapped once.
+    const blob=bytes instanceof Blob?bytes:new Blob([bytes instanceof Uint8Array?bytes:new Uint8Array(bytes)],{type:'application/octet-stream'});
+    this.romUrl=URL.createObjectURL(blob);
     const frame=document.createElement('iframe'); frame.title=gameName+' — '+this.systemLabel+' emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad; screen-wake-lock'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
     this.frame=frame; frame.addEventListener('load',this.boundFrameLoad); this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
     return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('Emülatör çekirdeği 75 saniye içinde başlamadı. İlk açılışta çekirdek indirilir; bağlantını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName,this.systemId,this.gameId,this.coreId,this.documentOptions); });
@@ -126,12 +127,18 @@ export class EmulatorJsPlayer {
   handleMessage(event) {
     if(!this.frame||event.source!==this.frame.contentWindow||!event.data||event.data.source!=='retroplay-emulatorjs')return;
     const data=event.data;
-    if(data.type==='started'){ this.started=true; window.clearTimeout(this.timer); this.timer=null; const resolve=this.resolveStart; this.resolveStart=null; this.rejectStart=null; resolve?.(true); }
+    if(data.type==='started'){
+      this.started=true;
+      // RetroArch keeps running its own (hidden) menu when a core cannot load the file, so a
+      // "started" event alone does not prove the game is running. An empty save state means no game.
+      if(this.contentLoaded()===false){ this.started=false; const error=new Error('Çekirdek bu oyun dosyasını açamadı.'); error.code='content-not-loaded'; this.fail(error); return; }
+      window.clearTimeout(this.timer); this.timer=null; const resolve=this.resolveStart; this.resolveStart=null; this.rejectStart=null; resolve?.(true);
+    }
     else if(data.type==='error') this.fail(new Error(data.message||'EmulatorJS başlatılamadı.'));
     else if(data.type==='warning') {
       try { this.onWarning(String(data.message || 'Emülatör uyarısı')); } catch {}
     }
-    else if(data.type==='exit'&&!this.destroyed)this.onError(new Error('Emülatör oturumu kapandı.'));
+    else if(data.type==='exit'&&!this.destroyed){ if(!this.started){ const error=new Error('Çekirdek oyunu başlatamadı.'); error.code='content-not-loaded'; this.fail(error); } else this.onError(new Error('Emülatör oturumu kapandı.')); }
   }
   fail(error){ if(this.destroyed)return; window.clearTimeout(this.timer); this.timer=null; const reject=this.rejectStart; this.resolveStart=null; this.rejectStart=null; this.onError(error); reject?.(error); }
   setImmersive(active){try{this.frame?.contentWindow?.postMessage({source:'retroplay-app',type:'immersive',active:Boolean(active)},'*');}catch{}}
@@ -177,6 +184,19 @@ export class EmulatorJsPlayer {
     gm.FS.writeFile(path, new Uint8Array(data));
     gm.loadSaveFiles();
     return true;
+  }
+  /**
+   * false when the core runs without a game (RetroArch reports a zero-size save state); null if
+   * unknown. MAME 2003-Plus has no state support for some games, so a zero size proves nothing there.
+   */
+  contentLoaded() {
+    if (this.coreId === 'mame2003_plus') return null;
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    try {
+      const info = gm?.functions?.saveStateInfo?.();
+      if (typeof info !== 'string') return null;
+      return !/^Size is zero/i.test(info);
+    } catch { return null; }
   }
   /** True when the running core can serialize its full machine state. */
   supportsStates() {

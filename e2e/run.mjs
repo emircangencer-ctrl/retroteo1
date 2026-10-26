@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST, cdnRequests } from './harness.mjs';
 import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
+import { placeholderSet } from './fixtures/zip-writer.mjs';
 
 if (!fs.existsSync(path.join(DIST, 'index.html'))) {
   console.error('dist/ is missing — run `npm run build` in the repository root first.');
@@ -22,6 +23,21 @@ const unverifiedRom = path.join(tmp, 'Super Mario Bros. 3 (U) (PRG 1) [h2].nes')
 fs.writeFileSync(unverifiedRom, unverifiedMmc3Rom());
 const checkerRom = path.join(tmp, 'checkerboard.nes');
 fs.writeFileSync(checkerRom, checkerboardRom());
+
+// Arcade sets made of CRC-matched placeholder files (zeros; no game data), built from the catalogs.
+const fbneoCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fbneo.json'), 'utf8'));
+const mameCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-mame2003plus.json'), 'utf8'));
+const arcadeFile = (name, roms, options) => { const file = path.join(tmp, name); fs.writeFileSync(file, placeholderSet(roms, options)); return file; };
+const puckmanZip = arcadeFile('puckman.zip', fbneoCatalog.games.puckman[6]);
+const renamedZip = arcadeFile('Pac Man kopyam.zip', fbneoCatalog.games.puckman[6]);
+const brokenZip = path.join(tmp, 'broken', 'puckman.zip');
+fs.mkdirSync(path.dirname(brokenZip));
+fs.writeFileSync(brokenZip, placeholderSet(fbneoCatalog.games.puckman[6], { omit: ['pm1_prg2.6k'] }));
+const mslugZip = arcadeFile('mslug.zip', fbneoCatalog.games.mslug[6]);
+const neogeoZip = arcadeFile('neogeo.zip', fbneoCatalog.games.neogeo[6].filter(([name]) => ['sp-s3.sp1', 'sm1.sm1', 'sfix.sfix', '000-lo.lo'].includes(name)));
+const zigzagZip = arcadeFile('zigzag.zip', mameCatalog.games.zigzag[6]);
+const mapperRom = path.join(tmp, 'mapper220.nes');
+{ const rom = checkerboardRom(); rom[6] = 0xc0; rom[7] = 0xd0; fs.writeFileSync(mapperRom, rom); }
 
 async function gameScreenshot(page) {
   const box = await page.evaluate(() => {
@@ -278,6 +294,70 @@ await scenario('the performance meter measures the speed factor and normal play 
   assert.equal(Boolean(fastForward), false, 'fast-forward is off again');
   await page.evaluate(() => document.querySelector('[data-view="settings"]').click());
   assert.match(await page.evaluate(() => document.querySelector('#perf-history').textContent), /checkerboard · NES\/nestopia/);
+});
+
+await scenario('an arcade zip is recognised by its set name, checked against FinalBurn Neo and started with it', async page => {
+  const text = await importFile(page, puckmanZip);
+  assert.match(text, /Eklendi: puckman\.zip — Puck Man \(Japan, set 1\) · FinalBurn Neo · tam set/);
+  const state = await play(page, 'Puck Man');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · FinalBurn Neo/, state.error);
+  const loaded = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return { zip: gm.FS.analyzePath('/puckman.zip').exists, info: gm.functions.saveStateInfo() }; });
+  assert.equal(loaded.zip, true, 'the core sees the set under its set name');
+  assert.doesNotMatch(loaded.info, /^Size is zero/, 'the game itself is loaded, not just the core');
+  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls button')].map(button => button.textContent));
+  assert.deepEqual(pad.slice(4), ['Y', 'X', 'L', 'B', 'A', 'R', 'JETON', 'START']);
+});
+
+await scenario('a renamed arcade zip is recognised from its file checksums', async page => {
+  const text = await importFile(page, renamedZip);
+  assert.match(text, /Puck Man \(Japan, set 1\) · FinalBurn Neo · tam set · dosya adı puckman\.zip olarak tanındı/);
+  const state = await play(page, 'Puck Man');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  assert.equal(await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager.FS.analyzePath('/puckman.zip').exists), true);
+});
+
+await scenario('an incomplete arcade set says which file is missing', async page => {
+  const text = await importFile(page, brokenZip);
+  assert.match(text, /FinalBurn Neo · 1 dosya eksik veya farklı/);
+  await page.evaluate(() => document.querySelector('[data-view="library"]').click());
+  assert.match(await page.evaluate(() => document.querySelector('#library-games .game-card .game-foot').textContent), /Eksik set · 1 dosya/);
+});
+
+await scenario('a Neo Geo game asks for neogeo.zip, offers to add it in the player and then starts with the BIOS', async page => {
+  const text = await importFile(page, mslugZip);
+  assert.match(text, /Metal Slug - Super Vehicle-001 · FinalBurn Neo · tam set · neogeo\.zip BIOS gerekli/);
+  let state = await play(page, 'Metal Slug - Super');
+  assert.match(state.status, /Başlatılamadı · neogeo\.zip gerekli/);
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('#player-screen iframe'))), false, 'nothing is loaded without the BIOS');
+  assert.equal(await page.evaluate(() => document.querySelector('#player-retry').textContent), 'neogeo.zip ekle');
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#player-retry')]);
+  await chooser.setFiles(neogeoZip);
+  await page.waitForFunction(() => { const text = document.querySelector('#player-status')?.textContent || ''; return /^Çalışıyor/.test(text) || (/Başlatılamadı/.test(text) && !/neogeo\.zip gerekli/.test(text)); }, null, { timeout: 90000 });
+  state = await page.evaluate(() => ({ status: document.querySelector('#player-status').textContent, error: document.querySelector('#player-error').textContent }));
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · FinalBurn Neo/, state.error);
+  const files = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return [gm.FS.analyzePath('/mslug.zip').exists, gm.FS.analyzePath('/neogeo.zip').exists, gm.functions.saveStateInfo()]; });
+  assert.deepEqual(files.slice(0, 2), [true, true]);
+  assert.doesNotMatch(files[2], /^Size is zero/);
+  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls .action-pad button')].map(button => button.textContent));
+  assert.deepEqual(pad, ['C', 'D', 'A', 'B']);
+  await page.evaluate(() => document.querySelector('#player-close').click());
+  await page.evaluate(() => document.querySelector('[data-view="settings"]').click());
+  assert.match(await page.evaluate(() => document.querySelector('#bios-list').textContent), /neogeo\.zip.*kullanıma hazır/);
+});
+
+await scenario('a set only MAME 2003-Plus has is started with MAME 2003-Plus', async page => {
+  const text = await importFile(page, zigzagZip);
+  assert.match(text, /MAME 2003-Plus · tam set/);
+  const state = await play(page, 'Zig Zag');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · MAME 2003-Plus/, state.error);
+});
+
+await scenario('when Nestopia cannot open an NES file, FCEUmm is offered instead of switching silently', async page => {
+  await importFile(page, mapperRom);
+  const state = await play(page, 'mapper220');
+  assert.match(state.status, /Nestopia bu oyunu açamadı/);
+  const retry = await page.evaluate(() => { const button = document.querySelector('#player-retry'); return { hidden: button.hidden, text: button.textContent }; });
+  assert.deepEqual(retry, { hidden: false, text: 'FCEUmm ile dene' });
 });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {

@@ -17,12 +17,15 @@ test('unknown SMB3 payloads never start without explicit consent, asked before a
   );
 });
 
-test('FCEUmm requires an explicit query parameter and Nestopia remains the default', () => {
+test('Nestopia starts first; when it cannot open a file FCEUmm is offered (not switched silently); ?nescore=fceumm forces it', () => {
   assert.match(app, /get\('nescore'\) === 'fceumm'/);
-  assert.match(app, /coreId: useFceummComparison \? 'fceumm' : system\.emulatorJsCoreId/);
-  assert.match(app, /systemLabel: useFceummComparison \? \x60\$\{system\.shortLabel\} \/ FCEUmm karşılaştırma modu\x60 : system\.shortLabel/);
+  assert.match(app, /const cores = forced \? \[fceumm\] : game\.nesCore === 'fceumm' \? \[fceumm, nestopia\] : \[nestopia, fceumm\];/);
+  assert.match(app, /if \(error\?\.code !== 'content-not-loaded' \|\| !next\) throw error;/);
+  assert.match(app, /label: `\$\{next\.name\} ile dene`/);
+  assert.match(app, /startGame\(game\.id, \{ coreOverride: next\.coreId \}\)/);
+  assert.match(app, /rememberCore\(game, used\.coreId\)/);
   assert.match(player, /nes: new Set\(\['nes', 'fceumm', 'nestopia'\]\)/);
-  assert.match(player, /window\.EJS_core = /);
+  assert.match(player, /error\.code='content-not-loaded'/);
 });
 
 test('there is a single service worker source and it starts new cache generations', async () => {
