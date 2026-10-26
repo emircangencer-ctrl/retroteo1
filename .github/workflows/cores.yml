@@ -118,9 +118,10 @@ jobs:
           # One release per run: files a build pins (by sha512) are never replaced.
           TAG="core-mame2003_plus_next-${MAME2003_PLUS_COMMIT::8}-r${GITHUB_RUN_NUMBER}"
           mkdir assets
-          for dir in built/*; do
-            opt="${dir##*-}"
-            for f in "$dir"/*; do cp "$f" "assets/${opt}-$(basename "$f")"; done
+          # One artifact is unpacked into built/ itself, several into built/<artifact>/.
+          find built -type f | while read -r f; do
+            dir=$(basename "$(dirname "$f")"); opt="${dir##*-}"; [ "$dir" = built ] && opt=release
+            cp "$f" "assets/${opt}-$(basename "$f")"
           done
           ls -la assets
           NOTES="MAME 2003-Plus ${MAME2003_PLUS_COMMIT::8} (libretro/mame2003-plus-libretro) · EmulatorJS/RetroArch ${RETROARCH_COMMIT::9} · emsdk $EMSDK_VERSION · built ${GITHUB_SHA::7}. Flags: the core's release flags with the PSX CPU interpreter's helpers forced inline (see the workflow). License: MAME non-commercial license (license.txt inside each .data). Source: $MAME2003_PLUS_REPO at the commit above, unmodified."
