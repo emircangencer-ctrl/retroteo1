@@ -233,3 +233,23 @@ test("the shipped FB Alpha 2012 CPS2 list runs the user's old X-Men Vs. Street F
   assert.equal(result.core, 'fbalpha2012_cps2');
   assert.equal(result.status, 'complete');
 });
+
+test('cabinet controls come from MAME 2003-Plus by set name, then parent', async () => {
+  const { arcadeInputInfo } = await import('../src/arcade.js');
+  const { compactDat } = await import('../scripts/build-arcade-catalogs.mjs');
+  const games = compactDat(`<mame><game name="puckman"><description>Puck Man</description><rom name="a" size="4" crc="12345678"/><input players="2" control="joy4way" coins="2"/></game>
+<game name="sf2" ><description>SF II</description><rom name="b" size="4" crc="22345678"/><input players="2" control="joy8way" buttons="6" coins="2"/></game>
+<game name="arkanoid"><description>Arkanoid</description><rom name="c" size="4" crc="32345678"/><input players="2" control="dial" buttons="1"/></game></mame>`);
+  assert.deepEqual(games.puckman[7], [0, 4]);
+  assert.deepEqual(games.sf2[7], [6, 8]);
+  assert.deepEqual(games.arkanoid[7], [1, 0]);
+  const catalogs = { mame2003_plus: { games } };
+  assert.deepEqual(arcadeInputInfo({ set: 'puckman' }, catalogs), { buttons: 0, ways: 4 });
+  assert.deepEqual(arcadeInputInfo({ set: 'sf2ce', parent: 'sf2' }, catalogs), { buttons: 6, ways: 8 });
+  assert.equal(arcadeInputInfo({ set: 'unknown' }, catalogs), null);
+  const shipped = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
+  assert.deepEqual(shipped.games.puckman[7], [0, 4]);
+  assert.deepEqual(shipped.games.dkong[7], [1, 4]);
+  assert.deepEqual(shipped.games['1942'][7], [2, 8]);
+  assert.deepEqual(shipped.games.mslug[7], [4, 8]);
+});

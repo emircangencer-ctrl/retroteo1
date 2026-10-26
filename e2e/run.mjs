@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST, cdnRequests } from './harness.mjs';
+import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST, cdnRequests, recordInputs, heldInputs, touchScreen, padGeometry } from './harness.mjs';
 import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
@@ -45,6 +45,8 @@ const keyedZip = arcadeFile('spf2t.zip', fbneoCatalog.games.spf2t[6]);
 const fbaCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fba2012-cps2.json'), 'utf8'));
 const oldCps2Zip = arcadeFile('megaman2.zip', fbneoCatalog.games.megaman2[6].filter(([name]) => !name.endsWith('.key')));
 const oldCloneZip = arcadeFile('megaman2a.zip', fbaCatalog.games.megaman2a[6]);
+const snesRom = path.join(tmp, 'snes pad.sfc');
+fs.writeFileSync(snesRom, new Uint8Array(131072));
 const mapperRom = path.join(tmp, 'mapper220.nes');
 { const rom = checkerboardRom(); rom[6] = 0xc0; rom[7] = 0xd0; fs.writeFileSync(mapperRom, rom); }
 
@@ -270,7 +272,10 @@ await scenario('on a phone the game is drawn at full screen resolution and no pi
   await page.waitForTimeout(1500);
   const { box, image } = await gameScreenshot(page);
   assert.equal(box.backing[0], Math.round(box.width * box.ratio), 'canvas backing store uses device pixels');
-  const runs = rowRuns(image, Math.floor(image.height / 2));
+  // A row exactly on the border between two NES rows is blended by the sharp shader: use the
+  // crispest row near the middle.
+  const middle = Math.floor(image.height / 2);
+  const runs = [-3, -2, -1, 0, 1, 2, 3].map(dy => rowRuns(image, middle + dy)).sort((a, b) => b.length - a.length)[0];
   assert.ok(runs.length >= 250, `all 256 NES columns are visible (${runs.length})`);
   assert.ok(Math.max(...runs) <= Math.ceil(image.width / 256) + 1, `no two NES pixels merge into one (widest run ${Math.max(...runs)})`);
   assert.match(await page.evaluate(() => document.querySelector('#display-mode').textContent), /Keskin/);
@@ -313,8 +318,9 @@ await scenario('an arcade zip is recognised by its set name, checked against Fin
   const loaded = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return { zip: gm.FS.analyzePath('/puckman.zip').exists, info: gm.functions.saveStateInfo() }; });
   assert.equal(loaded.zip, true, 'the core sees the set under its set name');
   assert.doesNotMatch(loaded.info, /^Size is zero/, 'the game itself is loaded, not just the core');
-  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls button')].map(button => button.textContent));
-  assert.deepEqual(pad.slice(4), ['Y', 'X', 'L', 'B', 'A', 'R', 'JETON', 'START']);
+  // Pac-Man's cabinet: a 4-way joystick and no buttons (MAME 2003-Plus control list).
+  const pad = await page.evaluate(() => ({ buttons: [...document.querySelectorAll('#touch-controls .tc-btn')].map(el => el.textContent || el.dataset.input), fourWay: document.querySelector('#touch-controls').dataset.fourWay }));
+  assert.deepEqual(pad, { buttons: ['JETON', 'START'], fourWay: 'true' });
 });
 
 await scenario('a renamed arcade zip is recognised from its file checksums', async page => {
@@ -377,8 +383,8 @@ await scenario('an old CPS2 set without .key runs on FB Alpha 2012 CPS2, also wh
   const loaded = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return [gm.FS.analyzePath('/megaman2.zip').exists, gm.functions.saveStateInfo()]; });
   assert.equal(loaded[0], true);
   assert.doesNotMatch(loaded[1], /^Size is zero/, 'the game itself is loaded, not just the core');
-  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls button')].map(button => button.textContent));
-  assert.deepEqual(pad.slice(4), ['Y', 'X', 'L', 'B', 'A', 'R', 'JETON', 'START']);
+  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls .tc-btn')].map(el => el.textContent || el.dataset.input));
+  assert.deepEqual(pad, ['BUTTON_Y', 'BUTTON_X', 'BUTTON_L', 'BUTTON_B', 'BUTTON_A', 'BUTTON_R', 'JETON', 'START']);
 });
 
 await scenario('a self-contained old CPS2 clone runs on FB Alpha 2012 CPS2 without its parent set', async page => {
@@ -406,8 +412,8 @@ await scenario('a Neo Geo game asks for neogeo.zip, offers to add it in the play
   const files = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return [gm.FS.analyzePath('/mslug.zip').exists, gm.FS.analyzePath('/neogeo.zip').exists, gm.functions.saveStateInfo()]; });
   assert.deepEqual(files.slice(0, 2), [true, true]);
   assert.doesNotMatch(files[2], /^Size is zero/);
-  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls .action-pad button')].map(button => button.textContent));
-  assert.deepEqual(pad, ['C', 'D', 'A', 'B']);
+  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls .tc-face')].map(el => `${el.textContent}=${el.dataset.input}`));
+  assert.deepEqual(pad, ['A=BUTTON_B', 'B=BUTTON_A', 'C=BUTTON_Y', 'D=BUTTON_X']);
   await page.evaluate(() => document.querySelector('#player-close').click());
   await page.evaluate(() => document.querySelector('[data-view="settings"]').click());
   assert.match(await page.evaluate(() => document.querySelector('#bios-list').textContent), /neogeo\.zip.*kullanıma hazır/);
@@ -427,6 +433,153 @@ await scenario('when Nestopia cannot open an NES file, FCEUmm is offered instead
   const retry = await page.evaluate(() => { const button = document.querySelector('#player-retry'); return { hidden: button.hidden, text: button.textContent }; });
   assert.deepEqual(retry, { hidden: false, text: 'FCEUmm ile dene' });
 });
+
+// ---- Touch play (phones/tablets) and controllers -------------------------------------------------
+const boxesOverlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+await scenario('on a phone the picture is on top and the console pad below; turning the phone puts the pad beside the picture', async page => {
+  await importFile(page, checkerRom);
+  const state = await play(page, 'checkerboard');
+  assert.match(state.status, /^Çalışıyor/);
+  let g = await padGeometry(page);
+  assert.equal(g.touchPlay, true);
+  assert.equal(g.orientation, 'portrait');
+  assert.deepEqual([g.screen.x, g.screen.y, Math.round(g.screen.w)], [0, 48, 393], 'edge-to-edge picture under the bar');
+  const parts = [g.dpad.box, ...g.face.map(b => b.box), ...g.system.map(b => b.box)];
+  for (const box of parts) {
+    assert.ok(box.y >= g.screen.y + g.screen.h, 'pad below the picture');
+    assert.ok(box.x >= 8 && box.x + box.w <= 393 - 8 && box.y + box.h <= 873, 'pad on screen');
+  }
+  assert.deepEqual(g.face.map(b => `${b.label}=${b.input}`), ['B=BUTTON_B', 'A=BUTTON_A']);
+  assert.deepEqual(g.system.map(b => b.label), ['SELECT', 'START']);
+  assert.ok(g.dpad.r * 2 >= 150, `d-pad ${g.dpad.r * 2}px`);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.player-header')).display), 'none', 'no page chrome around the game');
+  await page.setViewportSize({ width: 873, height: 393 });
+  await page.waitForTimeout(500);
+  g = await padGeometry(page);
+  assert.equal(g.orientation, 'landscape');
+  assert.equal(Math.round(g.screen.h), 393, 'full-height picture');
+  assert.ok(Math.abs(g.screen.x + g.screen.w / 2 - 873 / 2) < 2, 'centred');
+  for (const box of [g.dpad.box, ...g.face.map(b => b.box), ...g.system.map(b => b.box)]) assert.ok(!boxesOverlap(box, g.screen), 'beside the picture on a 20:9 phone');
+  assert.ok(g.dpad.x < g.screen.x && g.face.every(b => b.x > g.screen.x + g.screen.w));
+  const canvas = await page.evaluate(() => { const c = document.querySelector('#player-screen iframe').contentWindow.document.querySelector('canvas'); return [c.width, c.height]; });
+  assert.ok(canvas[1] >= 393 * 2.75 - 2, `the picture is re-rendered at the new size (${canvas})`);
+  // Fullscreen only hides the browser; the handheld layout stays usable.
+  await page.evaluate(() => document.querySelector('#play-menu').click());
+  await page.evaluate(() => document.querySelector('#fullscreen-game').click());
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(() => Boolean(document.fullscreenElement)), true);
+  const full = await padGeometry(page);
+  assert.equal(full.orientation, 'landscape');
+  assert.deepEqual([Math.round(full.dpad.x), Math.round(full.face[1].x)], [Math.round(g.dpad.x), Math.round(g.face[1].x)], 'same pad in fullscreen');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#touch-controls')).display), 'block');
+}, { mobile: true });
+
+await scenario('touch pad: the d-pad rolls through 8 directions without lifting, fingers work together, B→A slides and B+A presses both', async (page, context) => {
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  await recordInputs(page);
+  const touch = await touchScreen(context, page);
+  const { dpad: d, face } = await padGeometry(page);
+  const [B, A] = face;
+  const seen = [];
+  const step = async (type, points, label) => { await touch(type, points); seen.push(`${label}:${await heldInputs(page)}`); };
+  await step('touchStart', [[d.x, d.y - d.r * 0.6, 1]], 'down-on-up');
+  await step('touchMove', [[d.x + d.r * 0.43, d.y - d.r * 0.43, 1]], 'roll');
+  await step('touchMove', [[d.x + d.r * 0.7, d.y + 3, 1]], 'roll');
+  await step('touchMove', [[d.x + d.r * 0.45, d.y + d.r * 0.45, 1]], 'roll');
+  await step('touchMove', [[d.x + 2, d.y + d.r * 0.75, 1]], 'roll');
+  await step('touchMove', [[d.x + d.r * 1.9, d.y + d.r * 0.25, 1]], 'past-the-edge');
+  await step('touchStart', [[d.x + d.r * 1.9, d.y + d.r * 0.25, 1], [B.x, B.y, 2]], 'second-finger');
+  await step('touchMove', [[d.x + d.r * 1.9, d.y + d.r * 0.25, 1], [(A.x + B.x) / 2, (A.y + B.y) / 2, 2]], 'between');
+  await step('touchMove', [[d.x + d.r * 1.9, d.y + d.r * 0.25, 1], [A.x, A.y, 2]], 'slid');
+  await step('touchEnd', [[A.x, A.y, 2]], 'lift-A');
+  await step('touchEnd', [], 'all-up');
+  assert.deepEqual(seen, [
+    'down-on-up:UP', 'roll:RIGHT+UP', 'roll:RIGHT', 'roll:DOWN+RIGHT', 'roll:DOWN', 'past-the-edge:RIGHT',
+    'second-finger:B+RIGHT', 'between:A+B+RIGHT', 'slid:A+RIGHT', 'lift-A:RIGHT', 'all-up:-'
+  ]);
+  const buzz = await page.evaluate(() => window.__buzz);
+  assert.ok(buzz.length >= 6 && buzz.every(ms => ms > 0 && ms <= 20), `short vibrations on presses (${buzz})`);
+}, { mobile: true, init: () => { window.__buzz = []; navigator.vibrate = ms => { window.__buzz.push(ms); return true; }; } });
+
+await scenario('the menu pauses the game and resumes it; the back button closes the menu, not the game; pad settings apply live and are remembered', async page => {
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  const before = await padGeometry(page);
+  await page.evaluate(() => document.querySelector('#play-menu').click());
+  assert.match(await page.evaluate(() => document.querySelector('#player-status').textContent), /^Duraklatıldı/);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#player-menu')).display), 'flex');
+  await page.goBack();
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => document.querySelector('#player-modal').classList.contains('menu-open')), false, 'back closed the menu');
+  assert.equal(await page.evaluate(() => document.querySelector('#player-modal').classList.contains('hidden')), false, 'the game is still open');
+  assert.match(await page.evaluate(() => document.querySelector('#player-status').textContent), /^Çalışıyor/, 'and running again');
+  await page.evaluate(() => document.querySelector('#play-menu').click());
+  await page.evaluate(() => document.querySelector('#touch-settings-open').click());
+  await page.evaluate(() => { const input = document.querySelector('#ts-scale'); input.value = '85'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.evaluate(() => document.querySelector('#ts-dpad-mode button[data-value="4"]').click());
+  const live = await padGeometry(page);
+  assert.ok(live.face[0].r < before.face[0].r && live.dpad.r < before.dpad.r, 'the pad changed size while the menu is open');
+  assert.equal(await page.evaluate(() => document.querySelector('#ts-scale-out').textContent), '%85');
+  assert.equal(await page.evaluate(() => document.querySelector('#ts-dpad-mode button[data-value="4"]').getAttribute('aria-pressed')), 'true');
+  await page.evaluate(() => document.querySelector('#ts-done').click());
+  assert.match(await page.evaluate(() => document.querySelector('#player-status').textContent), /^Çalışıyor/);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-touch-settings')));
+  assert.equal(saved.scale, 0.85);
+  assert.equal(saved.dpadMode, '4');
+  await page.reload({ waitUntil: 'networkidle' });
+  await play(page, 'checkerboard');
+  const after = await padGeometry(page);
+  assert.equal(Math.round(after.face[0].r), Math.round(live.face[0].r), 'remembered after a reload');
+}, { mobile: true });
+
+await scenario('a USB/Bluetooth controller plays the game: buttons by position, stick as d-pad, the touch pad steps aside, the guide button opens the menu', async page => {
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  await recordInputs(page);
+  const set = async fn => { await page.evaluate(fn); await page.waitForTimeout(150); };
+  await set(() => { window.__padOn = true; window.dispatchEvent(new Event('gamepadconnected')); });
+  await set(() => { window.__pad.buttons[1].pressed = true; });
+  assert.equal(await heldInputs(page), 'A', 'right face button = A');
+  const hidden = await page.evaluate(() => ({ cls: document.querySelector('#player-modal').classList.contains('pad-hidden'), chip: !document.querySelector('#play-pad-chip').hidden, display: getComputedStyle(document.querySelector('#touch-controls')).display }));
+  assert.deepEqual(hidden, { cls: true, chip: true, display: 'none' });
+  await set(() => { window.__pad.buttons[1].pressed = false; window.__pad.buttons[0].pressed = true; window.__pad.axes[0] = -0.95; window.__pad.axes[1] = 0.9; });
+  assert.equal(await heldInputs(page), 'B+DOWN+LEFT', 'bottom face = B, stick down-left');
+  await set(() => { window.__pad.buttons[0].pressed = false; window.__pad.axes[0] = 0; window.__pad.axes[1] = 0; });
+  assert.equal(await heldInputs(page), '-');
+  // EmulatorJS's own gamepad code would have pressed RetroPad B for the right face button.
+  assert.equal(await page.evaluate(() => window.__inputs.filter(([index, value]) => index === 0 && value).length), 1, 'no double input from the emulator');
+  await set(() => { window.__pad.buttons[16].pressed = true; });
+  await set(() => { window.__pad.buttons[16].pressed = false; });
+  assert.equal(await page.evaluate(() => document.querySelector('#player-modal').classList.contains('menu-open')), true);
+  await page.evaluate(() => document.querySelector('#play-pad-chip').click());
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-touch-settings')).hideWithGamepad), false, 'the chip brings the touch pad back');
+}, { mobile: true, init: () => {
+  const pad = { id: 'Test Pad (STANDARD GAMEPAD)', index: 0, connected: true, mapping: 'standard', timestamp: 0, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })) };
+  window.__pad = pad; window.__padOn = false;
+  Object.defineProperty(Navigator.prototype, 'getGamepads', { configurable: true, value: () => (window.top.__padOn ? [window.top.__pad, null, null, null] : [null, null, null, null]) });
+} });
+
+await scenario('every console has its own pad: Super Nintendo diamond with L/R, Mega Drive A B C under X Y Z', async page => {
+  await importFile(page, snesRom);
+  let state = await play(page, 'snes pad');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · SNES/, state.error);
+  let g = await padGeometry(page);
+  assert.deepEqual(g.face.map(b => `${b.label}=${b.input}`), ['X=BUTTON_X', 'Y=BUTTON_Y', 'A=BUTTON_A', 'B=BUTTON_B']);
+  const [X, Y, A, B] = g.face;
+  assert.ok(X.y < Y.y && Y.x < A.x && B.y > A.y && Math.abs(X.x - B.x) < 2, 'diamond: X top, Y left, A right, B bottom');
+  assert.deepEqual(g.shoulders.map(b => b.label), ['L', 'R']);
+  assert.ok(g.shoulders.every(s => s.y < g.dpad.y - g.dpad.r && s.y > g.screen.y + g.screen.h), 'shoulders above the pad, below the picture');
+  await page.evaluate(() => document.querySelector('#player-exit').click());
+  await importFile(page, mdBin);
+  state = await play(page, 'genesis stub');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Mega Drive/, state.error);
+  g = await padGeometry(page);
+  assert.deepEqual(g.face.map(b => b.label), ['A', 'B', 'C', 'X', 'Y', 'Z']);
+  assert.ok(g.face.slice(3).every(top => top.y < Math.min(...g.face.slice(0, 3).map(b => b.y))), 'X Y Z row above A B C');
+  assert.deepEqual(g.system.map(b => b.label), ['START']);
+}, { mobile: true });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
   assert.deepEqual(cdnRequests, []);

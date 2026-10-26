@@ -24,7 +24,7 @@ export function startServer(port = 0) {
   return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}/` })));
 }
 
-export async function newPage(browser, base, { mobile = false, serviceWorkers = 'block' } = {}) {
+export async function newPage(browser, base, { mobile = false, serviceWorkers = 'block', init = null } = {}) {
   const context = await browser.newContext({
     viewport: mobile ? { width: 393, height: 873 } : { width: 1280, height: 860 },
     deviceScaleFactor: mobile ? 2.75 : 1, isMobile: mobile, hasTouch: mobile,
@@ -34,6 +34,7 @@ export async function newPage(browser, base, { mobile = false, serviceWorkers = 
     cdnRequests.push(route.request().url());
     return route.abort('blockedbyclient');
   });
+  if (init) await context.addInitScript(init);
   const page = await context.newPage();
   page.on('dialog', dialog => dialog.accept());
   const logs = [];
@@ -121,5 +122,49 @@ export function liveSram(page) {
   return page.evaluate(() => {
     const data = document.querySelector('#player-screen iframe')?.contentWindow?.EJS_emulator?.gameManager?.getSaveFile();
     return data ? Array.from(data.slice(0, 8)) : null;
+  });
+}
+
+/** Records every input the player sends to the core (RetroPad index, value) inside the emulator frame. */
+export function recordInputs(page) {
+  return page.evaluate(() => {
+    const frame = document.querySelector('#player-screen iframe').contentWindow;
+    const gm = frame.EJS_emulator.gameManager;
+    const original = gm.simulateInput.bind(gm);
+    window.__inputs = [];
+    gm.simulateInput = (player, index, value) => { window.__inputs.push([index, value]); return original(player, index, value); };
+  });
+}
+const RETROPAD = { 0: 'B', 1: 'Y', 2: 'SELECT', 3: 'START', 4: 'UP', 5: 'DOWN', 6: 'LEFT', 7: 'RIGHT', 8: 'A', 9: 'X', 10: 'L', 11: 'R', 12: 'L2', 13: 'R2' };
+/** RetroPad buttons currently held, e.g. "B+RIGHT" ("-" for none). */
+export function heldInputs(page) {
+  return page.evaluate(names => {
+    const state = new Map();
+    for (const [index, value] of window.__inputs || []) state.set(index, value);
+    return [...state].filter(([, value]) => value).map(([index]) => names[index] || index).sort().join('+') || '-';
+  }, RETROPAD);
+}
+/** Real multi-touch through the DevTools protocol (Chrome turns it into pointer events). */
+export async function touchScreen(context, page) {
+  const cdp = await context.newCDPSession(page);
+  return async (type, points) => {
+    await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y, id]) => ({ x, y, id, radiusX: 8, radiusY: 8, force: 1 })) });
+    await page.waitForTimeout(60);
+  };
+}
+/** Centres of the drawn pad parts in page coordinates. */
+export function padGeometry(page) {
+  return page.evaluate(() => {
+    const centre = el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2, box: { x: r.left, y: r.top, w: r.width, h: r.height } }; };
+    const dpad = document.querySelector('#touch-controls .tc-dpad');
+    return {
+      dpad: dpad ? centre(dpad) : null,
+      face: [...document.querySelectorAll('#touch-controls .tc-face')].map(el => ({ input: el.dataset.input, label: el.textContent, ...centre(el) })),
+      shoulders: [...document.querySelectorAll('#touch-controls .tc-shoulder')].map(el => ({ input: el.dataset.input, label: el.textContent, ...centre(el) })),
+      system: [...document.querySelectorAll('#touch-controls .tc-system')].map(el => ({ input: el.dataset.input, label: el.textContent, ...centre(el) })),
+      screen: (() => { const r = document.querySelector('.player-screen-frame').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })(),
+      orientation: document.querySelector('#player-modal').dataset.orientation,
+      touchPlay: document.querySelector('#player-modal').classList.contains('touch-play')
+    };
   });
 }

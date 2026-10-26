@@ -246,3 +246,17 @@ export function missingSummary(arcade) {
   const absent = Math.max(0, count - different);
   return [absent ? `${absent} dosya eksik` : '', different ? `${different} dosya farklı sürüm` : ''].filter(Boolean).join(', ') || `${count} dosya eksik`;
 }
+
+/**
+ * Cabinet controls for a set from MAME 2003-Plus's list (by the set's name, then its parent's):
+ * { buttons, ways } — e.g. Pac-Man { buttons: 0, ways: 4 }, 1942 { buttons: 2, ways: 8 } — or null.
+ */
+export function arcadeInputInfo(arcade, catalogs) {
+  const mame = catalogs?.mame2003_plus?.games;
+  if (!mame || !arcade) return null;
+  for (const name of [arcade.set, arcade.parent, ...(arcade.alternatives || []).map(alt => alt.set)]) {
+    const input = name && mame[name]?.[7];
+    if (Array.isArray(input)) return { buttons: Number(input[0]) || 0, ways: Number(input[1]) || 0 };
+  }
+  return null;
+}

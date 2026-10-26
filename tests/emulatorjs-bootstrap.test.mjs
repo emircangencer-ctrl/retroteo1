@@ -18,12 +18,18 @@ test('EmulatorJS bootstrap script is valid and uses the NES system ID and starts
   assert.ok(script.includes('window.EJS_gameUrl = "blob:'));
 });
 
-test('EmulatorJS uses standard RetroArch NES joypad indices for touch and keyboard input', () => {
+test('EmulatorJS uses standard RetroArch joypad indices for touch, keyboard and controller input', () => {
   assert.deepEqual(EMULATORJS_INPUT_INDEX, {
     BUTTON_B: 0, BUTTON_Y: 1, BUTTON_SELECT: 2, BUTTON_START: 3,
     BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7,
-    BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11
+    BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11,
+    BUTTON_L2: 12, BUTTON_R2: 13, BUTTON_L3: 14, BUTTON_R3: 15
   });
+});
+
+test("EmulatorJS's own gamepad loop is stopped once the game runs (RetroPlay reads controllers itself)", () => {
+  const html = buildEmulatorDocument('blob:rom', 'NES test', 'nes');
+  assert.ok(html.includes("emu.gamepad.terminate()"));
 });
 
 

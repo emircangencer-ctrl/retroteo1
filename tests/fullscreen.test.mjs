@@ -60,10 +60,12 @@ test('player UI exposes fullscreen and updates after browser fullscreen changes'
   assert.match(app, /activeEmulator\?\.fitInParent\?\.\(\)/);
   assert.match(app, /setFullscreenFallback\(true\)/);
   assert.match(app, /\$\('#immersive-exit'\)\?\.addEventListener\('click', toggleGameFullscreen\)/);
-  assert.match(styles, /#player-modal:fullscreen \.player-header[\s\S]*?display:none!important/);
-  assert.match(styles, /#player-modal:fullscreen \.touch-controls[\s\S]*?position:absolute!important/);
+  assert.match(styles, /#player-modal:not\(\.touch-play\):fullscreen \.player-header[\s\S]*?display:none!important/);
+  // Touch devices use the handheld layout (picture + pad positioned from touch-layout.js) in and out of fullscreen.
+  assert.match(styles, /#player-modal\.touch-play \.player-screen-frame\{position:absolute;left:var\(--scr-x\);top:var\(--scr-y\)/);
+  assert.match(styles, /#player-modal\.touch-play #touch-controls\{display:block;position:absolute;inset:0/);
   assert.match(styles, /\.immersive-exit/);
-  assert.match(styles, /#player-modal:fullscreen/);
+  assert.match(styles, /#player-modal:not\(\.touch-play\):fullscreen/);
   assert.match(styles, /\.player-backdrop\.is-immersive-fallback/);
 });
 
@@ -85,8 +87,8 @@ test('fullscreen requests hide browser navigation UI when supported and rejected
     readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
   ]);
   assert.match(app, /setFullscreenFallback\(true\);[\s\S]*?oyun alanı genişletilmiş görünümde açıldı/);
-  assert.match(styles, /#player-modal:fullscreen #player-screen iframe[\s\S]*?height:\s*100%\s*!important/);
-  assert.match(styles, /#player-modal:fullscreen \.touch-controls button[\s\S]*?pointer-events:\s*auto\s*!important/);
+  assert.match(styles, /#player-modal:not\(\.touch-play\):fullscreen #player-screen iframe[\s\S]*?height:\s*100%\s*!important/);
+  assert.match(styles, /#player-modal\.touch-play #touch-controls\{[^}]*touch-action:none/);
   assert.match(app, /!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)/);
   assert.match(app, /Başlatılmadı · doğrulanmamış döküm/);
   assert.doesNotMatch(app, /compatibility-fallback|useSmb3FceummFallback/);

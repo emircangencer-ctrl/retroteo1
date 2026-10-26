@@ -2,7 +2,7 @@ import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllow
 import { PLATFORM, platformInfo } from './platforms.js';
 import { safeCoverColor, validBackup } from './library-backup.js';
 import { extractRomFilesFromZip, readZipDirectory } from './zip-rom.js';
-import { ARCADE_CORES, loadCatalogs, identifyArcadeZip, arcadeLayout, describeArcadeStatus, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary } from './arcade.js';
+import { ARCADE_CORES, loadCatalogs, loadCatalog, identifyArcadeZip, arcadeLayout, describeArcadeStatus, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary, arcadeInputInfo } from './arcade.js';
 import { EmulatorJsPlayer } from './emulatorjs-nes-player.js';
 import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './emulator-systems.js';
 import { createBatterySaveRecord, emulatorGameId } from './save-data.js';
@@ -14,6 +14,9 @@ import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } fro
 import { watchServiceWorkerUpdates, activateUpdate, summarizeRuntimeCache } from './sw-update.js';
 import { DISPLAY_MODES, DISPLAY_MODE_STORAGE_KEY, normalizeDisplayMode, nextDisplayMode, displayStartOptions } from './display-modes.js';
 import { describeResult, paceWarning, deviceSummary, loadHistory, addToHistory, historyReport, PERF_HISTORY_KEY } from './performance-meter.js';
+import { TouchController } from './touch-controller.js';
+import { computeTouchLayout, padSpecFor, normalizeTouchSettings, DEFAULT_TOUCH_SETTINGS, TOUCH_SETTINGS_KEY } from './touch-layout.js';
+import { GamepadPoller } from './gamepad-input.js';
 import { getDriveClientId, loadGoogleIdentity, requestDriveAccessToken, listDriveFiles, downloadDriveFile, isDriveFolder, isSupportedDriveGame } from './google-drive.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
@@ -64,6 +67,18 @@ let saveTimer = 0;
 let displayMode = loadDisplayMode();
 let activeDisplayStart = null;
 let perfRunning = false;
+// Touch play ("handheld" layout on phones and tablets) and controllers.
+let touchController = null;
+let touchSettings = loadTouchSettings();
+let padSpec = padSpecFor('NES');
+let padSource = { platform: 'NES', game: null, arcade: null };
+let padAspect = 4 / 3;
+let gamepadPoller = null;
+let padInUse = false;
+let playMenuOpen = false;
+let menuPausedGame = false;
+let playLayoutFrame = 0;
+const touchPlayQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(hover: none) and (pointer: coarse)') : null;
 function renderPerfHistory() {
   const el = $('#perf-history');
   if (el) el.textContent = historyReport(loadHistory());
@@ -477,7 +492,7 @@ async function startGame(id, options = {}) {
   emulatorPaused = false;
   autoPaused = false;
   $('#player-title').textContent = game.title;
-  renderTouchControls(game.platform, game);
+  if ($('#play-title')) $('#play-title').textContent = game.title;
   $('#touch-controls').style.display = '';
   $('#gamepad-status').style.display = '';
   updateGamepadStatus();
@@ -487,6 +502,9 @@ async function startGame(id, options = {}) {
   const playerWasHidden = $('#player-modal').classList.contains('hidden');
   $('#player-modal').classList.remove('hidden');
   if (playerWasHidden) pushOverlayState('player');
+  void closePlayMenu();
+  renderTouchControls(game.platform, game);
+  startGamepadInput();
   $('.player-screen-frame').style.display = '';
   $('#player-screen').style.display = '';
   $('#player-screen').replaceChildren();
@@ -556,6 +574,12 @@ async function startGame(id, options = {}) {
     // Nestopia lacks), the player is offered the next core instead of switching silently: a core
     // given a file it cannot handle may crash the page, so that is the player's choice.
     const candidate = launch.cores[0];
+    if (game.platform === 'ARCADE') {
+      let input = null;
+      try { input = arcadeInputInfo(game.arcade, { mame2003_plus: await loadCatalog('mame2003_plus') }); } catch {}
+      if (session !== emulatorSession || activeGameId !== game.id) { revokeUrls(launch.extraFiles); return; }
+      renderTouchControls(game.platform, game, { core: candidate.coreId, buttons: input?.buttons, ways: input?.ways });
+    }
     const player = new EmulatorJsPlayer($('#player-screen'), {
       onError: reportError,
       systemId: candidate.systemId,
@@ -612,6 +636,8 @@ async function startGame(id, options = {}) {
     $('#player-status').textContent = playerStatus('Çalışıyor');
     $('#pause-game').disabled = false;
     $('#perf-test').disabled = false;
+    // The emulator's own menus have no place in the handheld layout.
+    activeEmulator?.setImmersive?.(isTouchPlay() || isFullscreen(document, $('#player-modal')) || fullscreenFallback);
     game.lastPlayed = Date.now();
     await saveGame(game);
     await refreshGames();
@@ -663,12 +689,15 @@ async function toggleGameFullscreen() {
   }
   const result = await enterFullscreen(modal, document);
   if (!result.supported) {
+    // The handheld layout already fills the window; only the browser bars stay.
+    if (modal.classList.contains('touch-play')) { showPlayerNotice('Bu tarayıcı tam ekranı desteklemiyor'); return; }
     setFullscreenFallback(true);
     return;
   }
   if (result.error || !result.entered) {
     // Some mobile browsers expose the Fullscreen API but reject it or resolve
     // without actually entering fullscreen. Keep play usable with visual fallback.
+    if (modal.classList.contains('touch-play')) { showPlayerNotice('Tarayıcı tam ekrana izin vermedi'); return; }
     setFullscreenFallback(true);
     showToast(
       result.error
@@ -685,12 +714,14 @@ async function toggleGameFullscreen() {
   });
 }
 function setupFullscreen() {
-  $('#fullscreen-game')?.addEventListener('click', toggleGameFullscreen);
+  $('#fullscreen-game')?.addEventListener('click', async () => { await closePlayMenu(); void toggleGameFullscreen(); });
   $('#immersive-exit')?.addEventListener('click', toggleGameFullscreen);
   const onChange = () => {
     if (fullscreenElement(document) !== $('#player-modal') && fullscreenFallback) setFullscreenFallback(false);
     activeEmulator?.setImmersive?.(isFullscreen(document, $('#player-modal')) || fullscreenFallback);
     updateFullscreenButton();
+    touchController?.releaseAll();
+    schedulePlayLayout();
     requestAnimationFrame(() => {
       try { activeEmulator?.fitInParent?.(); } catch {}
     });
@@ -793,8 +824,8 @@ function askUnverifiedDumpConsent(diagnostic) {
   });
 }
 function setStateButtons({ canSave, canLoad }) {
-  for (const id of ['#quick-save', '#immersive-save']) { const el = $(id); if (el) el.disabled = !canSave; }
-  for (const id of ['#quick-load', '#immersive-load']) { const el = $(id); if (el) el.disabled = !canLoad; }
+  for (const id of ['#quick-save', '#immersive-save', '#play-save']) { const el = $(id); if (el) el.disabled = !canSave; }
+  for (const id of ['#quick-load', '#immersive-load', '#play-load']) { const el = $(id); if (el) el.disabled = !canLoad; }
 }
 function hidePlayerNotice() {
   window.clearTimeout(playerNoticeTimer);
@@ -875,6 +906,12 @@ function leaveOverlayState(kind) {
 function closePlayer({ viaHistory = false } = {}) {
   const wasOpen = !$('#player-modal').classList.contains('hidden');
   pendingConsent?.(false);
+  touchController?.releaseAll();
+  stopGamepadInput();
+  playMenuOpen = false;
+  menuPausedGame = false;
+  $('#player-modal').classList.remove('menu-open');
+  if ($('#play-menu-backdrop')) $('#play-menu-backdrop').hidden = true;
   // Read the resume point and SRAM before the iframe is removed; the IndexedDB writes continue afterwards.
   const pendingState = captureState('auto');
   const pendingSave = endSaveSession('close');
@@ -925,6 +962,8 @@ async function handlePlayerVisibility() {
   if (!activeEmulator || $('#player-modal').classList.contains('hidden')) return;
   try {
     if (document.visibilityState === 'hidden') {
+      touchController?.releaseAll();
+      gamepadPoller?.releaseAll();
       void captureActiveSave('hidden');
       void captureState('auto');
       if (!emulatorPaused) {
@@ -943,16 +982,172 @@ async function handlePlayerVisibility() {
     console.warn('[RetroPlay] Arka plan duraklatma hatası:', error);
   }
 }
-function renderTouchControls(platform, game = null) {
+function loadTouchSettings() {
+  try { return normalizeTouchSettings(JSON.parse(localStorage.getItem(TOUCH_SETTINGS_KEY) || '{}')); } catch { return normalizeTouchSettings(); }
+}
+function saveTouchSettings(next) {
+  touchSettings = normalizeTouchSettings(next);
+  try { localStorage.setItem(TOUCH_SETTINGS_KEY, JSON.stringify(touchSettings)); } catch {}
+  touchController?.setSettings(touchSettings);
+  syncTouchSettingsUi();
+  if (!$('#player-modal').classList.contains('hidden')) renderTouchControls(padSource.platform, padSource.game, padSource.arcade);
+}
+/** Phones and tablets play in the handheld layout; ?touch=1 forces it (testing on a desktop). */
+function isTouchPlay() {
+  return Boolean(touchPlayQuery?.matches) || /[?&]touch=1(&|$)/.test(window.location.search);
+}
+let safeAreaProbe = null;
+function readSafeArea() {
+  if (!safeAreaProbe) {
+    safeAreaProbe = document.createElement('div');
+    safeAreaProbe.setAttribute('aria-hidden', 'true');
+    safeAreaProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+    document.body.appendChild(safeAreaProbe);
+  }
+  const style = getComputedStyle(safeAreaProbe);
+  return { top: parseFloat(style.paddingTop) || 0, right: parseFloat(style.paddingRight) || 0, bottom: parseFloat(style.paddingBottom) || 0, left: parseFloat(style.paddingLeft) || 0 };
+}
+/**
+ * Chooses the console's pad (and the picture shape) for the game about to start. Arcade: `arcade`
+ * = { core, buttons, ways } — the core that runs it and the cabinet's controls.
+ */
+function renderTouchControls(platform, game = null, arcade = null) {
+  padSource = { platform, game, arcade };
+  padSpec = padSpecFor(platform, platform === 'ARCADE' ? arcadeLayout(game?.arcade) : 'six', arcade, touchSettings);
+  padAspect = platform === 'ARCADE' && game?.arcade?.vertical ? 3 / 4 : 4 / 3;
   const root = $('#touch-controls');
-  const system = getEmulatedSystem(platform);
-  if (!root || !system) return;
-  const button = ({ label, input, ariaLabel = label }) => `<button data-nes-button="${esc(input)}" aria-label="${esc(ariaLabel)}">${esc(label)}</button>`;
-  const layout = platform === 'ARCADE' ? arcadeLayout(game?.arcade) : 'standard';
-  const actions = layout === 'neogeo' ? system.neoGeoButtons : system.actionButtons;
-  root.dataset.platform = platform;
-  root.dataset.layout = layout;
-  root.innerHTML = `<div class="dpad"><button data-nes-button="BUTTON_UP" aria-label="Yukarı">▲</button><div><button data-nes-button="BUTTON_LEFT" aria-label="Sola">◀</button><button data-nes-button="BUTTON_DOWN" aria-label="Aşağı">▼</button><button data-nes-button="BUTTON_RIGHT" aria-label="Sağa">▶</button></div></div><div class="action-pad">${actions.map(button).join('')}</div><div class="system-pad">${system.showSelect ? button({label:system.selectLabel || 'SELECT',input:'BUTTON_SELECT',ariaLabel:system.selectLabel === 'JETON' ? 'Jeton at' : 'SELECT'}) : ''}${system.showStart ? button({label:'START',input:'BUTTON_START'}) : ''}</div>`;
+  if (root) { root.dataset.platform = platform; root.dataset.layout = padSpec.id; }
+  applyPlayLayout();
+}
+/** Lays out the player: picture, pad and buttons for the current screen size and orientation. */
+function applyPlayLayout() {
+  const modal = $('#player-modal');
+  if (!modal || modal.classList.contains('hidden') || !touchController) return;
+  const touch = isTouchPlay();
+  modal.classList.toggle('touch-play', touch);
+  const width = touch ? modal.clientWidth || window.innerWidth : 393;
+  const height = touch ? modal.clientHeight || window.innerHeight : 873;
+  const layout = computeTouchLayout({ width, height, safe: touch ? readSafeArea() : {}, aspect: padAspect, spec: padSpec, settings: touchSettings, padHidden: touch && padInUse && touchSettings.hideWithGamepad });
+  if (touch) {
+    const vars = { '--scr-x': layout.screen.x, '--scr-y': layout.screen.y, '--scr-w': layout.screen.w, '--scr-h': layout.screen.h, '--bar-h': layout.chrome.bar.h, '--bar-pad': layout.chrome.bar.padTop };
+    for (const [name, value] of Object.entries(vars)) modal.style.setProperty(name, `${value}px`);
+    modal.dataset.orientation = layout.orientation;
+    modal.classList.toggle('pad-hidden', Boolean(layout.padHidden));
+  }
+  touchController.setSettings(touchSettings);
+  touchController.render(layout);
+  requestAnimationFrame(() => { try { activeEmulator?.fitInParent?.(); } catch {} });
+}
+function schedulePlayLayout() {
+  if (playLayoutFrame) return;
+  playLayoutFrame = requestAnimationFrame(() => { playLayoutFrame = 0; applyPlayLayout(); });
+}
+function syncTouchSettingsUi() {
+  const s = touchSettings;
+  const setRange = (id, value) => { const input = $(`#${id}`), out = $(`#${id}-out`); if (input) input.value = String(Math.round(value * 100)); if (out) out.textContent = `%${Math.round(value * 100)}`; };
+  setRange('ts-scale', s.scale);
+  setRange('ts-opacity', s.opacity);
+  const seg = (id, value) => { for (const b of $$(`#${id} button`)) b.setAttribute('aria-pressed', String(b.dataset.value === value)); };
+  seg('ts-haptics', s.haptics ? 'on' : 'off');
+  seg('ts-dpad-mode', s.dpadMode);
+  seg('ts-diagonal', s.diagonal);
+  seg('ts-floating', s.floating ? 'floating' : 'fixed');
+  seg('ts-hide-pad', s.hideWithGamepad ? 'on' : 'off');
+  seg('ts-arcade-buttons', s.arcadeButtons);
+  const row = $('#ts-arcade-row');
+  if (row) row.hidden = padSource.platform !== 'ARCADE';
+  const note = $('#ts-four-way-note');
+  if (note) note.hidden = !padSpec.fourWay;
+}
+function setupTouchSettings() {
+  const range = (id, key) => $(`#${id}`)?.addEventListener('input', e => saveTouchSettings({ ...touchSettings, [key]: Number(e.target.value) / 100 }));
+  range('ts-scale', 'scale');
+  range('ts-opacity', 'opacity');
+  const seg = (id, apply) => $(`#${id}`)?.addEventListener('click', e => { const b = e.target.closest('button[data-value]'); if (b) saveTouchSettings({ ...touchSettings, ...apply(b.dataset.value) }); });
+  seg('ts-haptics', v => ({ haptics: v === 'on' }));
+  seg('ts-dpad-mode', v => ({ dpadMode: v }));
+  seg('ts-diagonal', v => ({ diagonal: v }));
+  seg('ts-floating', v => ({ floating: v === 'floating' }));
+  seg('ts-hide-pad', v => ({ hideWithGamepad: v === 'on' }));
+  seg('ts-arcade-buttons', v => ({ arcadeButtons: v }));
+  $('#ts-reset')?.addEventListener('click', () => saveTouchSettings({ ...DEFAULT_TOUCH_SETTINGS }));
+  // The settings replace the menu buttons, so the sheet stays short and the pad below shows the change live.
+  $('#touch-settings-open')?.addEventListener('click', () => showTouchSettings(true));
+  $('#ts-back')?.addEventListener('click', () => showTouchSettings(false));
+  $('#ts-done')?.addEventListener('click', () => { void closePlayMenu(); });
+  syncTouchSettingsUi();
+}
+function showTouchSettings(open) {
+  const panel = $('#touch-settings');
+  if (!panel) return;
+  if (open) syncTouchSettingsUi();
+  panel.hidden = !open;
+  $('#player-menu')?.classList.toggle('settings-open', open);
+  $('#player-modal')?.classList.toggle('settings-view', open);
+  $('#touch-settings-open')?.setAttribute('aria-expanded', String(open));
+  if (open) $('#player-menu').scrollTop = 0;
+}
+/** Menu (touch play): pauses the game while open, resumes it on close unless paused by hand. */
+function openPlayMenu() {
+  const modal = $('#player-modal');
+  if (playMenuOpen || !modal || modal.classList.contains('hidden')) return;
+  playMenuOpen = true;
+  touchController?.releaseAll();
+  modal.classList.add('menu-open');
+  $('#play-menu-backdrop').hidden = false;
+  $('#play-menu')?.setAttribute('aria-expanded', 'true');
+  $('#play-menu-status').textContent = $('#player-status').textContent;
+  if (activeEmulator && !emulatorPaused && !$('#pause-game').disabled) { menuPausedGame = true; void togglePause(); }
+}
+function closePlayMenu() {
+  if (!playMenuOpen) return Promise.resolve();
+  playMenuOpen = false;
+  $('#player-modal')?.classList.remove('menu-open');
+  $('#play-menu-backdrop').hidden = true;
+  $('#play-menu')?.setAttribute('aria-expanded', 'false');
+  showTouchSettings(false);
+  const resume = menuPausedGame && emulatorPaused ? togglePause() : Promise.resolve();
+  menuPausedGame = false;
+  return resume;
+}
+function setupPlayChrome() {
+  $('#play-menu')?.addEventListener('click', () => (playMenuOpen ? closePlayMenu() : openPlayMenu()));
+  $('#play-menu-close')?.addEventListener('click', () => { void closePlayMenu(); });
+  $('#play-menu-backdrop')?.addEventListener('click', () => { void closePlayMenu(); });
+  $('#play-save')?.addEventListener('click', () => { void quickSave(); });
+  $('#play-load')?.addEventListener('click', () => { void quickLoad(); });
+  $('#play-pad-chip')?.addEventListener('click', () => saveTouchSettings({ ...touchSettings, hideWithGamepad: !touchSettings.hideWithGamepad }));
+  const relayout = () => { if (!$('#player-modal').classList.contains('hidden')) { touchController?.releaseAll(); schedulePlayLayout(); } };
+  window.addEventListener('resize', relayout);
+  window.visualViewport?.addEventListener('resize', relayout);
+  window.screen?.orientation?.addEventListener?.('change', relayout);
+  touchPlayQuery?.addEventListener?.('change', relayout);
+  setupTouchSettings();
+}
+/** Physical controllers drive the game directly (positional RetroPad mapping, left stick = d-pad). */
+function startGamepadInput() {
+  if (!gamepadPoller) {
+    gamepadPoller = new GamepadPoller({
+      onChange: (pressed, released) => {
+        for (const name of released) activeEmulator?.releaseButton?.(name, 'gamepad');
+        for (const name of pressed) activeEmulator?.pressButton?.(name, 'gamepad');
+      },
+      onActivity: () => setPadInUse(true),
+      onMenu: () => { if (!isTouchPlay()) { void togglePause(); return; } if (playMenuOpen) void closePlayMenu(); else openPlayMenu(); }
+    });
+  }
+  gamepadPoller.start();
+}
+function stopGamepadInput() { gamepadPoller?.stop(); }
+function setPadInUse(active) {
+  if (padInUse === active) return;
+  padInUse = active;
+  $('#player-modal')?.classList.toggle('pad-in-use', active);
+  const chip = $('#play-pad-chip');
+  if (chip) chip.hidden = !active;
+  if (active) touchController?.releaseAll();
+  updateGamepadStatus();
+  schedulePlayLayout();
 }
 function updateGamepadStatus() {
   const root = $('#gamepad-status');
@@ -966,7 +1161,11 @@ function updateGamepadStatus() {
 function setupGamepadStatus() {
   $('#refresh-gamepads')?.addEventListener('click', updateGamepadStatus);
   window.addEventListener('gamepadconnected', updateGamepadStatus);
-  window.addEventListener('gamepaddisconnected', updateGamepadStatus);
+  window.addEventListener('gamepaddisconnected', () => {
+    updateGamepadStatus();
+    const pads = typeof navigator.getGamepads === 'function' ? [...navigator.getGamepads()].filter(Boolean) : [];
+    if (!pads.length) setPadInUse(false);
+  });
   window.addEventListener('focus', updateGamepadStatus);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') updateGamepadStatus();
@@ -975,24 +1174,12 @@ function setupGamepadStatus() {
 }
 
 function wireTouchControls() {
-  const root = $('#touch-controls');
-  root.addEventListener('pointerdown', event => {
-    const button = event.target.closest('[data-nes-button]');
-    if (!button || !activeEmulator) return;
-    event.preventDefault();
-    try { button.setPointerCapture?.(event.pointerId); } catch {}
-    activeEmulator.pressButton?.(button.dataset.nesButton);
-    button.classList.add('pressed');
+  touchController = new TouchController($('#touch-controls'), {
+    press: input => activeEmulator?.pressButton?.(input, 'touch'),
+    release: input => activeEmulator?.releaseButton?.(input, 'touch'),
+    vibrate: typeof navigator.vibrate === 'function' ? ms => navigator.vibrate(ms) : null
   });
-  const release = event => {
-    const button = event.target.closest('[data-nes-button]');
-    if (!button) return;
-    activeEmulator?.releaseButton?.(button.dataset.nesButton);
-    button.classList.remove('pressed');
-  };
-  root.addEventListener('pointerup', release);
-  root.addEventListener('pointercancel', release);
-  root.addEventListener('lostpointercapture', release);
+  touchController.setSettings(touchSettings);
 }
 
 async function refreshGames(){const [stored,saves,stateKeys,bios]=await Promise.all([allStored(),allBatterySaves(),allSaveStateKeys().catch(()=>[]),allBios().catch(()=>[])]);batterySaveIds=new Set(saves.map(save=>save.id));biosIds=new Set(bios.map(record=>record.id));resumeStateIds=new Set(stateKeys.map(String).filter(key=>key.endsWith(':auto')).map(key=>key.slice(0,-':auto'.length)));games=[...DEMO_GAMES.map(g=>({...g})),...stored];renderAll();}
@@ -1143,7 +1330,7 @@ function setupDrive(){
   }
 }
 
-function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const removeBiosButton=e.target.closest('[data-remove-bios]');if(removeBiosButton){await removeBios(removeBiosButton.dataset.removeBios);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',()=>closeImport());$('#player-close').addEventListener('click',()=>closePlayer());$('#pause-game').addEventListener('click',togglePause);$('#quick-save').addEventListener('click',()=>{void quickSave();});$('#quick-load').addEventListener('click',()=>{void quickLoad();});$('#immersive-save').addEventListener('click',()=>{void quickSave();});$('#immersive-load').addEventListener('click',()=>{void quickLoad();});$('#player-exit').addEventListener('click',()=>closePlayer());$('#update-reload')?.addEventListener('click',applyUpdate);$('#display-mode')?.addEventListener('click',()=>setDisplayMode(nextDisplayMode(displayMode)));$('#perf-test')?.addEventListener('click',()=>{void runPerformanceTest();});$('#perf-copy')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(historyReport(loadHistory()));showToast('Performans ölçümleri panoya kopyalandı.');}catch{showToast('Kopyalanamadı; metni seçip kopyalayabilirsin.','error');}});$('#perf-clear')?.addEventListener('click',()=>{try{localStorage.removeItem(PERF_HISTORY_KEY);}catch{}renderPerfHistory();});renderPerfHistory();$('#display-mode-setting')?.addEventListener('change',e=>setDisplayMode(e.target.value));updateDisplayModeUi();$('#update-later')?.addEventListener('click',()=>{const banner=$('#update-banner');if(banner)banner.hidden=true;});wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});window.addEventListener('popstate',()=>{if(!$('#player-modal').classList.contains('hidden')){closePlayer({viaHistory:true});return;}if(!$('#import-modal').classList.contains('hidden'))closeImport({viaHistory:true});});document.addEventListener('visibilitychange',()=>{void handlePlayerVisibility();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#bios-add')?.addEventListener('click',()=>$('#bios-input').click());$('#bios-input')?.addEventListener('change',e=>{void handleFiles(e.target.files);e.target.value='';});$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
+function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const removeBiosButton=e.target.closest('[data-remove-bios]');if(removeBiosButton){await removeBios(removeBiosButton.dataset.removeBios);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',()=>closeImport());$('#player-close').addEventListener('click',()=>closePlayer());$('#pause-game').addEventListener('click',()=>{menuPausedGame=false;void togglePause();});$('#quick-save').addEventListener('click',async()=>{await closePlayMenu();void quickSave();});$('#quick-load').addEventListener('click',async()=>{await closePlayMenu();void quickLoad();});$('#immersive-save').addEventListener('click',()=>{void quickSave();});$('#immersive-load').addEventListener('click',()=>{void quickLoad();});$('#player-exit').addEventListener('click',()=>closePlayer());$('#update-reload')?.addEventListener('click',applyUpdate);$('#display-mode')?.addEventListener('click',()=>setDisplayMode(nextDisplayMode(displayMode)));$('#perf-test')?.addEventListener('click',async()=>{await closePlayMenu();void runPerformanceTest();});$('#perf-copy')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(historyReport(loadHistory()));showToast('Performans ölçümleri panoya kopyalandı.');}catch{showToast('Kopyalanamadı; metni seçip kopyalayabilirsin.','error');}});$('#perf-clear')?.addEventListener('click',()=>{try{localStorage.removeItem(PERF_HISTORY_KEY);}catch{}renderPerfHistory();});renderPerfHistory();$('#display-mode-setting')?.addEventListener('change',e=>setDisplayMode(e.target.value));updateDisplayModeUi();$('#update-later')?.addEventListener('click',()=>{const banner=$('#update-banner');if(banner)banner.hidden=true;});wireTouchControls();setupPlayChrome();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});window.addEventListener('popstate',()=>{if(!$('#player-modal').classList.contains('hidden')){if(playMenuOpen){void closePlayMenu();pushOverlayState('player');return;}closePlayer({viaHistory:true});return;}if(!$('#import-modal').classList.contains('hidden'))closeImport({viaHistory:true});});document.addEventListener('visibilitychange',()=>{void handlePlayerVisibility();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#bios-add')?.addEventListener('click',()=>$('#bios-input').click());$('#bios-input')?.addEventListener('change',e=>{void handleFiles(e.target.files);e.target.value='';});$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
 window.addEventListener('pagehide',()=>{void captureState('auto');void endSaveSession('pagehide');if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}});
 function updateNetwork(){
   $('#network-label').textContent=navigator.onLine?'Bağlantı mevcut':'Çevrimdışı';

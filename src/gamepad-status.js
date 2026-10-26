@@ -27,7 +27,7 @@ export function inspectGamepads(navigatorLike = globalThis.navigator) {
 
 export function describeGamepads(status) {
   if (!status || status.state === 'unsupported') {
-    return 'Gamepad API algılanamadı. Emülatör menüsündeki kontrolcü ayarını yine de deneyebilirsin.';
+    return 'Gamepad API algılanamadı; bu tarayıcıda fiziksel kontrolcü kullanılamıyor.';
   }
   if (status.state === 'unavailable') {
     return 'Gamepad durumu okunamadı. Yeniden tara.';

@@ -11,7 +11,8 @@ serves from its own site together with the cores it uses (no CDN at runtime).
 | Mega Drive / Genesis | `.md`, `.gen`, `.bin` (SEGA header only) | Genesis Plus GX 1.7.4 | |
 | Arcade | `.zip` (ROM set) | FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2, MAME 2003-Plus | Set checked against the core's own list; Neo Geo needs `neogeo.zip`; old CPS2 sets without `.key` run on FB Alpha 2012 CPS2 |
 
-`src/emulator-systems.js` defines each system (extensions, EmulatorJS system ID, touch layout).
+`src/emulator-systems.js` defines each system (extensions, EmulatorJS system ID); the touch pads
+are in `src/touch-layout.js`.
 N64 can appear in the library but is not playable (see `docs/` and the emulator research: N64 in a
 phone browser has no dynamic recompiler and is not expected to reach full speed).
 
@@ -32,7 +33,7 @@ publishing `dist/`.
 
 `scripts/emulatorjs-runtime.mjs` (used by `vite.config.js`) builds `/emulatorjs/4.2.3/data/`:
 
-- The exact npm tarballs of `@emulatorjs/emulatorjs` and the six cores are fetched with `npm pack`
+- The exact npm tarballs of `@emulatorjs/emulatorjs` and the seven cores are fetched with `npm pack`
   and checked against pinned sha512 integrity values (installing them as normal dependencies would
   pull every core of every system, ~300 MB). They are cached in `node_modules/.cache/`.
 - The npm package has no minified runtime, so the build bundles the unmodified 4.2.3 sources into
@@ -59,8 +60,8 @@ game) and reloads when the player taps it.
 ## Playing
 
 1. Import files (or a ZIP of console ROMs, or an arcade set zip) with **Oyun ekle**.
-2. Choose **Oyna**. Touch controls follow the system; arcade games get six buttons (Y X L / B A R),
-   **JETON** and **START**; Neo Geo games get A B C D. Keyboard and gamepads work too.
+2. Choose **Oyna**. On phones and tablets the player becomes a handheld (see *Touch controls and
+   controllers*); on a computer keyboard and controllers work.
 3. **Görüntü** switches the display mode live: **Keskin** (default; sharp-bilinear shader, every
    pixel the same size), **Piksel** (nearest neighbour), **CRT** (crt-easymode), **Tam sayı**
    (integer scale on both axes; applied when a game starts). The game is drawn at the screen's real
@@ -74,6 +75,45 @@ game) and reloads when the player taps it.
 For files named like Super Mario Bros. 3, an unrecognised payload (usually a ROM hack) is never
 started silently: the player explains the risk and asks **Yine de oyna / Vazgeç**; the choice is
 remembered.
+
+## Touch controls and controllers
+
+On touch devices (`(hover: none) and (pointer: coarse)`, or `?touch=1`) the player fills the screen
+like a handheld: in portrait the picture sits edge to edge under a slim bar (☰ menu, title,
+Kaydet, Yükle) and the pad is below it; in landscape the picture is centred at full height and the
+pad sits in the side areas, reaching over the picture only on narrow (16:9) screens, where the
+Saydamlık setting applies. Fullscreen only hides the browser's bars. `src/touch-layout.js` computes
+the geometry (screen size, orientation, safe-area insets, pad size setting) and is unit-tested on
+phone and tablet sizes for every pad: on screen, thumb-sized, no overlaps, clear of the edge-swipe
+zone, never over the picture in portrait.
+
+Each console has its own pad: NES B·A (A a little higher), Super Nintendo X/Y/A/B diamond in its
+colours with L/R shoulders, Mega Drive A·B·C under X·Y·Z (Genesis Plus GX 6-button mapping),
+arcade Y X L / B A R panel with JETON/START, Neo Geo A·B·C·D in SNK's colours. FinalBurn Neo games
+show only the buttons their cabinet had (1942: 2, Galaga: 1, Pac-Man: none; counts and joystick
+type from the MAME 2003-Plus list, FinalBurn Neo numbers buttons positionally: 1 = B, 2 = A,
+3 = Y, 4 = X); 4-way joystick games (Pac-Man, Donkey Kong) get a 4-way d-pad. "Altısı da" in the
+settings brings the full panel back.
+
+`src/touch-controller.js` handles the input:
+- The d-pad is one surface: 8 sectors by angle (cardinals 50°, diagonals 40°; "Çapraz basma"
+  Zor/Normal/Kolay = 30/40/52°), a small dead zone, 8° hysteresis so a resting thumb does not
+  flicker between neighbours, and the thumb may roll between directions and slide past the drawn
+  cross without lifting. 4-way mode and a floating d-pad (centred where the thumb lands) are
+  options.
+- Face buttons react ~25 % beyond their edge; sliding switches buttons; a thumb in the gap between
+  two buttons presses both.
+- Every pointer is tracked separately and presses act on touch-down; the core gets the union of
+  all fingers. Each new press vibrates briefly (8 ms directions, 14 ms buttons; Android).
+- Menu, app switch and rotation lift every finger. The menu pauses the game and resumes it on
+  close; the Android back button closes the menu first.
+
+Controllers (`src/gamepad-input.js`): RetroPlay polls the Gamepad API once per frame and maps a
+standard controller by position like RetroArch (bottom = RetroPad B, right = A, left = Y, top = X,
+bumpers L/R, triggers L2/R2), the left stick as an 8-way d-pad with a dead zone, a hat switch on
+non-standard controllers, the guide button opens the menu. EmulatorJS's own gamepad loop is stopped
+when the game starts so a press is never delivered twice. While a controller is in use the touch
+pad steps aside (🎮 in the bar brings it back; setting "Kontrolcü kullanılınca … gizle").
 
 ## Arcade sets and BIOS files
 
