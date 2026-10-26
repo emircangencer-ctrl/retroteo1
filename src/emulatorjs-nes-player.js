@@ -213,6 +213,50 @@ export class EmulatorJsPlayer {
       return false;
     }
   }
+  /** Frames per second during normal play (vsync on); about 60 unless the screen drives it faster. */
+  async measurePace({ ms = 2000 } = {}) {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (!this.started || this.destroyed || typeof gm?.getFrameNum !== 'function') return null;
+    const startFrame = gm.getFrameNum();
+    const startTime = performance.now();
+    await new Promise(resolve => window.setTimeout(resolve, ms));
+    return (gm.getFrameNum() - startFrame) / ((performance.now() - startTime) / 1000);
+  }
+  /**
+   * Measures how fast this device can run the game: the core runs unthrottled (fast-forward with
+   * no limit, vsync off, muted) for `seconds` and the emulated frame rate is compared with the
+   * system's normal rate. Returns { fps, headroom, frames, ms } or null; always restores normal play.
+   */
+  async benchmark({ seconds = 4, nominalFps = 60 } = {}) {
+    const emu = this.frame?.contentWindow?.EJS_emulator;
+    const gm = emu?.gameManager;
+    if (!this.started || this.destroyed || typeof gm?.getFrameNum !== 'function' || typeof gm.toggleFastForward !== 'function') return null;
+    const wait = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+    const volume = typeof emu.volume === 'number' ? emu.volume : 0.7;
+    this.releaseAllButtons();
+    try {
+      try { emu.setVolume?.(0); } catch {}
+      try { gm.functions?.setVSync?.(0); } catch {}
+      gm.setFastForwardRatio?.(0);
+      gm.toggleFastForward(1);
+      await wait(500); // let the unthrottled loop settle
+      const startFrame = gm.getFrameNum();
+      const startTime = performance.now();
+      await wait(Math.max(1000, seconds * 1000));
+      const frames = gm.getFrameNum() - startFrame;
+      const ms = performance.now() - startTime;
+      const fps = frames / (ms / 1000);
+      return { fps, headroom: fps / nominalFps, frames, ms };
+    } catch (error) {
+      try { this.onWarning(`Performans ölçülemedi: ${error?.message || error}`); } catch {}
+      return null;
+    } finally {
+      try { gm.toggleFastForward(0); } catch {}
+      try { gm.setFastForwardRatio?.(3); } catch {}
+      try { gm.functions?.setVSync?.(1); } catch {}
+      try { emu.setVolume?.(volume); } catch {}
+    }
+  }
   /** Switches the shader of the running game (display mode); returns false if it is not possible. */
   setShader(name) {
     const emu = this.frame?.contentWindow?.EJS_emulator;

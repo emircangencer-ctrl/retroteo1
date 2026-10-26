@@ -12,6 +12,7 @@ import { inspectGamepads, describeGamepads } from './gamepad-status.js';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from './fullscreen.js';
 import { watchServiceWorkerUpdates, activateUpdate, summarizeRuntimeCache } from './sw-update.js';
 import { DISPLAY_MODES, DISPLAY_MODE_STORAGE_KEY, normalizeDisplayMode, nextDisplayMode, displayStartOptions } from './display-modes.js';
+import { describeResult, paceWarning, deviceSummary, loadHistory, addToHistory, historyReport, PERF_HISTORY_KEY } from './performance-meter.js';
 import { getDriveClientId, loadGoogleIdentity, requestDriveAccessToken, listDriveFiles, downloadDriveFile, isDriveFolder, isSupportedDriveGame } from './google-drive.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
@@ -60,6 +61,36 @@ let saveCapture = null;
 let saveTimer = 0;
 let displayMode = loadDisplayMode();
 let activeDisplayStart = null;
+let perfRunning = false;
+function renderPerfHistory() {
+  const el = $('#perf-history');
+  if (el) el.textContent = historyReport(loadHistory());
+}
+/** Runs the performance meter on the running game and keeps the result for Settings. */
+async function runPerformanceTest() {
+  const game = games.find(g => g.id === activeGameId && !g.demo);
+  if (!game || perfRunning || typeof activeEmulator?.benchmark !== 'function') return;
+  if (emulatorPaused) { showPlayerNotice('Ölçüm için önce oyunu devam ettir'); return; }
+  perfRunning = true;
+  const button = $('#perf-test');
+  if (button) button.disabled = true;
+  const player = activeEmulator;
+  showPlayerNotice('Performans ölçülüyor… yaklaşık 7 saniye', { timeout: 9000 });
+  try {
+    const normalFps = await player.measurePace({ ms: 2000 });
+    const result = activeEmulator === player ? await player.benchmark({ seconds: 4 }) : null;
+    if (activeEmulator !== player) return;
+    if (!result) { showPlayerNotice('Performans ölçülemedi'); return; }
+    const entry = { at: Date.now(), title: game.title, platform: game.platform, core: activeCoreId || '', headroom: result.headroom, fps: result.fps, normalFps, ...deviceSummary() };
+    addToHistory(entry);
+    renderPerfHistory();
+    const warning = paceWarning(normalFps);
+    showPlayerNotice(warning ? `${describeResult(entry)} · ${warning}` : describeResult(entry), { timeout: 10000 });
+  } finally {
+    perfRunning = false;
+    if (button) button.disabled = !activeEmulator;
+  }
+}
 function loadDisplayMode() {
   try { return normalizeDisplayMode(localStorage.getItem(DISPLAY_MODE_STORAGE_KEY)); } catch { return normalizeDisplayMode(null); }
 }
@@ -268,6 +299,7 @@ async function startGame(id) {
   $('#player-screen').replaceChildren();
   $('#pause-game').textContent = 'Ⅱ Duraklat';
   $('#pause-game').disabled = true;
+  $('#perf-test').disabled = true;
   activeCoreId = null;
   setStateButtons({ canSave: false, canLoad: false });
   hidePlayerNotice();
@@ -362,6 +394,7 @@ async function startGame(id) {
 
     $('#player-status').textContent = playerStatus('Çalışıyor');
     $('#pause-game').disabled = false;
+    $('#perf-test').disabled = false;
     game.lastPlayed = Date.now();
     await saveGame(game);
     await refreshGames();
@@ -887,7 +920,7 @@ function setupDrive(){
   }
 }
 
-function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',()=>closeImport());$('#player-close').addEventListener('click',()=>closePlayer());$('#pause-game').addEventListener('click',togglePause);$('#quick-save').addEventListener('click',()=>{void quickSave();});$('#quick-load').addEventListener('click',()=>{void quickLoad();});$('#immersive-save').addEventListener('click',()=>{void quickSave();});$('#immersive-load').addEventListener('click',()=>{void quickLoad();});$('#player-exit').addEventListener('click',()=>closePlayer());$('#update-reload')?.addEventListener('click',applyUpdate);$('#display-mode')?.addEventListener('click',()=>setDisplayMode(nextDisplayMode(displayMode)));$('#display-mode-setting')?.addEventListener('change',e=>setDisplayMode(e.target.value));updateDisplayModeUi();$('#update-later')?.addEventListener('click',()=>{const banner=$('#update-banner');if(banner)banner.hidden=true;});wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});window.addEventListener('popstate',()=>{if(!$('#player-modal').classList.contains('hidden')){closePlayer({viaHistory:true});return;}if(!$('#import-modal').classList.contains('hidden'))closeImport({viaHistory:true});});document.addEventListener('visibilitychange',()=>{void handlePlayerVisibility();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
+function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',()=>closeImport());$('#player-close').addEventListener('click',()=>closePlayer());$('#pause-game').addEventListener('click',togglePause);$('#quick-save').addEventListener('click',()=>{void quickSave();});$('#quick-load').addEventListener('click',()=>{void quickLoad();});$('#immersive-save').addEventListener('click',()=>{void quickSave();});$('#immersive-load').addEventListener('click',()=>{void quickLoad();});$('#player-exit').addEventListener('click',()=>closePlayer());$('#update-reload')?.addEventListener('click',applyUpdate);$('#display-mode')?.addEventListener('click',()=>setDisplayMode(nextDisplayMode(displayMode)));$('#perf-test')?.addEventListener('click',()=>{void runPerformanceTest();});$('#perf-copy')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(historyReport(loadHistory()));showToast('Performans ölçümleri panoya kopyalandı.');}catch{showToast('Kopyalanamadı; metni seçip kopyalayabilirsin.','error');}});$('#perf-clear')?.addEventListener('click',()=>{try{localStorage.removeItem(PERF_HISTORY_KEY);}catch{}renderPerfHistory();});renderPerfHistory();$('#display-mode-setting')?.addEventListener('change',e=>setDisplayMode(e.target.value));updateDisplayModeUi();$('#update-later')?.addEventListener('click',()=>{const banner=$('#update-banner');if(banner)banner.hidden=true;});wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});window.addEventListener('popstate',()=>{if(!$('#player-modal').classList.contains('hidden')){closePlayer({viaHistory:true});return;}if(!$('#import-modal').classList.contains('hidden'))closeImport({viaHistory:true});});document.addEventListener('visibilitychange',()=>{void handlePlayerVisibility();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
 window.addEventListener('pagehide',()=>{void captureState('auto');void endSaveSession('pagehide');if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}});
 function updateNetwork(){
   $('#network-label').textContent=navigator.onLine?'Bağlantı mevcut':'Çevrimdışı';

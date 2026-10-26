@@ -263,6 +263,23 @@ await scenario('"Tam sayı" display mode makes every NES pixel exactly the same 
   assert.equal(new Set(runs).size, 1, `one pixel width only, got ${[...new Set(runs)].join('/')}`);
 }, { mobile: true });
 
+await scenario('the performance meter measures the speed factor and normal play resumes afterwards', async page => {
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  await page.waitForTimeout(1000);
+  await page.evaluate(() => document.querySelector('#perf-test').click());
+  const notice = await waitFor(() => page.evaluate(() => { const text = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(text) ? text : null; }), { timeout: 20000, interval: 300 });
+  assert.match(notice || '', /Hız payı \d+,\d× \(\d+ kare\/sn\)/);
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
+  assert.equal(history.length, 1);
+  assert.ok(history[0].headroom > 1, `headroom ${history[0].headroom}`);
+  assert.equal(history[0].core, 'nestopia');
+  const fastForward = await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.isFastForward);
+  assert.equal(Boolean(fastForward), false, 'fast-forward is off again');
+  await page.evaluate(() => document.querySelector('[data-view="settings"]').click());
+  assert.match(await page.evaluate(() => document.querySelector('#perf-history').textContent), /checkerboard · NES\/nestopia/);
+});
+
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
   assert.deepEqual(cdnRequests, []);
 });

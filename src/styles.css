@@ -249,3 +249,4 @@
 .update-banner[hidden]{display:none}
 @media(max-width:760px){.update-banner{bottom:calc(84px + env(safe-area-inset-bottom));width:calc(100vw - 30px);justify-content:space-between}}
 .setting-select{min-width:120px;background:#141e2e;color:#dbe3f2;border:1px solid #29374c;border-radius:9px;padding:7px 10px;font-size:11px}
+.setting-row-stack{align-items:flex-start}.perf-history{margin:10px 0 0;padding:10px;max-height:160px;overflow:auto;white-space:pre-wrap;font:10px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c6d2e6;background:#0c1422;border:1px solid #243149;border-radius:9px}
