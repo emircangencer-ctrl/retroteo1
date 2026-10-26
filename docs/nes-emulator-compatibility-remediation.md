@@ -1,6 +1,8 @@
 # NES emulator compatibility remediation
 
-Status: **migration spike under validation**. The branch defaults to EmulatorJS with the Nestopia core (FCEUmm only via explicit `?nescore=fceumm`), but that does not prove the reported graphics or timing issues are fixed.
+Status: **migration done; real-device validation open**. EmulatorJS 4.2.3 with Nestopia is the only NES engine; the legacy JSNES and `@nesjs/core` engines were removed in Faz 1 (2026-10-26). FCEUmm is offered when Nestopia cannot open a file and can be forced with `?nescore=fceumm`. None of this proves the reported graphics or timing issues are fixed on the device.
+
+**2026-10-26 update (Faz 1):** the canvas-resolution issue below is fixed and measured: with a self-authored checkerboard ROM at devicePixelRatio 2.75, NES pixels had been drawn 2, 3, 5 or 6 screen pixels wide (some lost); RetroArch now renders at device resolution (pixels 3–4 wide, none lost), the default "Keskin" mode makes every pixel the same size with a sharp-bilinear shader, and "Tam sayı" mode gives exactly equal pixels. The runtime and cores are served from RetroPlay itself and play offline after one visit.
 
 **2026-10-25 evidence:** blargg's public `mmc3_test_2` ROMs, run through the app's own import and EmulatorJS 4.2.3 pipeline in desktop Chromium, pass 6/6 with Nestopia (FCEUmm fails `4-scanline_timing` #2). The reported SMB3 payload CRC `7388BEBD` is absent from the libretro No-Intro NES database. A separate, game-independent issue was measured: the emulator canvas is rendered at CSS-pixel resolution and then scaled by the device pixel ratio with nearest-neighbour filtering, which produces uneven pixel widths on high-DPI phones. These findings point away from a core MMC3 defect; the user's latest screenshot is still needed to classify the reported symptom.
 
@@ -19,9 +21,9 @@ Earlier screenshots showed severe graphical corruption in *Super Mario Bros. 3* 
 
 - The default engine is EmulatorJS, loaded from the official version-pinned CDN in a dedicated iframe. NES now explicitly selects `EJS_core = 'nestopia'`; the NES-specific EmulatorJS documentation lists both `fceumm` and `nestopia` as supported cores. SNES and Mega Drive retain their system-matched cores. The chosen core is not, by itself, proof of correct graphics for every ROM dump or game.
 - ROM bytes stay in the browser and are handed to the iframe using a local Blob URL. RetroPlay does not upload the ROM to a third-party ROM service.
-- The existing JSNES player remains selectable with `?nescore=jsnes`; `@nesjs/core` remains selectable with `?nescore=nesjs`. These are comparison paths, not evidence that either engine is the correct fallback for every title.
+- The JSNES and `@nesjs/core` comparison engines (`?nescore=jsnes` / `?nescore=nesjs`) were removed in Faz 1 together with their AudioWorklet and mapper patch.
 - The application preserves its own player shell and touch controls. Immersive mode now hides surrounding player UI and leaves the game image, touch controls, and one exit-fullscreen control visible; canvas scaling is constrained to a centered 4:3 display box rather than stretched to arbitrary parent dimensions. Keyboard events are registered on the outer page and on the emulator iframe so controls can still be captured when the iframe owns focus. A unit test verifies the forwarded key-down/key-up calls.
-- EmulatorJS and its core assets are requested from the version-pinned official CDN path `https://cdn.emulatorjs.org/4.2.3/data/`. The versioned path was chosen over the moving `stable` alias so upstream releases do not silently change the runtime. Initial setup needs network access. Browser caching may help subsequent launches, but **offline playback is not guaranteed** by this integration.
+- EmulatorJS 4.2.3 and its cores are served from RetroPlay's own `/emulatorjs/4.2.3/data/` (built from integrity-checked npm tarballs; see README). Nothing is loaded from `cdn.emulatorjs.org`; after one online visit the service worker serves the runtime and the NES/SNES/Mega Drive cores offline (E2E-tested in Chromium).
 - EmulatorJS is GPL-3.0 licensed. Review the licensing and distribution implications before public release.
 
 ## Required validation before merge or production deployment
@@ -32,7 +34,7 @@ Earlier screenshots showed severe graphical corruption in *Super Mario Bros. 3* 
 4. Repeat the key checks in desktop Chromium. Record the browser/device, ROM dump/source, and observed result so a failure can be reproduced.
 5. Test malformed, unsupported, and truncated ROM files for clear failure behavior; header validation alone must not label a game as compatible.
 6. Confirm that existing IndexedDB ROM records and ROM export remain intact across the engine change.
-7. Test offline startup separately. The current CDN-based default is not expected to guarantee offline playback; if offline operation is a release requirement, test the current version-pinned cache behavior on actual browsers, then decide whether to package or self-host the runtime and core assets and re-evaluate licensing/distribution before release.
+7. Test offline startup on the phone: open the app once online, wait until Settings shows the cores on the device, switch to airplane mode and start an NES, SNES and Mega Drive game.
 
 ## Guardrails
 

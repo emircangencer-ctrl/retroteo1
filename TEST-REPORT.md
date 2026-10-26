@@ -280,3 +280,30 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - Policy change: an unrecognized SMB3 payload is still never started silently, but instead of blocking, the player shows a plain explanation (not a clean copy, likely a hack, graphics may differ) with **Yine de oyna / Vazgeç**, before any emulator is created. The choice is stored on the game record (`unverifiedDumpAccepted`) and a short reminder appears after start. Declining keeps the game closed with a one-line reason.
 - Disabled player buttons are now visibly disabled; the empty screen frame is hidden while the question is shown.
 - Tests: unit 123/123 (wiring tests updated to the new policy, ordering before player construction still asserted). E2E 12/12, including consent → start → remembered on relaunch, and decline → no emulator.
+
+
+## Stage 31 — Faz 1: self-hosted EmulatorJS, offline play, legacy engines removed (2026-10-26)
+
+- EmulatorJS 4.2.3 and the Nestopia, FCEUmm, Snes9x, Genesis Plus GX, FinalBurn Neo and MAME 2003-Plus cores are built into `dist/emulatorjs/4.2.3/data/` from npm tarballs fetched with `npm pack` and checked against pinned sha512 integrity values. The npm runtime has no minified files; the build bundles the unmodified sources plus a small documented addition (`scripts/emulatorjs-runtime.mjs`). Build reports are shipped (without them EmulatorJS disables its core cache).
+- Found while testing offline: lazily imported chunks were never precached, so an offline start failed ("Failed to fetch dynamically imported module"). The build now stamps every asset and a build ID into the service worker. Updates wait and are offered with "Yeni sürüm hazır · Yenile", never over a running game.
+- Removed the duplicate root `service-worker.js` and the JSNES / `@nesjs` engines, their AudioWorklet, mapper patch and dependencies.
+- E2E blocks every request to `cdn.emulatorjs.org`; 14/14 passed, including a new scenario that starts a game with the network off after one online visit. Unit 127/127. CI and Netlify Deploy Preview green.
+
+## Stage 32 — device-pixel rendering and display modes (2026-10-26)
+
+- Measured with a self-authored checkerboard ROM in a phone-sized view (devicePixelRatio 2.75): the canvas backing store was 329×247 (CSS pixels) and NES pixels were 2, 3, 5 or 6 screen pixels wide, some merged/lost. Cause: RetroArch sizes the canvas from `devicePixelContentBoxSize`, which arrived in CSS pixels. The core glue is patched to use CSS size × devicePixelRatio when the two disagree; RetroArch then renders at 905×679 (pixels 3–4 wide, all 256 columns present).
+- Display modes: Keskin (sharp-bilinear shader, equal pixel sizes), Piksel, CRT (crt-easymode), Tam sayı (`video_scale_integer` on both axes: every pixel exactly 3×3 in the test). The canvas fills the player; RetroArch letterboxes with the core's aspect ratio. EmulatorJS's menu bar no longer covers the game.
+- E2E 16/16 (device-pixel backing store, no merged columns, integer mode uniform). Unit 132/132.
+
+## Stage 33 — performance meter (2026-10-26)
+
+- "⏱ Performans" runs the core unthrottled for 4 s (fast-forward without limit, vsync off, muted) and reports frames per second / 60, plus the normal pace (a game following a 120 Hz screen is flagged). Results are kept on the device and listed in Settings with a copy button. In headless Chromium on the CI-class machine Nestopia ran ~295 fps unthrottled; this number says nothing about the phone.
+- E2E 17/17 (result stored, fast-forward off afterwards). Unit 137/137.
+
+## Stage 34 — arcade: FinalBurn Neo, MAME 2003-Plus, set checking, BIOS manager (2026-10-26)
+
+- Catalogs from the DATs of the commits the EmulatorJS 4.2.3 cores were built from: FinalBurn Neo v1.0.0.03 (EmulatorJS/FBNeo `dedd04f2`, 7889 sets) and MAME 2003-Plus (`3a72dae`, 5257 sets); set names, titles, ROM sizes and CRC32s only.
+- Zip import reads the central directory, matches by set name or by checksums, prefers FinalBurn Neo, reports complete / needs parent / missing files. BIOS sets go to a new `bios` store (DB v4, additive) and `neogeo.zip` is checked for `sp-s3.sp1`, `sm1.sm1`, `sfix.sfix`, `000-lo.lo` (the non-optional files in FBNeo's `d_neogeo.cpp`). BIOS and parent zips are written next to the game in the emulator.
+- A core that cannot open a file is detected (RetroArch reports a zero-size state while running its own menu). Measured: FCEUmm crashes the page on synthetic ROMs with mappers 220/239/247, so the next core is offered ("FCEUmm ile dene"), not started silently.
+- E2E with CRC-matched placeholder sets (zeros + four solved bytes; no game data) runs the real cores: FinalBurn Neo start, renamed zip, incomplete set, Neo Geo started after adding `neogeo.zip` from the player (both zips present in the emulator's file system, game loaded), MAME-only set, FCEUmm offer. 23/23 E2E, 148/148 unit.
+- **Not verified here:** real arcade sets on the user's phone (speed, memory with ~100 MB Neo Geo sets, audio), real-device offline start and update banner. PR #2 stays draft; `main` unchanged.
