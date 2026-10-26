@@ -9,7 +9,7 @@ serves from its own site together with the cores it uses (no CDN at runtime).
 | NES | `.nes` | Nestopia UE 1.53.1 | If Nestopia cannot open a file, FCEUmm is offered and remembered; `?nescore=fceumm` forces FCEUmm |
 | SNES | `.sfc`, `.smc` | Snes9x 1.63 | |
 | Mega Drive / Genesis | `.md`, `.gen`, `.bin` (SEGA header only) | Genesis Plus GX 1.7.4 | |
-| Arcade | `.zip` (ROM set) | FinalBurn Neo v1.0.0.03, MAME 2003-Plus | Set checked against the core's own list; Neo Geo needs `neogeo.zip` |
+| Arcade | `.zip` (ROM set) | FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2, MAME 2003-Plus | Set checked against the core's own list; Neo Geo needs `neogeo.zip`; old CPS2 sets without `.key` run on FB Alpha 2012 CPS2 |
 
 `src/emulator-systems.js` defines each system (extensions, EmulatorJS system ID, touch layout).
 N64 can appear in the library but is not playable (see `docs/` and the emulator research: N64 in a
@@ -40,8 +40,8 @@ publishing `dist/`.
   files written next to the game before it loads (arcade BIOS/parent zips), and a fix that makes
   RetroArch size its canvas in device pixels when the browser reports the device-pixel box in CSS
   pixels.
-- WebGL1 (`-legacy`) and WebGL2 builds of Nestopia, FCEUmm, Snes9x, Genesis Plus GX, FinalBurn Neo
-  and MAME 2003-Plus are shipped with their build reports (EmulatorJS needs the reports to cache
+- WebGL1 (`-legacy`) and WebGL2 builds of Nestopia, FCEUmm, Snes9x, Genesis Plus GX, FinalBurn Neo,
+  FB Alpha 2012 CPS2 and MAME 2003-Plus are shipped with their build reports (EmulatorJS needs the reports to cache
   cores). Thread builds are not shipped; they need cross-origin isolation.
 - `/emulatorjs/runtime-manifest.json` lists the files for the service worker.
 
@@ -81,11 +81,15 @@ Arcade emulators identify a game by its set name (the zip name) and the ROM file
 only works with the ROM set version of the core. `scripts/build-arcade-catalogs.mjs` turns the DATs
 of the commits the EmulatorJS 4.2.3 cores were built from into compact lists of set names, titles
 and ROM sizes/CRC32s (no game data): FinalBurn Neo v1.0.0.03 (EmulatorJS/FBNeo `dedd04f2`, 7889
-sets) and MAME 2003-Plus (`3a72dae`, 5257 sets).
+sets), MAME 2003-Plus (`3a72dae`, 5257 sets) and FB Alpha 2012 CPS2 (EmulatorJS/fbalpha2012_cps2
+`3fb5b89`, 284 sets; it ships no DAT, so its ROM tables are read from `d_cps2.c`).
 
 - On import a zip without console ROMs is read from its central directory only and matched by set
-  name, or by checksums if it was renamed. FinalBurn Neo is preferred; MAME 2003-Plus covers sets
-  FinalBurn Neo lacks. The import result says whether the set is complete, needs its parent zip
+  name, or by checksums if it was renamed. FinalBurn Neo is preferred; FB Alpha 2012 CPS2 runs CPS2
+  sets from before MAME 0.178 (2016), which lack the 20-byte `.key` file FinalBurn Neo and MAME
+  2003-Plus need (it has the keys built in; a self-contained clone gets a stand-in parent zip because
+  its loader opens one); MAME 2003-Plus covers sets the others lack. Incomplete sets already in the
+  library are checked again when the cores change, keeping the ROM, saves and record ID. The import result says whether the set is complete, needs its parent zip
   (split sets; prefer "non-merged" sets) or which files are missing or different.
 - `neogeo.zip` and other BIOS sets are stored in the `bios` store (IndexedDB version 4; the upgrade
   only adds this store) and checked for the files FinalBurn Neo cannot start without

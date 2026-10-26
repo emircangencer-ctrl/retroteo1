@@ -178,7 +178,7 @@ function arcadeCardLabel(arcade){
 }
 function formatBytes(n){if(!Number.isFinite(n)||n<=0)return '—';const units=['B','KB','MB','GB'];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),units.length-1);return `${(n/Math.pow(1024,i)).toFixed(i?1:0)} ${units[i]}`;}
 function renderSystemTile(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key).length;return `<button class="system-tile" data-system-filter="${key}"><span class="system-logo">${esc(p.logo)}</span><span><strong>${esc(p.short)}</strong><small>${isPlayablePlatform(key)?(count?`${count} kütüphane kaydı`:'Oynatmaya hazır'):'Yakında'}</small></span></button>`;}
-function renderSystemRow(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key&&!g.demo).length;return `<article class="system-row"><span class="system-logo">${esc(p.logo)}</span><div class="system-row-copy"><strong>${esc(p.short)} <span style="color:#8291aa;font-weight:500">· ${esc(p.label)}</span></strong><p>${key==='ARCADE'?'Oynatıcı hazır · FinalBurn Neo (CPS1, CPS2, CPS3, Neo Geo ve daha fazlası) ve MAME 2003-Plus. Zip dosyası set adıyla tanınır ve çekirdek sürümüyle karşılaştırılır; Neo Geo için neogeo.zip gerekir.':SYSTEM_CORE_LABELS[key]?`Oynatıcı hazır · EmulatorJS / ${SYSTEM_CORE_LABELS[key]}. Oyun uyumluluğu oyun bazında doğrulanır.`:key==='N64'?'Henüz oynatılamaz. Uyumluluk oyun ve cihaz bazında ayrıca test edilecek.':key==='CPS1'||key==='CPS2'||key==='NEOGEO'?'Henüz oynatılamaz. Arcade için çekirdek ve doğru dosya seti gereklidir.':'Henüz oynatılamaz.'}</p></div><span class="system-row-count">${count} yerel oyun</span></article>`;}
+function renderSystemRow(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key&&!g.demo).length;return `<article class="system-row"><span class="system-logo">${esc(p.logo)}</span><div class="system-row-copy"><strong>${esc(p.short)} <span style="color:#8291aa;font-weight:500">· ${esc(p.label)}</span></strong><p>${key==='ARCADE'?'Oynatıcı hazır · FinalBurn Neo (CPS1, CPS2, CPS3, Neo Geo ve daha fazlası), eski CPS2 setleri için FB Alpha 2012 CPS2 ve MAME 2003-Plus. Zip dosyası set adıyla tanınır ve çekirdek sürümüyle karşılaştırılır; Neo Geo için neogeo.zip gerekir.':SYSTEM_CORE_LABELS[key]?`Oynatıcı hazır · EmulatorJS / ${SYSTEM_CORE_LABELS[key]}. Oyun uyumluluğu oyun bazında doğrulanır.`:key==='N64'?'Henüz oynatılamaz. Uyumluluk oyun ve cihaz bazında ayrıca test edilecek.':key==='CPS1'||key==='CPS2'||key==='NEOGEO'?'Henüz oynatılamaz. Arcade için çekirdek ve doğru dosya seti gereklidir.':'Henüz oynatılamaz.'}</p></div><span class="system-row-count">${count} yerel oyun</span></article>`;}
 function filteredGames({favorites=false,recent=false}={}){let result=[...games];if(favorites)result=result.filter(g=>g.favorite);if(recent)result=result.filter(g=>!g.demo&&g.lastPlayed).sort((a,b)=>(b.lastPlayed||0)-(a.lastPlayed||0));const q=($('#search-input')?.value||'').trim().toLocaleLowerCase('tr-TR');if(q&&$('#view-library').classList.contains('active'))result=result.filter(g=>`${g.title} ${platformInfo(g.platform).short} ${g.fileName||''}`.toLocaleLowerCase('tr-TR').includes(q));if($('#view-library').classList.contains('active')&&selectedPlatform!=='ALL')result=result.filter(g=>g.platform===selectedPlatform);const sort=$('#sort-select')?.value||'recent';if(sort==='name')result.sort((a,b)=>a.title.localeCompare(b.title,'tr'));else if(sort==='platform')result.sort((a,b)=>platformInfo(a.platform).short.localeCompare(platformInfo(b.platform).short)||a.title.localeCompare(b.title,'tr'));else result.sort((a,b)=>(b.addedAt||0)-(a.addedAt||0));return result;}
 function fillGrid(el,items){if(!el)return;el.innerHTML=items.map(renderCard).join('');el.classList.toggle('list-layout',layoutMode==='list');}
 function renderLibraryResults(){
@@ -217,9 +217,39 @@ function renderFilters(){const list=[['ALL','Tümü'],...Object.keys(PLATFORM).m
 function setView(name){const target=$(`#view-${name}`);if(!target)return;$$('.view').forEach(v=>v.classList.toggle('active',v===target));$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===name));const labels={home:'Ana Sayfa',library:'Kütüphane',systems:'Sistemler',favorites:'Favoriler',recent:'Son oynananlar',settings:'Ayarlar',help:'Yardım'};$('#breadcrumb').innerHTML=`${esc(labels[name]||'RetroPlay')} <span>/</span> ${name==='library'?'Koleksiyonun':name==='systems'?'Platform rehberi':'Kişisel retro merkez'}`;if(name==='library')renderAll();window.scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}
 function openImport(){const m=$('#import-modal');if(m.classList.contains('hidden'))pushOverlayState('import');m.classList.remove('hidden');$('#import-results').textContent='';$('#import-progress').classList.add('hidden');$('#modal-file-input').value='';$('#choose-files').focus();}
 function closeImport({viaHistory=false}={}){const m=$('#import-modal');if(m.classList.contains('hidden'))return;m.classList.add('hidden');if(!viaHistory)leaveOverlayState('import');}
+// Changes whenever the arcade cores or their game lists change: incomplete sets are checked again.
+const ARCADE_CATALOG_REV='fbneo-dedd04f2+fba2012cps2-3fb5b89+mame2003p-3a72dae';
+// FB Alpha 2012 opens a clone's parent zip even when the clone zip holds every file. Stand-in: a zip
+// with one empty file (a zip with no entries makes its loader close the archive twice).
+const STAND_IN_PARENT_ZIP=Uint8Array.from(atob('UEsDBBQAAAAAAAAAIQAAAAAAAAAAAAAAAAAFAAAAZW1wdHlQSwECFAAUAAAAAAAAACEAAAAAAAAAAAAAAAAABQAAAAAAAAAAAAAAAAAAAAAAZW1wdHlQSwUGAAAAAAEAAQAzAAAAIwAAAAAA'),c=>c.charCodeAt(0));
 /** What the library keeps about a recognised arcade set (the full ROM list stays in the catalog). */
 function arcadeRecord(arcade){
-  return {core:arcade.core,set:arcade.set,status:arcade.status,missing:(arcade.missing||[]).slice(0,20),missingCount:(arcade.missing||[]).length,different:(arcade.different||[]).slice(0,20),cps2Key:Boolean(arcade.cps2Key),parent:arcade.parent||'',bios:arcade.bios||'',vertical:Boolean(arcade.vertical),manufacturer:arcade.manufacturer||'',renamedFrom:arcade.renamedFrom||'',alternatives:arcade.alternatives||[]};
+  return {checkedWith:ARCADE_CATALOG_REV,core:arcade.core,set:arcade.set,status:arcade.status,missing:(arcade.missing||[]).slice(0,20),missingCount:(arcade.missing||[]).length,different:(arcade.different||[]).slice(0,20),cps2Key:Boolean(arcade.cps2Key),parent:arcade.parent||'',bios:arcade.bios||'',vertical:Boolean(arcade.vertical),manufacturer:arcade.manufacturer||'',renamedFrom:arcade.renamedFrom||'',alternatives:arcade.alternatives||[]};
+}
+/**
+ * Checks an incomplete arcade set again with the current cores (an old CPS2 set without its .key
+ * runs on FB Alpha 2012). Only the arcade metadata changes; the ROM, saves and record ID stay.
+ */
+async function recheckArcadeGame(game){
+  if(game?.platform!=='ARCADE'||!(game.blob instanceof Blob)||game.arcade?.status!=='incomplete'||game.arcade?.checkedWith===ARCADE_CATALOG_REV)return game;
+  try{
+    const [entries,catalogs]=await Promise.all([readZipDirectory(game.blob),loadCatalogs()]);
+    const found=identifyArcadeZip(game.fileName||`${game.arcade.set}.zip`,entries,catalogs);
+    const arcade=found?.kind==='game'?arcadeRecord(found):{...game.arcade,checkedWith:ARCADE_CATALOG_REV};
+    const current=games.find(g=>g.id===game.id)||game;
+    const updated={...current,arcade};
+    await saveGame(updated);
+    const index=games.findIndex(g=>g.id===game.id);if(index>=0)games[index]=updated;
+    return updated;
+  }catch(error){console.warn('Arcade set re-check failed:',error);return game;}
+}
+async function recheckArcadeLibrary(){
+  const pending=games.filter(g=>g.platform==='ARCADE'&&g.arcade?.status==='incomplete'&&g.arcade?.checkedWith!==ARCADE_CATALOG_REV&&g.blob instanceof Blob);
+  if(!pending.length)return;
+  let playable=0;
+  for(const game of pending){const updated=await recheckArcadeGame(game);if(updated.arcade?.status!=='incomplete')playable++;}
+  renderAll();
+  if(playable)showToast(`${playable} arcade oyunu artık açılabiliyor.`);
 }
 function arcadeParentInstalled(arcade){
   return !arcade?.parent||arcade.status!=='needs-parent'||games.some(g=>g.platform==='ARCADE'&&g.arcade?.set===arcade.parent&&g.blob instanceof Blob);
@@ -393,6 +423,10 @@ async function resolveLaunch(game, system, { coreOverride = '' } = {}) {
       return { blocked: { status: `Başlatılamadı · ${arcade.parent}.zip gerekli`, message: `Bu set bir klon ve ana set ${arcade.parent}.zip olmadan açılamaz. ${arcade.parent}.zip dosyasını da içe aktar ya da her zip'in tek başına yettiği "non-merged" seti kullan.` } };
     }
     extraFiles.push({ name: `${arcade.parent}.zip`, url: URL.createObjectURL(parent.blob) });
+  } else if (arcade.parent && cores.some(core => ARCADE_CORES[core.coreId]?.opensParentZip)) {
+    // A complete clone: give FB Alpha 2012 the parent zip it insists on opening (a stand-in if absent).
+    const parent = games.find(g => g.platform === 'ARCADE' && g.arcade?.set === arcade.parent && g.blob instanceof Blob);
+    extraFiles.push({ name: `${arcade.parent}.zip`, url: URL.createObjectURL(parent ? parent.blob : new Blob([STAND_IN_PARENT_ZIP], { type: 'application/zip' })) });
   }
   return prefer({ cores, gameName: `${arcade.set}.zip`, extraFiles });
 }
@@ -410,7 +444,7 @@ async function keyBlock(game) {
     ? `Bu zip'teki ${keys} bu oyunun anahtarı değil: içeriği ${coreLabel}'un beklediğinden farklı.`
     : `Bu zip'te ${keys} yok.`;
   const why = cps2
-    ? 'CPS2 oyunlarının programı şifreli; FinalBurn Neo da MAME 2003-Plus da bu 20 baytlık anahtar olmadan oyunu açamaz. Setin diğer dosyaları doğru: bu zip, anahtarların setlere eklendiği 2016\'dan (MAME 0.178) önceki bir koleksiyondan geliyor.'
+    ? 'CPS2 oyunlarının programı şifreli. FinalBurn Neo ve MAME 2003-Plus bu 20 baytlık anahtarı zip\'te arıyor; anahtarları kendi içinde taşıyan FB Alpha 2012 CPS2 çekirdeği ise oyunun bu sürümünü tanımıyor (2012\'den sonra eklenmiş bir sürüm).'
     : 'Bu oyunun programı şifreli ve çekirdek anahtar dosyası olmadan açamaz; setin diğer dosyaları doğru, yani set eski bir sürüm.';
   const fix = `Aynı oyunun ${coreLabel === 'MAME 2003-Plus' ? 'MAME 2003-Plus' : 'FinalBurn Neo 1.0.0.03'} setini (ya da MAME 0.178 sonrası bir setini) içe aktar; yeni kopya açılınca bu kartı "Kütüphaneden kaldır" ile silebilirsin.`;
   return { status: `Başlatılamadı · ${what} ${found.different.length && !found.absent.length ? 'uyuşmuyor' : 'eksik'}`, message: `${problem} ${why} ${fix}` };
@@ -425,11 +459,12 @@ function playerStatus(label) {
   return `${label} · ${engine}${mapper}`;
 }
 async function startGame(id, options = {}) {
-  const game = games.find(g => g.id === id && !g.demo);
+  let game = games.find(g => g.id === id && !g.demo);
   if (!game || !isPlayablePlatform(game.platform) || !(game.blob instanceof Blob)) {
     showToast('Bu kayıt için henüz desteklenen bir sistemde oynatılabilir ROM bulunamadı.', 'error');
     return;
   }
+  if (game.platform === 'ARCADE' && game.arcade?.status === 'incomplete') game = await recheckArcadeGame(game);
   const session = ++emulatorSession;
   endSaveSession('switch');
   if (activeEmulator) {
@@ -1156,5 +1191,5 @@ async function registerSW(){
     console.warn('Service worker registration failed:',e);
   }
 }
-async function init(){try{if(history.state?.retroplayOverlay)history.replaceState(null,'');}catch{}setupEvents();updateNetwork();try{db=await openDB();await refreshGames();void renderBiosList();$('#storage-status').textContent='Bu cihazda saklanır';}catch(e){$('#storage-status').textContent='Depolama kullanılamıyor';showToast(`Yerel kütüphane başlatılamadı: ${e.message}`,'error');games=DEMO_GAMES.map(g=>({...g}));renderAll();}registerSW();if('storage'in navigator&&navigator.storage.persist){navigator.storage.persist().then(granted=>{if(!granted)$('#storage-status').textContent='Tarayıcı depolaması';}).catch(()=>{});}}
+async function init(){try{if(history.state?.retroplayOverlay)history.replaceState(null,'');}catch{}setupEvents();updateNetwork();try{db=await openDB();await refreshGames();void renderBiosList();void recheckArcadeLibrary();$('#storage-status').textContent='Bu cihazda saklanır';}catch(e){$('#storage-status').textContent='Depolama kullanılamıyor';showToast(`Yerel kütüphane başlatılamadı: ${e.message}`,'error');games=DEMO_GAMES.map(g=>({...g}));renderAll();}registerSW();if('storage'in navigator&&navigator.storage.persist){navigator.storage.persist().then(granted=>{if(!granted)$('#storage-status').textContent='Tarayıcı depolaması';}).catch(()=>{});}}
 init();

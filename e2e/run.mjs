@@ -41,6 +41,10 @@ const noKeyZip = path.join(tmp, 'old', 'spf2t.zip');
 fs.mkdirSync(path.dirname(noKeyZip));
 fs.writeFileSync(noKeyZip, placeholderSet(fbneoCatalog.games.spf2t[6], { omit: ['spf2t.key'] }));
 const keyedZip = arcadeFile('spf2t.zip', fbneoCatalog.games.spf2t[6]);
+// Old CPS2 sets FB Alpha 2012 CPS2 knows: a parent and a self-contained clone, both without .key.
+const fbaCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fba2012-cps2.json'), 'utf8'));
+const oldCps2Zip = arcadeFile('megaman2.zip', fbneoCatalog.games.megaman2[6].filter(([name]) => !name.endsWith('.key')));
+const oldCloneZip = arcadeFile('megaman2a.zip', fbaCatalog.games.megaman2a[6]);
 const mapperRom = path.join(tmp, 'mapper220.nes');
 { const rom = checkerboardRom(); rom[6] = 0xc0; rom[7] = 0xd0; fs.writeFileSync(mapperRom, rom); }
 
@@ -328,7 +332,7 @@ await scenario('an incomplete arcade set says which file is missing', async page
   assert.match(await page.evaluate(() => document.querySelector('#library-games .game-card .game-foot').textContent), /Eksik set · 1 dosya eksik/);
 });
 
-await scenario('an old CPS2 set without its key is explained before any core is loaded, also for records saved earlier', async page => {
+await scenario('a CPS2 set no core can start without its key is explained before any core is loaded', async page => {
   let text = await importFile(page, noKeyZip);
   assert.match(text, /Super Puzzle Fighter II Turbo \(Europe 960529\) · FinalBurn Neo · CPS2 şifre anahtarı eksik: spf2t\.key/);
   await page.evaluate(() => document.querySelector('[data-view="library"]').click());
@@ -351,6 +355,40 @@ await scenario('an old CPS2 set without its key is explained before any core is 
   await page.evaluate(() => document.querySelector('#player-close').click());
   text = await importFile(page, keyedZip);
   assert.match(text, /Super Puzzle Fighter II Turbo \(Europe 960529\) · FinalBurn Neo · tam set · aynı oyunun eksik eski kopyası kütüphanede/);
+});
+
+await scenario('an old CPS2 set without .key runs on FB Alpha 2012 CPS2, also when it was imported by the previous build', async page => {
+  const text = await importFile(page, oldCps2Zip);
+  assert.match(text, /Eklendi: megaman2\.zip — .* · FB Alpha 2012 CPS2 · tam set/);
+  // Turn the record into what the previous build stored: FinalBurn Neo, incomplete, key missing.
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('retroplay-local-v1');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { const tx = req.result.transaction('games', 'readwrite'); const store = tx.objectStore('games'); const all = store.getAll();
+      all.onsuccess = () => { for (const game of all.result) if (game.arcade) { game.arcade = { core: 'fbneo', set: 'megaman2', status: 'incomplete', missing: ['megaman2.key'], missingCount: 1, parent: '', bios: '', vertical: false, manufacturer: 'Capcom', renamedFrom: '', alternatives: [{ core: 'mame2003_plus', status: 'incomplete', set: 'megaman2' }] }; store.put(game); } };
+      tx.oncomplete = () => { req.result.close(); resolve(); }; tx.onerror = () => reject(tx.error); };
+  }));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForFunction(() => /arcade oyunu artık açılabiliyor/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 15000 });
+  await page.evaluate(() => document.querySelector('[data-view="library"]').click());
+  assert.match(await page.evaluate(() => document.querySelector('#library-games .game-card .game-foot').textContent), /FB Alpha 2012 CPS2 · tam set/);
+  const state = await play(page, 'Mega Man 2');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · FB Alpha 2012 CPS2/, state.error);
+  const loaded = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return [gm.FS.analyzePath('/megaman2.zip').exists, gm.functions.saveStateInfo()]; });
+  assert.equal(loaded[0], true);
+  assert.doesNotMatch(loaded[1], /^Size is zero/, 'the game itself is loaded, not just the core');
+  const pad = await page.evaluate(() => [...document.querySelectorAll('#touch-controls button')].map(button => button.textContent));
+  assert.deepEqual(pad.slice(4), ['Y', 'X', 'L', 'B', 'A', 'R', 'JETON', 'START']);
+});
+
+await scenario('a self-contained old CPS2 clone runs on FB Alpha 2012 CPS2 without its parent set', async page => {
+  const text = await importFile(page, oldCloneZip);
+  assert.match(text, /Mega Man 2 - the power fighters \(960708 Asia\) · FB Alpha 2012 CPS2 · tam set/);
+  const state = await play(page, 'Mega Man 2');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · FB Alpha 2012 CPS2/, state.error);
+  const loaded = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return [gm.FS.analyzePath('/megaman2a.zip').exists, gm.FS.analyzePath('/megaman2.zip').exists, gm.functions.saveStateInfo()]; });
+  assert.deepEqual(loaded.slice(0, 2), [true, true], 'the clone and a stand-in parent zip are in place');
+  assert.doesNotMatch(loaded[2], /^Size is zero/);
 });
 
 await scenario('a Neo Geo game asks for neogeo.zip, offers to add it in the player and then starts with the BIOS', async page => {

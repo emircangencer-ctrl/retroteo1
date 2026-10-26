@@ -2,14 +2,18 @@
 //
 // Arcade emulators identify a game by its set name (the zip name, e.g. "mslug.zip") and load the
 // ROM files inside by name/CRC32. A set only works if it matches the core's own ROM set version,
-// so RetroPlay ships the game lists (set name, title, ROM sizes and CRC32s) of the two cores it
-// serves: FinalBurn Neo v1.0.0.03 and MAME 2003-Plus (see scripts/build-arcade-catalogs.mjs).
+// so RetroPlay ships the game lists (set name, title, ROM sizes and CRC32s) of the cores it serves:
+// FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2 and MAME 2003-Plus (scripts/build-arcade-catalogs.mjs).
+// FB Alpha 2012 CPS2 carries the CPS2 decryption keys itself, so it runs CPS2 sets from before
+// MAME 0.178 (2016) that have no .key file, which FinalBurn Neo and MAME 2003-Plus cannot start.
 
 export const ARCADE_CORES = Object.freeze({
   fbneo: Object.freeze({ id: 'fbneo', label: 'FinalBurn Neo', systemId: 'arcade', catalog: '/assets/arcade-fbneo.json' }),
-  mame2003_plus: Object.freeze({ id: 'mame2003_plus', label: 'MAME 2003-Plus', systemId: 'mame', catalog: '/assets/arcade-mame2003plus.json' })
+  mame2003_plus: Object.freeze({ id: 'mame2003_plus', label: 'MAME 2003-Plus', systemId: 'mame', catalog: '/assets/arcade-mame2003plus.json' }),
+  // Its loader opens every zip a clone names (clone and parent) before looking at files.
+  fbalpha2012_cps2: Object.freeze({ id: 'fbalpha2012_cps2', label: 'FB Alpha 2012 CPS2', systemId: 'arcade', catalog: '/assets/arcade-fba2012-cps2.json', opensParentZip: true })
 });
-const CORE_ORDER = Object.freeze(['fbneo', 'mame2003_plus']);
+const CORE_ORDER = Object.freeze(['fbneo', 'fbalpha2012_cps2', 'mame2003_plus']);
 
 // Game tuple indexes (see compactDat in scripts/build-arcade-catalogs.mjs).
 const TITLE = 0, YEAR = 1, MAKER = 2, CLONE_OF = 3, ROM_OF = 4, FLAGS = 5, ROMS = 6;
@@ -201,8 +205,8 @@ export function identifyArcadeZip(fileName, entries, catalogs) {
   }
   const usable = result => result && result.status !== 'incomplete';
   // An exact set name wins over a checksum guess; FinalBurn Neo first (faster, more accurate for
-  // CPS and Neo Geo), MAME 2003-Plus for what it lacks; an incomplete named set is still kept so
-  // the player learns what is missing.
+  // CPS and Neo Geo), then FB Alpha 2012 CPS2 (old CPS2 sets without .key), MAME 2003-Plus for the
+  // rest; an incomplete named set is still kept so the player learns what is missing.
   const order = [
     ...CORE_ORDER.map(id => byName[id]).filter(usable),
     ...CORE_ORDER.map(id => byCrc[id]).filter(usable),

@@ -29,11 +29,12 @@ export const PACKAGES = Object.freeze({
   snes9x: { name: '@emulatorjs/core-snes9x', integrity: 'sha512-JTe9Rv9eOuCkgkG4ILwuCZUqNcVI3m9ju1NHTTjridUlFgJSqL4DUqF/vLKN9olCpsqlJFfcCayAOoikJxefwA==' },
   genesis_plus_gx: { name: '@emulatorjs/core-genesis_plus_gx', integrity: 'sha512-D1e2XA2CPRAjfr0JurpXJgR9dePxl/xHtaE8v1T9BqD9A3DLfobIFWsWU9jCFS4NfUxCvcLdTYdY/We3QzvcTw==' },
   fbneo: { name: '@emulatorjs/core-fbneo', integrity: 'sha512-54Yx8Kcq8DH42caTakws3pMUZc6UkBNqtZgg7Q04lNmWWc/W0wPGN0gHxG90xmlOFGHHtxp9QnicBb1NXMjGWg==' },
-  mame2003_plus: { name: '@emulatorjs/core-mame2003_plus', integrity: 'sha512-z37RxbT4R6dJe4r+/+GGN0gDW7d3K+DACJPowqJDSYO8TQK9RQBWPl0nsgp1aiLYkRL7yspbJn2tu2inBMWZow==' }
+  mame2003_plus: { name: '@emulatorjs/core-mame2003_plus', integrity: 'sha512-z37RxbT4R6dJe4r+/+GGN0gDW7d3K+DACJPowqJDSYO8TQK9RQBWPl0nsgp1aiLYkRL7yspbJn2tu2inBMWZow==' },
+  fbalpha2012_cps2: { name: '@emulatorjs/core-fbalpha2012_cps2', integrity: 'sha512-RqmLd0J/Gh8dkyjnpGN7YGIRS1fJjtCKqBs8r54Uz35KmHxw4Qs/ghCc836DRXP/IrIYX871jMxVvsOIOdCB/g==' }
 });
 
 /** Cores RetroPlay ships. Thread variants are omitted: they need cross-origin isolation. */
-export const CORES = Object.freeze(['nestopia', 'fceumm', 'snes9x', 'genesis_plus_gx', 'fbneo', 'mame2003_plus']);
+export const CORES = Object.freeze(['nestopia', 'fceumm', 'snes9x', 'genesis_plus_gx', 'fbneo', 'mame2003_plus', 'fbalpha2012_cps2']);
 /** Cores stored for offline use when the app is installed (the default console cores, ~3.5 MB). */
 export const PRECACHED_CORES = Object.freeze(['nestopia', 'snes9x', 'genesis_plus_gx']);
 const CORE_VARIANTS = Object.freeze(['-legacy-wasm.data', '-wasm.data']);

@@ -23,8 +23,10 @@ EmulatorJS. RetroPlay is a personal, non-commercial project.
    - Genesis Plus GX (Mega Drive) — Genesis Plus GX non-commercial license — https://github.com/EmulatorJS/Genesis-Plus-GX
    - FinalBurn Neo (arcade) — FinalBurn Neo non-commercial license — https://github.com/EmulatorJS/FBNeo
    - MAME 2003-Plus (arcade) — MAME non-commercial license — https://github.com/EmulatorJS/mame2003-plus-libretro
+   - FB Alpha 2012 CPS2 (arcade) — FB Alpha non-commercial license — https://github.com/EmulatorJS/fbalpha2012_cps2
 
 4. Arcade game lists (ROM set names, sizes and CRC32 values only)
    - FinalBurn Neo v1.0.0.03 arcade DAT (EmulatorJS/FBNeo, commit dedd04f2)
    - MAME 2003-Plus metadata/mame2003-plus.xml (EmulatorJS/mame2003-plus-libretro, commit 3a72dae)
+   - FB Alpha 2012 CPS2 ROM tables from src/burn/drv/capcom/d_cps2.c (EmulatorJS/fbalpha2012_cps2, commit 3fb5b89)
    These lists contain no game data. No ROM, BIOS or game file is distributed with RetroPlay.

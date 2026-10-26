@@ -162,3 +162,74 @@ test('library records: CPS2 key lookup, truncated lists and records saved before
   // Only the first 20 names are kept; a record cut short is not "only keys".
   assert.equal(onlyKeysMissing({ status: 'incomplete', missing: ['a.key'], missingCount: 25 }), false);
 });
+
+// FB Alpha 2012 CPS2 has the CPS2 keys built in: its sets have no .key file.
+test('an old CPS2 set without .key goes to FB Alpha 2012 CPS2; a current set stays on FinalBurn Neo', () => {
+  const fba = { games: { xmvsf: ['X-Men vs Street Fighter (961004 Euro)', '1996', 'Capcom', '', '', 0, keyed.games.xmvsf[6].filter(([name]) => name !== 'xmvsf.key')] } };
+  const three = { ...keyedCatalogs, fbalpha2012_cps2: fba };
+  const old = identifyArcadeZip('xmvsf.zip', withoutKey, three);
+  assert.equal(old.core, 'fbalpha2012_cps2');
+  assert.equal(old.status, 'complete');
+  assert.equal(describeArcadeStatus(old), 'FB Alpha 2012 CPS2 · tam set');
+  assert.deepEqual(old.alternatives.map(alt => [alt.core, alt.status]), [['fbneo', 'incomplete'], ['mame2003_plus', 'incomplete']]);
+  const current = identifyArcadeZip('xmvsf.zip', entriesOf(keyed.games.xmvsf[6]), three);
+  assert.equal(current.core, 'fbneo');
+  assert.deepEqual(current.alternatives.map(alt => [alt.core, alt.status]), [['fbalpha2012_cps2', 'complete'], ['mame2003_plus', 'complete']]);
+});
+
+test('the FB Alpha 2012 game list is read from its driver source like its ROM loader reads it', async () => {
+  const { compactFbaDriverSource } = await import('../scripts/build-arcade-catalogs.mjs');
+  const source = `
+static struct BurnRomInfo XmvsfRomDesc[] = {
+	{ "xvse.03f",      0x080000, 0xdb06413f, CPS2_PRG_68K | BRF_ESS | BRF_PRG },
+	{ "xvs.13m",       0x400000, 0xf6684efd, CPS2_GFX | BRF_GRA },
+	{ "opt.bin",       0x010000, 0x12345678, BRF_OPT },
+	{ "89c4051.bin",   0x010000, 0x00000000, BRF_PRG | BRF_NODUMP },
+};
+
+STD_ROM_PICK(Xmvsf)
+STD_ROM_FN(Xmvsf)
+
+static struct BurnRomInfo Xmvsfr1RomDesc[] = {
+	{ "xvse.03d",      0x080000, 0x5ae5bd3b, CPS2_PRG_68K | BRF_ESS | BRF_PRG },
+	{ "xvs.13m",       0x400000, 0xf6684efd, CPS2_GFX | BRF_GRA },
+};
+
+STD_ROM_PICK(Xmvsfr1)
+STD_ROM_FN(Xmvsfr1)
+
+struct BurnDriver BurnDrvCpsXmvsf = {
+	"xmvsf", NULL, NULL, NULL, "1996",
+	"X-Men vs Street Fighter (961004 Euro)\\0", NULL, "Capcom", "CPS2",
+	NULL, NULL, NULL, NULL,
+	BDF_GAME_WORKING | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS2, GBF_VSFIGHT, FBF_SF,
+	NULL, XmvsfRomInfo, XmvsfRomName, NULL, NULL, Cps2FightingInputInfo, NULL,
+	Cps2Init, DrvExit, Cps2Frame, CpsRedraw, CpsAreaScan,
+	&CpsRecalcPal, 0x1000, 384, 224, 4, 3
+};
+
+struct BurnDriver BurnDrvCpsXmvsfr1 = {
+	"xmvsfr1", "xmvsf", NULL, NULL, "1996",
+	"X-Men vs Street Fighter (960910 Euro)\\0", NULL, "Capcom", "CPS2",
+	NULL, NULL, NULL, NULL,
+	BDF_GAME_WORKING | BDF_CLONE | BDF_ORIENTATION_VERTICAL, 2, HARDWARE_CAPCOM_CPS2, GBF_VSFIGHT, FBF_SF,
+	NULL, Xmvsfr1RomInfo, Xmvsfr1RomName, NULL, NULL, Cps2FightingInputInfo, NULL,
+	Cps2Init, DrvExit, Cps2Frame, CpsRedraw, CpsAreaScan,
+	&CpsRecalcPal, 0x1000, 224, 384, 3, 4
+};
+`;
+  const games = compactFbaDriverSource(source);
+  assert.deepEqual(games.xmvsf, ['X-Men vs Street Fighter (961004 Euro)', '1996', 'Capcom', '', '', 0, [['xvse.03f', 524288, 'db06413f', ''], ['xvs.13m', 4194304, 'f6684efd', '']]]);
+  assert.deepEqual(games.xmvsfr1, ['X-Men vs Street Fighter (960910 Euro)', '1996', 'Capcom', 'xmvsf', 'xmvsf', 2, [['xvse.03d', 524288, '5ae5bd3b', ''], ['xvs.13m', 4194304, 'f6684efd', 'xvs.13m']]]);
+});
+
+test("the shipped FB Alpha 2012 CPS2 list runs the user's old X-Men Vs. Street Fighter set without a key", async () => {
+  const fba = JSON.parse(await readFile(new URL('../public/assets/arcade-fba2012-cps2.json', import.meta.url), 'utf8'));
+  const fb = JSON.parse(await readFile(new URL('../public/assets/arcade-fbneo.json', import.meta.url), 'utf8'));
+  assert.equal(Object.keys(fba.games).length, 284);
+  assert.ok(Object.values(fba.games).every(game => game[6].every(([name]) => !/\.key$/.test(name))), 'no key files in FB Alpha 2012 sets');
+  const oldSet = fb.games.xmvsf[6].filter(([name]) => name !== 'xmvsf.key').map(([name, size, crc]) => ({ name, size, crc }));
+  const result = identifyArcadeZip('xmvsf.zip', oldSet, { fbneo: fb, fbalpha2012_cps2: fba });
+  assert.equal(result.core, 'fbalpha2012_cps2');
+  assert.equal(result.status, 'complete');
+});

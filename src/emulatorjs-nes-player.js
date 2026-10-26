@@ -18,7 +18,7 @@ const CORES_BY_SYSTEM = Object.freeze({
   nes: new Set(['nes', 'fceumm', 'nestopia']),
   snes: new Set(['snes']),
   segaMD: new Set(['segaMD']),
-  arcade: new Set(['fbneo']),
+  arcade: new Set(['fbneo', 'fbalpha2012_cps2']),
   mame: new Set(['mame2003_plus'])
 });
 const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
