@@ -36,6 +36,11 @@ fs.writeFileSync(brokenZip, placeholderSet(fbneoCatalog.games.puckman[6], { omit
 const mslugZip = arcadeFile('mslug.zip', fbneoCatalog.games.mslug[6]);
 const neogeoZip = arcadeFile('neogeo.zip', fbneoCatalog.games.neogeo[6].filter(([name]) => ['sp-s3.sp1', 'sm1.sm1', 'sfix.sfix', '000-lo.lo'].includes(name)));
 const zigzagZip = arcadeFile('zigzag.zip', mameCatalog.games.zigzag[6]);
+// An old CPS2 set: every file right except the 20-byte decryption key (sets before MAME 0.178).
+const noKeyZip = path.join(tmp, 'old', 'spf2t.zip');
+fs.mkdirSync(path.dirname(noKeyZip));
+fs.writeFileSync(noKeyZip, placeholderSet(fbneoCatalog.games.spf2t[6], { omit: ['spf2t.key'] }));
+const keyedZip = arcadeFile('spf2t.zip', fbneoCatalog.games.spf2t[6]);
 const mapperRom = path.join(tmp, 'mapper220.nes');
 { const rom = checkerboardRom(); rom[6] = 0xc0; rom[7] = 0xd0; fs.writeFileSync(mapperRom, rom); }
 
@@ -318,9 +323,34 @@ await scenario('a renamed arcade zip is recognised from its file checksums', asy
 
 await scenario('an incomplete arcade set says which file is missing', async page => {
   const text = await importFile(page, brokenZip);
-  assert.match(text, /FinalBurn Neo · 1 dosya eksik veya farklı/);
+  assert.match(text, /FinalBurn Neo · 1 dosya eksik/);
   await page.evaluate(() => document.querySelector('[data-view="library"]').click());
-  assert.match(await page.evaluate(() => document.querySelector('#library-games .game-card .game-foot').textContent), /Eksik set · 1 dosya/);
+  assert.match(await page.evaluate(() => document.querySelector('#library-games .game-card .game-foot').textContent), /Eksik set · 1 dosya eksik/);
+});
+
+await scenario('an old CPS2 set without its key is explained before any core is loaded, also for records saved earlier', async page => {
+  let text = await importFile(page, noKeyZip);
+  assert.match(text, /Super Puzzle Fighter II Turbo \(Europe 960529\) · FinalBurn Neo · CPS2 şifre anahtarı eksik: spf2t\.key/);
+  await page.evaluate(() => document.querySelector('[data-view="library"]').click());
+  assert.match(await page.evaluate(() => document.querySelector('#library-games .game-card .game-foot').textContent), /Eksik set · CPS2 anahtarı yok/);
+  // The user's record was saved by the previous build: no "different"/"cps2Key" fields.
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('retroplay-local-v1');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { const tx = req.result.transaction('games', 'readwrite'); const store = tx.objectStore('games'); const all = store.getAll();
+      all.onsuccess = () => { for (const game of all.result) if (game.arcade) { delete game.arcade.different; delete game.arcade.cps2Key; store.put(game); } };
+      tx.oncomplete = () => { req.result.close(); resolve(); }; tx.onerror = () => reject(tx.error); };
+  }));
+  await page.reload({ waitUntil: 'networkidle' });
+  const state = await play(page, 'Super Puzzle Fighter');
+  assert.match(state.status, /Başlatılamadı · CPS2 şifre anahtarı eksik/);
+  assert.match(state.error, /Bu zip'te spf2t\.key yok\. CPS2 oyunlarının programı şifreli/);
+  assert.match(state.error, /MAME 0\.178/);
+  assert.doesNotMatch(state.error, /\.\./, 'no doubled full stop');
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('#player-screen iframe'))), false, 'no core is loaded for a set that cannot start');
+  await page.evaluate(() => document.querySelector('#player-close').click());
+  text = await importFile(page, keyedZip);
+  assert.match(text, /Super Puzzle Fighter II Turbo \(Europe 960529\) · FinalBurn Neo · tam set · aynı oyunun eksik eski kopyası kütüphanede/);
 });
 
 await scenario('a Neo Geo game asks for neogeo.zip, offers to add it in the player and then starts with the BIOS', async page => {

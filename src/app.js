@@ -2,7 +2,7 @@ import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllow
 import { PLATFORM, platformInfo } from './platforms.js';
 import { safeCoverColor, validBackup } from './library-backup.js';
 import { extractRomFilesFromZip, readZipDirectory } from './zip-rom.js';
-import { ARCADE_CORES, loadCatalogs, identifyArcadeZip, arcadeLayout, describeArcadeStatus } from './arcade.js';
+import { ARCADE_CORES, loadCatalogs, identifyArcadeZip, arcadeLayout, describeArcadeStatus, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary } from './arcade.js';
 import { EmulatorJsPlayer } from './emulatorjs-nes-player.js';
 import { getEmulatedSystem, isPlayablePlatform, supportsRomExtension } from './emulator-systems.js';
 import { createBatterySaveRecord, emulatorGameId } from './save-data.js';
@@ -173,7 +173,8 @@ function arcadeCardLabel(arcade){
   if(arcade.bios&&!biosIds.has(`${arcade.bios}.zip`))return `${arcade.bios}.zip gerekli`;
   if(arcade.status==='complete')return `${ARCADE_CORES[arcade.core]?.label||'Arcade'} · tam set`;
   if(arcade.status==='needs-parent')return arcadeParentInstalled(arcade)?`Ana set ${arcade.parent} ile`:`Ana set ${arcade.parent}.zip gerekli`;
-  return `Eksik set · ${arcade.missingCount||0} dosya`;
+  if(onlyKeysMissing(arcade))return arcade.cps2Key===true?'Eksik set · CPS2 anahtarı yok':'Eksik set · şifre anahtarı yok';
+  return `Eksik set · ${missingSummary(arcade)}`;
 }
 function formatBytes(n){if(!Number.isFinite(n)||n<=0)return '—';const units=['B','KB','MB','GB'];const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),units.length-1);return `${(n/Math.pow(1024,i)).toFixed(i?1:0)} ${units[i]}`;}
 function renderSystemTile(key){const p=platformInfo(key);const count=games.filter(g=>g.platform===key).length;return `<button class="system-tile" data-system-filter="${key}"><span class="system-logo">${esc(p.logo)}</span><span><strong>${esc(p.short)}</strong><small>${isPlayablePlatform(key)?(count?`${count} kütüphane kaydı`:'Oynatmaya hazır'):'Yakında'}</small></span></button>`;}
@@ -218,7 +219,7 @@ function openImport(){const m=$('#import-modal');if(m.classList.contains('hidden
 function closeImport({viaHistory=false}={}){const m=$('#import-modal');if(m.classList.contains('hidden'))return;m.classList.add('hidden');if(!viaHistory)leaveOverlayState('import');}
 /** What the library keeps about a recognised arcade set (the full ROM list stays in the catalog). */
 function arcadeRecord(arcade){
-  return {core:arcade.core,set:arcade.set,status:arcade.status,missing:(arcade.missing||[]).slice(0,20),missingCount:(arcade.missing||[]).length,parent:arcade.parent||'',bios:arcade.bios||'',vertical:Boolean(arcade.vertical),manufacturer:arcade.manufacturer||'',renamedFrom:arcade.renamedFrom||'',alternatives:arcade.alternatives||[]};
+  return {core:arcade.core,set:arcade.set,status:arcade.status,missing:(arcade.missing||[]).slice(0,20),missingCount:(arcade.missing||[]).length,different:(arcade.different||[]).slice(0,20),cps2Key:Boolean(arcade.cps2Key),parent:arcade.parent||'',bios:arcade.bios||'',vertical:Boolean(arcade.vertical),manufacturer:arcade.manufacturer||'',renamedFrom:arcade.renamedFrom||'',alternatives:arcade.alternatives||[]};
 }
 function arcadeParentInstalled(arcade){
   return !arcade?.parent||arcade.status!=='needs-parent'||games.some(g=>g.platform==='ARCADE'&&g.arcade?.set===arcade.parent&&g.blob instanceof Blob);
@@ -311,8 +312,9 @@ async function handleFiles(fileList){
       const id=`rom-${crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(16).slice(2)}`;
       const title=arcade?arcade.title:file.name.replace(/\.[^.]+$/,'').replace(/[._-]+/g,' ').trim()||file.name;
       const game={id,title,platform,year:arcade?Number(arcade.year)||null:null,genre:arcade?'Arcade':'Bilinmiyor',...(arcadeMeta?{arcade:arcadeMeta}:{}),symbol:platformInfo(platform).logo,coverBg:platformInfo(platform).color,coverGlow:platformInfo(platform).glow,fileName:file.name,size:file.size,sizeLabel:formatBytes(file.size),contentHash:hash,blob:file,romValidation,addedAt:Date.now(),favorite:false,demo:false,playable:false,status:platform==='UNKNOWN'?'platform-unknown':'imported'};
+      const staleCopy=arcadeMeta&&arcadeMeta.status!=='incomplete'?games.find(g=>g.platform==='ARCADE'&&g.arcade?.set===arcadeMeta.set&&g.arcade?.status==='incomplete'):null;
       await saveGame(game);games.push(game);success++;
-      $('#import-results').textContent+=arcade?`Eklendi: ${file.name} — ${arcade.title} · ${describeArcadeStatus(arcadeMeta,{biosInstalled:!arcadeMeta.bios||biosIds.has(`${arcadeMeta.bios}.zip`),parentInstalled:arcadeParentInstalled(arcadeMeta)})}\n`:`Eklendi: ${file.name}${hash?' — içerik parmak izi alındı':''}\n`;
+      $('#import-results').textContent+=arcade?`Eklendi: ${file.name} — ${arcade.title} · ${describeArcadeStatus(arcadeMeta,{biosInstalled:!arcadeMeta.bios||biosIds.has(`${arcadeMeta.bios}.zip`),parentInstalled:arcadeParentInstalled(arcadeMeta)})}${staleCopy?' · aynı oyunun eksik eski kopyası kütüphanede; onu kartındaki "Kütüphaneden kaldır" ile silebilirsin':''}\n`:`Eklendi: ${file.name}${hash?' — içerik parmak izi alındı':''}\n`;
     }catch(e){failed++;$('#import-results').textContent+=`Hata: ${file.name} — ${storageErrorMessage(e)}\n`;}
     finally{done++;const pct=Math.round(done/files.length*100);$('#progress-percent').textContent=`${pct}%`;progress.style.width=`${pct}%`;$('#progress-label').textContent=`İşlenen ${done}/${files.length} · ${formatBytes(Math.min(total,files.slice(0,done).reduce((n,item)=>n+item.file.size,0)))}`;}
   }
@@ -374,6 +376,7 @@ async function resolveLaunch(game, system, { coreOverride = '' } = {}) {
   // Each core may know the zip under its own set name (a renamed zip matched by checksums).
   const choices = [{ core: arcade.core, set: arcade.set }, ...(arcade.alternatives || []).filter(alt => alt.status !== 'incomplete')]
     .filter((choice, i, all) => ARCADE_CORES[choice.core] && all.findIndex(other => other.core === choice.core) === i);
+  if (onlyKeysMissing(arcade)) return { blocked: await keyBlock(game) };
   const cores = choices.map(choice => ({ coreId: choice.core, systemId: ARCADE_CORES[choice.core].systemId, name: ARCADE_CORES[choice.core].label, label: `Arcade · ${ARCADE_CORES[choice.core].label}`, gameName: `${choice.set || arcade.set}.zip` }));
   const extraFiles = [];
   if (arcade.bios) {
@@ -392,6 +395,25 @@ async function resolveLaunch(game, system, { coreOverride = '' } = {}) {
     extraFiles.push({ name: `${arcade.parent}.zip`, url: URL.createObjectURL(parent.blob) });
   }
   return prefer({ cores, gameName: `${arcade.set}.zip`, extraFiles });
+}
+/** Why a set whose only missing files are decryption keys cannot start, and how to fix it. */
+async function keyBlock(game) {
+  const arcade = game.arcade;
+  let cps2 = typeof arcade.cps2Key === 'boolean' && Array.isArray(arcade.different) ? arcade.cps2Key : null;
+  if (cps2 === null) { try { cps2 = isCps2KeyMissing((await loadCatalogs())[arcade.core], arcade.set, arcade.missing); } catch { cps2 = true; } }
+  const entries = await readZipDirectory(game.blob).catch(() => null);
+  const found = entries ? keyFindings(arcade.missing, entries) : { absent: arcade.missing, different: [] };
+  const keys = arcade.missing.join(', ');
+  const coreLabel = ARCADE_CORES[arcade.core]?.label || 'FinalBurn Neo';
+  const what = cps2 ? 'CPS2 şifre anahtarı' : 'şifre çözme anahtarı';
+  const problem = found.different.length && !found.absent.length
+    ? `Bu zip'teki ${keys} bu oyunun anahtarı değil: içeriği ${coreLabel}'un beklediğinden farklı.`
+    : `Bu zip'te ${keys} yok.`;
+  const why = cps2
+    ? 'CPS2 oyunlarının programı şifreli; FinalBurn Neo da MAME 2003-Plus da bu 20 baytlık anahtar olmadan oyunu açamaz. Setin diğer dosyaları doğru: bu zip, anahtarların setlere eklendiği 2016\'dan (MAME 0.178) önceki bir koleksiyondan geliyor.'
+    : 'Bu oyunun programı şifreli ve çekirdek anahtar dosyası olmadan açamaz; setin diğer dosyaları doğru, yani set eski bir sürüm.';
+  const fix = `Aynı oyunun ${coreLabel === 'MAME 2003-Plus' ? 'MAME 2003-Plus' : 'FinalBurn Neo 1.0.0.03'} setini (ya da MAME 0.178 sonrası bir setini) içe aktar; yeni kopya açılınca bu kartı "Kütüphaneden kaldır" ile silebilirsin.`;
+  return { status: `Başlatılamadı · ${what} ${found.different.length && !found.absent.length ? 'uyuşmuyor' : 'eksik'}`, message: `${problem} ${why} ${fix}` };
 }
 function playerStatus(label) {
   const engine = activeEmulator?.engineName || 'Emülatör';
@@ -567,8 +589,8 @@ async function startGame(id, options = {}) {
     }
     $('#player-status').textContent = 'Başlatılamadı';
     $('#player-error').textContent = game.platform === 'ARCADE'
-      ? `Arcade seti açılamadı: ${error?.message || error}. ${game.arcade?.status === 'incomplete' ? `Set bu çekirdek sürümüyle uyuşmuyor (${game.arcade.missingCount || 0} dosya eksik veya farklı): ${(game.arcade.missing || []).slice(0, 5).join(', ')}. ${ARCADE_CORES[game.arcade.core]?.label || ''} için doğru ROM seti sürümünü kullan.` : 'Set ve BIOS dosyalarını kontrol et.'}`
-      : `Bu ROM çalıştırılamadı: ${error?.message || error}. ROM biçimi ve mapper desteği kontrol edilmeli.`;
+      ? `Arcade seti açılamadı: ${String(error?.message || error).replace(/[.\s]+$/, '')}. ${game.arcade?.status === 'incomplete' ? `Set bu çekirdek sürümüyle uyuşmuyor (${missingSummary(game.arcade)}): ${(game.arcade.missing || []).slice(0, 5).join(', ')}. ${ARCADE_CORES[game.arcade.core]?.label || ''} için doğru ROM seti sürümünü kullan.` : 'Set ve BIOS dosyalarını kontrol et.'}`
+      : `Bu ROM çalıştırılamadı: ${String(error?.message || error).replace(/[.\s]+$/, '')}. ROM biçimi ve mapper desteği kontrol edilmeli.`;
     showToast('Oyun başlatılamadı. Ayrıntı oynatıcı penceresinde.', 'error');
   }
 }

@@ -73,6 +73,37 @@ export function biosOf(catalog, setName) {
   return '';
 }
 
+const baseName = name => String(name || '').replace(/\\/g, '/').split('/').pop().toLowerCase();
+const isKeyFile = name => /\.key$/i.test(String(name || ''));
+// CPS2 boards decrypt their program with a 20-byte key. MAME 0.178 (2016) moved these keys into
+// the ROM sets and FinalBurn Neo and MAME 2003-Plus followed, so older CPS2 sets lack them.
+const CPS2_KEY_SIZE = 20;
+
+/**
+ * Whether every file a set lacks is a decryption key (e.g. an old CPS2 set without its .key):
+ * no core can start it, and the fix is a newer copy of the same set.
+ * Works on validateSet results and on library records ({ missing, missingCount }).
+ */
+export function onlyKeysMissing(arcade) {
+  const missing = arcade?.missing || [];
+  if (arcade?.status !== 'incomplete' || !missing.length) return false;
+  if ((arcade.missingCount ?? missing.length) !== missing.length) return false;
+  return missing.every(isKeyFile);
+}
+
+/** Whether a missing key is a 20-byte CPS2 key, looked up in a catalog (for older library records). */
+export function isCps2KeyMissing(catalog, setName, missing) {
+  const roms = catalog?.games?.[setName]?.[ROMS] || [];
+  return (missing || []).some(name => isKeyFile(name) && roms.some(rom => rom[0] === name && rom[1] === CPS2_KEY_SIZE));
+}
+
+/** For each missing key: is it absent from the zip, or present under its name with other contents? */
+export function keyFindings(missing, entries) {
+  const named = new Set((entries || []).map(entry => baseName(entry.name)));
+  const keys = (missing || []).filter(isKeyFile);
+  return { absent: keys.filter(name => !named.has(baseName(name))), different: keys.filter(name => named.has(baseName(name))) };
+}
+
 /**
  * Checks a set's files against a zip's entries ({ name, size, crc }).
  * status: complete | needs-parent (split set: files of the parent set are elsewhere) | incomplete
@@ -81,16 +112,22 @@ export function validateSet(catalog, setName, entries) {
   const game = catalog.games[setName];
   if (!game) return null;
   const present = new Set(entries.map(entry => `${String(entry.crc).toLowerCase()}:${entry.size}`));
+  const named = new Set(entries.map(entry => baseName(entry.name)));
   const bios = biosOf(catalog, setName);
   const biosCrcs = new Set((catalog.games[bios]?.[ROMS] || []).map(rom => rom[2]));
   const missingOwn = [];
   const missingParent = [];
+  const different = [];
+  const keys = [];
+  let cps2Key = false;
   let required = 0;
   for (const [name, size, crc, merge] of game[ROMS]) {
     if (merge && biosCrcs.has(crc)) continue; // provided by the BIOS zip
     required++;
     if (present.has(`${crc}:${size}`)) continue;
     (merge ? missingParent : missingOwn).push(name);
+    if (named.has(baseName(name))) different.push(name);
+    if (!merge && isKeyFile(name)) { keys.push(name); if (size === CPS2_KEY_SIZE) cps2Key = true; }
   }
   const status = !missingOwn.length && !missingParent.length ? 'complete' : !missingOwn.length ? 'needs-parent' : 'incomplete';
   return {
@@ -98,6 +135,9 @@ export function validateSet(catalog, setName, entries) {
     status,
     required,
     missing: [...missingOwn, ...missingParent],
+    different,
+    keys,
+    cps2Key,
     parent: game[CLONE_OF] || '',
     bios,
     title: game[TITLE],
@@ -187,8 +227,18 @@ export function describeArcadeStatus(arcade, { biosInstalled = true, parentInsta
   const parts = [core];
   if (arcade.status === 'complete') parts.push('tam set');
   else if (arcade.status === 'needs-parent') parts.push(parentInstalled ? `ana set ${arcade.parent}.zip ile` : `ana set ${arcade.parent}.zip gerekli`);
-  else parts.push(`${arcade.missing?.length || 0} dosya eksik veya farklı`);
+  else if (onlyKeysMissing(arcade)) parts.push(`${arcade.cps2Key ? 'CPS2 şifre anahtarı' : 'şifre çözme anahtarı'} ${Array.isArray(arcade.different) && arcade.different.length ? 'farklı' : 'eksik'}: ${arcade.missing.join(', ')}`);
+  else parts.push(missingSummary(arcade));
   if (arcade.bios) parts.push(biosInstalled ? `${arcade.bios}.zip BIOS hazır` : `${arcade.bios}.zip BIOS gerekli`);
   if (arcade.renamedFrom) parts.push(`dosya adı ${arcade.set}.zip olarak tanındı`);
   return parts.join(' · ');
+}
+
+/** "2 dosya eksik", "1 dosya farklı sürüm", … (older records without the split: "eksik veya farklı"). */
+export function missingSummary(arcade) {
+  const count = arcade?.missingCount ?? arcade?.missing?.length ?? 0;
+  if (!Array.isArray(arcade?.different)) return `${count} dosya eksik veya farklı`;
+  const different = arcade.different.length;
+  const absent = Math.max(0, count - different);
+  return [absent ? `${absent} dosya eksik` : '', different ? `${different} dosya farklı sürüm` : ''].filter(Boolean).join(', ') || `${count} dosya eksik`;
 }

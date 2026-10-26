@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { identifyArcadeZip, validateSet, validateBios, biosOf, arcadeLayout, describeArcadeStatus, loadCatalog } from '../src/arcade.js';
+import { identifyArcadeZip, validateSet, validateBios, biosOf, arcadeLayout, describeArcadeStatus, loadCatalog, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary } from '../src/arcade.js';
 import { readZipDirectory } from '../src/zip-rom.js';
 import { placeholderWithCrc, writeZip, crc32, placeholderSet } from '../e2e/fixtures/zip-writer.mjs';
 
@@ -112,4 +112,53 @@ test('the shipped catalogs match the cores RetroPlay serves', async () => {
   const zip = placeholderSet(fb.games.puckman[6]);
   const result = identifyArcadeZip('puckman.zip', await readZipDirectory(new Blob([zip])), { fbneo: fb, mame2003_plus: m2p });
   assert.equal(result.status, 'complete');
+});
+
+// CPS2 sets carry a 20-byte decryption key since MAME 0.178; Sega MC-8123 keys are 8 KB.
+const keyed = { games: {
+  xmvsf: ['X-Men Vs. Street Fighter (Europe 961004)', '1996', 'Capcom', '', '', 0, [['xvse.03f', 64, '10101010', ''], ['xvs.13m', 64, '20202020', ''], ['xmvsf.key', 20, 'd5c07311', '']]],
+  gigas: ['Gigas', '1986', 'Sega', '', '', 0, [['g-7', 64, '30303030', ''], ['317-5002.key', 8192, '40404040', '']]]
+} };
+const keyedCatalogs = { fbneo: keyed, mame2003_plus: { games: { xmvsf: keyed.games.xmvsf } } };
+const withoutKey = entriesOf(keyed.games.xmvsf[6].filter(([name]) => name !== 'xmvsf.key'));
+
+test('an old CPS2 set without its .key is incomplete only because of the key', () => {
+  const result = identifyArcadeZip('xmvsf.zip', withoutKey, keyedCatalogs);
+  assert.equal(result.status, 'incomplete');
+  assert.deepEqual(result.missing, ['xmvsf.key']);
+  assert.deepEqual(result.keys, ['xmvsf.key']);
+  assert.deepEqual(result.different, []);
+  assert.equal(result.cps2Key, true);
+  assert.equal(onlyKeysMissing(result), true);
+  assert.equal(describeArcadeStatus(result), 'FinalBurn Neo · CPS2 şifre anahtarı eksik: xmvsf.key');
+});
+
+test('a .key with other contents is reported as different, not absent', () => {
+  const entries = [...withoutKey, { name: 'xmvsf.key', size: 20, crc: '01234567' }];
+  const result = validateSet(keyed, 'xmvsf', entries);
+  assert.deepEqual(result.different, ['xmvsf.key']);
+  assert.match(describeArcadeStatus({ ...result, core: 'fbneo' }), /CPS2 şifre anahtarı farklı: xmvsf\.key/);
+  assert.deepEqual(keyFindings(result.missing, entries), { absent: [], different: ['xmvsf.key'] });
+  assert.deepEqual(keyFindings(result.missing, withoutKey), { absent: ['xmvsf.key'], different: [] });
+});
+
+test('a missing non-CPS2 key is a decryption key, and other missing files are not a key problem', () => {
+  const sega = validateSet(keyed, 'gigas', entriesOf([keyed.games.gigas[6][0]]));
+  assert.equal(sega.cps2Key, false);
+  assert.match(describeArcadeStatus({ ...sega, core: 'fbneo' }), /· şifre çözme anahtarı eksik: 317-5002\.key/);
+  const both = validateSet(keyed, 'xmvsf', entriesOf([keyed.games.xmvsf[6][0]]));
+  assert.equal(onlyKeysMissing(both), false);
+  assert.equal(missingSummary(both), '2 dosya eksik');
+});
+
+test('library records: CPS2 key lookup, truncated lists and records saved before the split', () => {
+  assert.equal(isCps2KeyMissing(keyed, 'xmvsf', ['xmvsf.key']), true);
+  assert.equal(isCps2KeyMissing(keyed, 'gigas', ['317-5002.key']), false);
+  // Saved by the first arcade build: no "different" field, and the user's set lacked xmvsf.key.
+  const oldRecord = { core: 'fbneo', set: 'xmvsf', status: 'incomplete', missing: ['xmvsf.key'], missingCount: 1 };
+  assert.equal(onlyKeysMissing(oldRecord), true);
+  assert.equal(missingSummary({ status: 'incomplete', missing: ['a'], missingCount: 1 }), '1 dosya eksik veya farklı');
+  assert.equal(missingSummary({ status: 'incomplete', missing: ['a', 'b'], missingCount: 2, different: ['b'] }), '1 dosya eksik, 1 dosya farklı sürüm');
+  // Only the first 20 names are kept; a record cut short is not "only keys".
+  assert.equal(onlyKeysMissing({ status: 'incomplete', missing: ['a.key'], missingCount: 25 }), false);
 });
