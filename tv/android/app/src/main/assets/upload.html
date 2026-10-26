@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B0C0F">
+<title>RetroPlay TV'ye gönder</title>
+<style>
+  :root { --bg: #0B0C0F; --surface: #15171C; --line: #262A33; --text: #F4F5F7; --text-2: #A8AFBA; --accent: #FF5B2E; --ok: #3DD9A1; --bad: #FF7A6E; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 620px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 18px 40px; display: grid; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: .08em; font-size: 15px; }
+  .brand i { width: 10px; height: 10px; background: var(--accent); display: inline-block; }
+  h1 { margin: 4px 0 0; font-size: 26px; line-height: 1.2; }
+  p { margin: 0; color: var(--text-2); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 12px; }
+  label { font-weight: 600; font-size: 14px; color: var(--text-2); }
+  input[type=text] { width: 9ch; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: #0F1115; color: var(--text); font: 700 24px/1 ui-monospace, monospace; letter-spacing: .25em; text-align: center; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 20px; border-radius: 14px; border: 1px solid var(--line); background: #1C1F26; color: var(--text); font: 700 16px system-ui, sans-serif; flex: 1 1 200px; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #0B0C0F; }
+  .btn input { display: none; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  li { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; background: #101217; border: 1px solid var(--line); }
+  li .top { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+  li .name { font-weight: 600; overflow-wrap: anywhere; }
+  li .state { color: var(--text-2); white-space: nowrap; font-family: ui-monospace, monospace; font-size: 13px; }
+  li.done .state { color: var(--ok); }
+  li.fail .state { color: var(--bad); }
+  progress { width: 100%; height: 6px; accent-color: var(--accent); }
+  .msg { padding: 10px 12px; border-radius: 12px; background: #2A1517; border: 1px solid #5B2622; color: #FFB4AD; }
+  .msg.ok { background: #0F2A22; border-color: #1F4D41; color: #9FF0D0; }
+  .hidden { display: none !important; }
+  small { color: var(--text-2); }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><i></i>RETROPLAY</div>
+  <div>
+    <h1>TV'ye oyun gönder</h1>
+    <p id="device">Dosyalar TV'deki RetroPlay'e gider; TV'de "Gelenleri ekle" ile kütüphaneye eklenir.</p>
+  </div>
+
+  <div class="card" id="code-card">
+    <label for="code">TV ekranındaki kod</label>
+    <div class="row"><input id="code" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000"><span id="code-state"><small></small></span></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <label class="btn primary">Dosya seç<input id="files" type="file" multiple></label>
+      <label class="btn" id="folder-btn">Klasör seç<input id="folder" type="file" webkitdirectory multiple></label>
+    </div>
+    <small>ROM ve ZIP dosyaları (NES, SNES, Mega Drive, arcade setleri, neogeo.zip gibi BIOS dosyaları). Klasör seçince yalnızca oyun dosyaları gönderilir.</small>
+    <div id="message" class="msg hidden"></div>
+    <ul id="queue"></ul>
+  </div>
+
+  <div class="card hidden" id="waiting-card">
+    <label>TV'de eklenmeyi bekleyenler</label>
+    <ul id="waiting"></ul>
+  </div>
+</main>
+<script>
+(() => {
+  const GAME = /\.(nes|sfc|smc|md|gen|bin|zip|z64|n64|v64|cue|iso)$/i;
+  const $ = id => document.getElementById(id);
+  const codeInput = $('code');
+  const params = new URLSearchParams(location.search);
+  codeInput.value = (params.get('k') || localStorage.getItem('retroplay-tv-code') || '').replace(/\D/g, '').slice(0, 4);
+  const queue = [];
+  let busy = false;
+
+  const size = n => n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  const code = () => codeInput.value.replace(/\D/g, '');
+  function message(text, ok) { const el = $('message'); el.textContent = text; el.className = 'msg' + (ok ? ' ok' : '') + (text ? '' : ' hidden'); }
+
+  async function status() {
+    if (code().length !== 4) { $('code-state').innerHTML = '<small>4 haneli kodu gir</small>'; return; }
+    try {
+      const res = await fetch('/api/status?k=' + code(), { cache: 'no-store' });
+      const data = await res.json();
+      if (!data.ok) { $('code-state').innerHTML = '<small style="color:var(--bad)">' + (data.error || 'Kod yanlış') + '</small>'; return; }
+      localStorage.setItem('retroplay-tv-code', code());
+      $('code-state').innerHTML = '<small style="color:var(--ok)">Bağlandı</small>';
+      $('device').textContent = (data.name || 'TV') + " · dosyalar TV'deki RetroPlay'e gider; TV'de \"Gelenleri ekle\" ile kütüphaneye eklenir.";
+      const waiting = $('waiting');
+      waiting.replaceChildren(...data.files.map(f => { const li = document.createElement('li'); li.innerHTML = '<div class="top"><span class="name"></span><span class="state"></span></div>'; li.querySelector('.name').textContent = f.name; li.querySelector('.state').textContent = size(f.size); return li; }));
+      $('waiting-card').classList.toggle('hidden', !data.files.length);
+    } catch { $('code-state').innerHTML = '<small style="color:var(--bad)">TV\'ye ulaşılamadı; RetroPlay TV\'de açık mı?</small>'; }
+  }
+
+  function add(files, onlyGames) {
+    const chosen = [...files].filter(f => !onlyGames || GAME.test(f.name));
+    if (onlyGames && chosen.length < files.length) message((files.length - chosen.length) + ' oyun olmayan dosya atlandı.', true);
+    for (const file of chosen) {
+      const li = document.createElement('li');
+      li.innerHTML = '<div class="top"><span class="name"></span><span class="state">sırada</span></div><progress max="100" value="0"></progress>';
+      li.querySelector('.name').textContent = file.webkitRelativePath || file.name;
+      $('queue').appendChild(li);
+      queue.push({ file, li });
+    }
+    void pump();
+  }
+
+  function send(item) {
+    return new Promise(resolve => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', '/api/upload?k=' + code() + '&name=' + encodeURIComponent(item.file.name));
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      const bar = item.li.querySelector('progress'), state = item.li.querySelector('.state');
+      xhr.upload.onprogress = e => { if (e.lengthComputable) { bar.value = Math.round(e.loaded / e.total * 100); state.textContent = '%' + bar.value; } };
+      xhr.onload = () => {
+        let data = {}; try { data = JSON.parse(xhr.responseText); } catch {}
+        if (xhr.status === 200 && data.ok) { item.li.classList.add('done'); bar.value = 100; state.textContent = 'gönderildi'; }
+        else { item.li.classList.add('fail'); state.textContent = data.error || 'gönderilemedi'; if (xhr.status === 403) message(data.error || 'Kod yanlış'); }
+        resolve();
+      };
+      xhr.onerror = () => { item.li.classList.add('fail'); state.textContent = 'bağlantı kesildi'; resolve(); };
+      xhr.send(item.file);
+    });
+  }
+
+  async function pump() {
+    if (busy) return;
+    if (code().length !== 4) { message('Önce TV ekranındaki 4 haneli kodu gir.'); return; }
+    busy = true;
+    message('');
+    while (queue.length) await send(queue.shift());
+    busy = false;
+    const failed = document.querySelectorAll('#queue li.fail').length;
+    message(failed ? failed + ' dosya gönderilemedi.' : 'Tamamlandı. TV\'de "Gelenleri ekle"ye bas.', !failed);
+    void status();
+  }
+
+  $('files').addEventListener('change', e => { add(e.target.files, false); e.target.value = ''; });
+  $('folder').addEventListener('change', e => { add(e.target.files, true); e.target.value = ''; });
+  codeInput.addEventListener('input', () => { codeInput.value = code().slice(0, 4); void status(); if (code().length === 4 && queue.length) void pump(); });
+  if (!('webkitdirectory' in document.createElement('input')) || /Android|iPhone|iPad/i.test(navigator.userAgent)) $('folder-btn').classList.add('hidden');
+  void status();
+  setInterval(status, 4000);
+})();
+</script>
+</body>
+</html>

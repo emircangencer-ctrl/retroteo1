@@ -10,7 +10,8 @@
     { n: '05', title: 'Kontrolcü (gamepad)', text: 'USB veya Bluetooth kontrolcüyü bağla ve bir tuşa bas: düğmeler konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır. Oyun menüsü: ortadaki ana düğme ya da Select + Start birlikte. Menülerde ve kütüphanede de kontrolcüyle gezersin: A seç, B geri, X favori, Y ayrıntılar, L/R sistem.' },
     { n: '06', title: 'Klavye', text: 'Ok tuşları yön, Z/X/A/S/Q/W oyun düğmeleri (oyun açıkken ekranın altında hangisinin ne olduğu yazar). Start: Enter ya da 1. Select: Sağ Shift, 5, V veya Sağ Ctrl. Arcade oyunlarda 5 jeton atar, 1 başlatır; üst çubukta Jeton ve Başla düğmeleri de var. Esc oyun menüsünü açar. Kütüphanede Ctrl+K arama kutusuna gider.' },
     { n: '07', title: 'Çevrimdışı ve güncelleme', text: 'İlk açılıştan sonra uygulama ve emülatör çekirdekleri cihaza kaydedilir; oyunlar internetsiz açılır. Yeni sürüm hazır olunca oyun bitene kadar beklenir ve "Yenile" önerilir.' },
-    { n: '08', title: 'Verini yedekle', text: 'Tarayıcı verileri temizlenebilir veya alan daralınca silinebilir. Ayarlar → Yedek al ile oyun listeni, oyun sayfalarından ROM ve kayıt dosyalarını indirip ayrıca sakla.' }
+    { n: '08', title: 'Verini yedekle', text: 'Tarayıcı verileri temizlenebilir veya alan daralınca silinebilir. Ayarlar → Yedek al ile oyun listeni, oyun sayfalarından ROM ve kayıt dosyalarını indirip ayrıca sakla.' },
+    { n: '09', title: 'Google TV / Android TV', text: 'RetroPlay TV uygulaması (Ayarlar → Google TV / Android TV) siteyi televizyonda tam ekran açar. Kumandanın yön tuşlarıyla gezersin, OK seçer, Geri bir önceki ekrana döner; oyunda Geri menüyü açar. Oyunları Oyun ekle → Telefondan gönder ile eklersin: telefonda QR kodu tara, 4 haneli kodu gir, dosyaları seç. Oynamak için Bluetooth kontrolcü önerilir.' }
   ];
 </script>
 

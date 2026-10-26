@@ -2,3 +2,10 @@ node_modules/
 dist/
 e2e/node_modules/
 test-results/
+tv/android/.gradle/
+tv/android/build/
+tv/android/app/build/
+tv/android/local.properties
+tv-ci/
+tv/android/*.p12
+tv/android/*.jks

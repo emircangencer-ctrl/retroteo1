@@ -83,6 +83,8 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Files sent to the RetroPlay TV app: answered by the app itself, never cached here.
+  if (url.pathname.startsWith('/__tv/')) return;
 
   if (url.pathname.startsWith(RUNTIME_PATH_PREFIX) && url.pathname !== RUNTIME_MANIFEST) {
     // Versioned, immutable runtime files: cache first, store on first use (arcade cores too).

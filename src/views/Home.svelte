@@ -104,7 +104,7 @@
         <h2 id="added-title" class="eyebrow">{hero ? 'Son eklenenler' : 'Kütüphanen'}</h2>
         <a class="text-btn" href="#/library">Kütüphane</a>
       </div>
-      {#if !hero}<p class="tip">Bir oyuna dokun: ayrıntıları açılır, oradan oynarsın. Kaldığın yer otomatik kaydedilir.</p>{/if}
+      {#if !hero}<p class="tip">Bir oyunu seç: ayrıntıları açılır, oradan oynarsın. Kaldığın yer otomatik kaydedilir.</p>{/if}
       <div class="rail">
         {#each added as game (game.id)}<GameCard {game} layout="row" />{/each}
         <a class="add-tile" href="#/import"><Icon name="plus" size={24} /><span>Oyun ekle</span></a>

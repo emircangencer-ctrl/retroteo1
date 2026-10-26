@@ -29,6 +29,7 @@ import { importer } from '../lib/importer.svelte.ts';
 import { resolveLaunch, rememberCore, type ExtraFile } from './launch.ts';
 import { keyHints, PRIMARY_SYSTEM_KEY, type KeyHint } from '../lib/key-hints.ts';
 import { keyboardLabels } from '../lib/keyboard-labels.svelte.ts';
+import { tv } from '../lib/tv.svelte.ts';
 import type { Game, SaveStateRecord, SlotId, SlotInfo } from '../lib/types.ts';
 
 export const SAVE_CAPTURE_INTERVAL_MS = 30_000;
@@ -365,6 +366,7 @@ class PlayerSession {
       if (session !== this.#session) { player.destroy(); return; }
       // Arcade games wait for a coin. Without a touch pad, say which keys insert it and start.
       if (game.platform === 'ARCADE' && !this.isTouchPlay() && !resumed && !this.notice) this.#showArcadeKeys();
+      else if (tv.active && !this.notice) this.showNotice('Oyun menüsü: kumandanın Geri tuşu', { timeout: 3500 });
 
       this.running = true;
       this.status = this.#statusLine('Çalışıyor');
@@ -389,11 +391,23 @@ class PlayerSession {
   }
 
   #showArcadeKeys() {
+    if (tv.active) {
+      this.showNotice('Kontrolcüde Select jeton atar, Start başlatır · menü: Geri tuşu', { timeout: 7000 });
+      this.#arcadeNoticeId = this.notice?.id ?? 0;
+      return;
+    }
     const coin = keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_SELECT);
     const start = keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_START);
     const pad = gamepadUI.connected ? ' · kumandada Select / Start' : '';
     this.showNotice(`Jeton: ${coin} · Başla: ${start}${pad}`, { action: { label: 'Jeton at', run: () => this.tapInput('BUTTON_SELECT') }, timeout: 9000 });
     this.#arcadeNoticeId = this.notice?.id ?? 0;
+  }
+
+  /** Jeton / Başla from the pause menu: the menu closes, the game resumes, then the press. */
+  async tapFromMenu(name: 'BUTTON_SELECT' | 'BUTTON_START') {
+    await this.closeMenu();
+    // The emulator needs a frame or two after resuming before it reads input.
+    setTimeout(() => this.tapInput(name), 120);
   }
 
   /** Jeton / Başla from the bar or a notice: a short press the game is sure to see. */

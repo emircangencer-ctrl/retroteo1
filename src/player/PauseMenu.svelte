@@ -2,6 +2,7 @@
   import Icon from '../components/Icon.svelte';
   import TouchSettings from '../components/TouchSettings.svelte';
   import KeyHints from '../components/KeyHints.svelte';
+  import { tv } from '../lib/tv.svelte.ts';
   import { player, slotName } from './session.svelte.ts';
   import { settings } from '../lib/settings.svelte.ts';
   import { gamepadUI, moveFocus } from '../lib/gamepad-ui.svelte.ts';
@@ -91,12 +92,18 @@
     </div>
     <div class="items">
       <button type="button" class="item primary" id="play-menu-close" data-nav-default onclick={() => player.closeMenu()}><Icon name="play" size={18} /><span class="grow">Oyuna dön</span></button>
+      {#if player.isArcade}
+        <div class="item-pair">
+          <button type="button" class="item" id="menu-coin" disabled={!player.running} onclick={() => player.tapFromMenu('BUTTON_SELECT')}><Icon name="plus" size={18} /><span class="grow">Jeton at</span></button>
+          <button type="button" class="item" id="menu-start" disabled={!player.running} onclick={() => player.tapFromMenu('BUTTON_START')}><Icon name="play" size={18} /><span class="grow">Başla</span></button>
+        </div>
+      {/if}
       <button type="button" class="item" id="quick-save" disabled={!player.canSave || !player.running} onclick={async () => { await player.quickSave(); }}><Icon name="save" size={18} /><span class="grow">Hızlı kaydet</span></button>
       <button type="button" class="item" id="quick-load" disabled={!player.canLoad || !player.running} onclick={async () => { await player.quickLoad(); await player.closeMenu(); }}><Icon name="load" size={18} /><span class="grow">Hızlı yükle</span>{#if quick}<span class="aside">{slotTime(quick.createdAt)}</span>{/if}</button>
       <button type="button" class="item" id="menu-slots" disabled={!player.running || !player.canSave} onclick={() => player.setPanel('slots')}><Icon name="slots" size={18} /><span class="grow">Kayıt yuvaları</span><Icon name="chevron" size={16} class="chev" /></button>
       <button type="button" class="item" id="menu-display" onclick={() => player.setPanel('display')}><Icon name="monitor" size={18} /><span class="grow">Ekran ve ses</span><span class="aside" id="display-mode">{displayLabel(display)}</span><Icon name="chevron" size={16} class="chev" /></button>
       <button type="button" class="item" id="touch-settings-open" aria-haspopup="true" onclick={() => player.setPanel('controls')}><Icon name="gamepad" size={18} /><span class="grow">Kontroller</span><Icon name="chevron" size={16} class="chev" /></button>
-      <button type="button" class="item" id="fullscreen-game" aria-pressed={player.fullscreen || player.fullscreenFallback} onclick={() => player.toggleFullscreen()}><Icon name="fullscreen" size={18} /><span class="grow">{fullscreenLabel}</span></button>
+      {#if !tv.active}<button type="button" class="item" id="fullscreen-game" aria-pressed={player.fullscreen || player.fullscreenFallback} onclick={() => player.toggleFullscreen()}><Icon name="fullscreen" size={18} /><span class="grow">{fullscreenLabel}</span></button>{/if}
       <button type="button" class="item" id="perf-test" disabled={!player.running || player.perfRunning} title="Bu cihazın bu oyunu ne kadar rahat çalıştırdığını ölç" onclick={() => player.runPerformanceTest()}><Icon name="gauge" size={18} /><span class="grow">Performansı ölç</span><span class="aside">~7 sn</span></button>
       <button type="button" class="item" id="menu-restart" disabled={!player.running} onclick={restart}><Icon name="restart" size={18} /><span class="grow">Yeniden başlat</span></button>
       <button type="button" class="item danger" id="player-exit" onclick={() => player.close()}><Icon name="exit" size={18} /><span class="grow">Oyundan çık</span><span class="aside">{settings.prefs.autoResume ? 'kaydedip çıkar' : 'çıkar'}</span></button>
@@ -168,7 +175,7 @@
           <button id="refresh-gamepads" class="text-btn" type="button" onclick={() => player.updateGamepadStatus()}>Yeniden tara</button>
         </div>
         <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.isArcade ? ' Select jeton atar, Start başlatır.' : ''} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
-        {#if !player.touchPlay}
+        {#if !player.touchPlay && !tv.active}
           <p class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span><KeyHints hints={player.keyHints} /></p>
           <p class="note">{player.isArcade ? 'Jeton için 5, Sağ Shift, V veya Sağ Ctrl; başlamak için 1 ya da Enter.' : 'Start için Enter ya da 1; Select için Sağ Shift, 5, V veya Sağ Ctrl.'}</p>
         {/if}

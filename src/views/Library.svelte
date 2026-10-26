@@ -97,7 +97,7 @@
       <Icon name="search" />
       <span class="sr-only">Oyun ara</span>
       <input bind:this={search} id="search-input" type="search" placeholder="Oyun, sistem veya dosya ara" autocomplete="off" enterkeyhint="search" bind:value={query} oninput={() => (limit = PAGE_SIZE)} />
-      <kbd class="kbd">Ctrl K</kbd>
+      <kbd class="kbd tv-hide">Ctrl K</kbd>
     </label>
 
     <div class="chips" role="group" aria-label="Sisteme göre süz" id="platform-filters">

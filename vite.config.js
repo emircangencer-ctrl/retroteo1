@@ -54,6 +54,8 @@ function emulatorJsSelfHost() {
         const source = fs.readFileSync(workerFile, 'utf8');
         if (!source.includes('__RETROPLAY_BUILD_ID__') || !source.includes('/*__RETROPLAY_APP_ASSETS__*/')) throw new Error('service-worker.js is missing a build placeholder.');
         fs.writeFileSync(workerFile, source.replace('__RETROPLAY_BUILD_ID__', buildId).replace('/*__RETROPLAY_APP_ASSETS__*/', assets.map(asset => JSON.stringify(asset)).join(', ')));
+        // Which commit a deploy serves (Netlify sets COMMIT_REF); the TV workflow waits for it.
+        fs.writeFileSync(path.join(outDir, 'build.json'), JSON.stringify({ version: pkg.version, buildId, commit: process.env.COMMIT_REF || process.env.GITHUB_SHA || '' }) + '\n');
       }
     }
   };

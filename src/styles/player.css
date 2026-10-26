@@ -158,6 +158,7 @@
 .player-menu .menu-head h2 { font-size: 17px; font-weight: 700; line-height: 1.25; }
 .player-menu .play-menu-status { font-family: var(--mono); font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .player-menu .items { display: flex; flex-direction: column; gap: 2px; }
+.player-menu .item-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .player-menu .item { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; border: 2px solid transparent; border-radius: 10px; background: transparent; color: var(--text); font-weight: 600; font-size: 15px; text-align: left; }
 .player-menu .item:hover:not(:disabled) { background: #1A1C22; }
 .player-menu .item:disabled { opacity: 0.4; }
@@ -203,3 +204,13 @@
 .player-menu .pad-hints span { display: inline-flex; align-items: center; gap: 6px; }
 .player-menu .pad-hints b { width: 24px; height: 24px; border-radius: 999px; border: 1px solid #3A3F4A; display: grid; place-items: center; font-weight: 800; font-size: 12px; }
 html.player-open, html.player-open body { overflow: hidden; }
+
+/* ---- TV (RetroPlay TV app): always full screen, the bar only while the menu is open or for a
+   moment after starting; the remote and controllers need no pointer buttons. ---- */
+.player.tv:not(.touch-play) { grid-template-rows: 0 minmax(0, 1fr) 0; }
+.player.tv:not(.touch-play) .play-bar { position: absolute; left: 0; right: 0; top: 0; z-index: 30; padding: var(--tv-y, 27px) var(--tv-x, 48px) 14px; background: linear-gradient(180deg, rgba(11, 12, 15, 0.92), rgba(11, 12, 15, 0.6) 70%, rgba(11, 12, 15, 0)); border-bottom: 0; }
+.player.tv:not(.touch-play) .stage { padding: 0; }
+.player.tv:not(.touch-play) .player-screen-frame { border-radius: 0; box-shadow: none; }
+.player.tv #bar-fullscreen, .player.tv .arcade-chip, .player.tv #player-close { display: none; }
+.player.tv .player-menu { padding-left: max(16px, var(--tv-x, 48px)); padding-top: max(18px, var(--tv-y, 27px)); padding-bottom: var(--tv-y, 27px); width: min(400px, 46vw); }
+.player.tv .player-notice { top: calc(var(--tv-y, 27px) + 56px); }

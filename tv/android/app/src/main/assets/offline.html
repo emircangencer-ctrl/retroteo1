@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RetroPlay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0B0C0F; color: #F4F5F7; font: 16px/1.5 system-ui, sans-serif; }
+  main { height: 100%; display: grid; place-content: center; gap: 14px; text-align: center; padding: 27px 48px; box-sizing: border-box; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: .04em; }
+  h1 span { display: inline-block; width: 14px; height: 14px; margin-right: 12px; background: #FF5B2E; }
+  p { margin: 0; color: #A8AFBA; max-width: 560px; }
+  button { justify-self: center; margin-top: 8px; padding: 12px 28px; border: 0; border-radius: 12px; background: #FF5B2E; color: #0B0C0F; font: 700 18px system-ui, sans-serif; }
+  button:focus { outline: 4px solid #F4F5F7; outline-offset: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1><span></span>RETROPLAY</h1>
+  <p>RetroPlay'e bağlanılamadı. İlk açılışta internet bağlantısı gerekir; sonra oyunlar internetsiz de açılır.</p>
+  <p>TV'nin internete bağlı olduğunu kontrol edip tekrar dene.</p>
+  <button id="retry" autofocus onclick="location.href='{{URL}}'">Tekrar dene</button>
+</main>
+<script>document.getElementById('retry').focus();</script>
+</body>
+</html>

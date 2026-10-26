@@ -40,4 +40,7 @@ EmulatorJS. RetroPlay is a personal, non-commercial project.
    - IBM Plex Mono (400, 500, 600; latin and latin-ext subsets) — SIL Open Font License 1.1
      Copyright 2017 IBM Corp. (https://github.com/IBM/plex)
      Packaged by Fontsource (@fontsource/ibm-plex-mono). License text: /licenses/IBM-Plex-Mono-OFL-1.1.txt
+   - qrcode-generator 2.0 (QR code on the TV's "Telefondan gönder" screen) — MIT License
+     Copyright (c) 2009 Kazuhiko Arase. License text: /licenses/qrcode-generator-MIT.txt
+     "QR Code" is a registered trademark of DENSO WAVE INCORPORATED.
    The font files are served unmodified (WOFF2 subsets as published by Fontsource).

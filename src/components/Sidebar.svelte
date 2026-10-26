@@ -19,7 +19,7 @@
   ]);
 </script>
 
-<aside class="sidebar" aria-label="Kenar menüsü">
+<aside class="sidebar" aria-label="Kenar menüsü" data-nav-region="sidebar">
   <a class="brand" href="#/" aria-label="RetroPlay ana ekran">
     <span class="mark" aria-hidden="true"></span><span>RETROPLAY</span>
   </a>
@@ -39,7 +39,7 @@
       <p class="none">Oyun ekleyince sistemler burada listelenir.</p>
     {/each}
   </section>
-  <div class="pad-card" data-state={gamepadUI.connected ? 'on' : 'off'}>
+  <div class="pad-card tv-hide" data-state={gamepadUI.connected ? 'on' : 'off'}>
     <Icon name="gamepad" size={22} />
     <span>
       <strong>{gamepadUI.connected ? 'Gamepad bağlı' : 'Gamepad bağlı değil'}</strong>

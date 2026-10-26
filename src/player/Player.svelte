@@ -7,6 +7,7 @@
   import KeyHints from '../components/KeyHints.svelte';
   import { keyboardLabels } from '../lib/keyboard-labels.svelte.ts';
   import { PRIMARY_SYSTEM_KEY } from '../lib/key-hints.ts';
+  import { tv } from '../lib/tv.svelte.ts';
 
   let modal: HTMLElement;
   let screen: HTMLElement;
@@ -24,9 +25,10 @@
   function wake() {
     idle = false;
     if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => { if (player.running && !player.paused && !player.menuOpen && player.fullscreen && !player.touchPlay) idle = true; }, 2500);
+    idleTimer = setTimeout(() => { if (player.running && !player.paused && !player.menuOpen && (player.fullscreen || tv.active) && !player.touchPlay) idle = true; }, 2500);
   }
-  $effect(() => { if (!player.fullscreen || player.menuOpen) idle = false; else wake(); });
+  // In fullscreen and on a TV the bar steps away while playing.
+  $effect(() => { void player.running; if ((!player.fullscreen && !tv.active) || player.menuOpen) idle = false; else wake(); });
 
   // Arcade on a computer: Jeton and Başla in the bar. Focus leaves the button afterwards, so Space or
   // Enter keep going to the game instead of pressing the button again.
@@ -48,6 +50,7 @@
   class:pad-in-use={player.padInUse}
   class:is-vertical={player.vertical}
   class:is-fallback={player.fullscreenFallback}
+  class:tv={tv.active}
   class:idle
   data-orientation={player.touchPlay ? player.orientation : 'desktop'}
   role="dialog"
@@ -133,7 +136,7 @@
   {/if}
   <PauseMenu />
 
-  {#if !player.touchPlay && player.open && player.running && !player.menuOpen}
+  {#if !player.touchPlay && !tv.active && player.open && player.running && !player.menuOpen}
     <p class="desk-hints" aria-hidden="true">
       <KeyHints hints={player.keyHints} />
       {#if gamepadUI.connected}<span class="pad"><Icon name="gamepad" size={16} /> kontrolcü hazır · {player.isArcade ? 'Select jeton · Start başla · ' : ''}Select+Start menü</span>{/if}

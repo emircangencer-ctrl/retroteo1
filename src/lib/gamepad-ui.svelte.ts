@@ -39,8 +39,14 @@ export function moveFocus(root: HTMLElement, dir: NavDirection): HTMLElement | n
     next = preferred || (content ? items.find(el => content.contains(el)) : undefined) || items[0];
   } else {
     const others = items.filter(el => el !== current);
-    const index = pickNeighbor(current.getBoundingClientRect(), others.map(el => el.getBoundingClientRect()), dir);
-    next = index >= 0 ? others[index] : null;
+    // Up and down stay in the same column (the sidebar or the page) while it has somewhere to go;
+    // left and right cross between them.
+    const region = dir === 'up' || dir === 'down' ? current.closest('[data-nav-region]') : null;
+    const near = region ? others.filter(el => region.contains(el)) : [];
+    for (const pool of near.length ? [near, others] : [others]) {
+      const index = pickNeighbor(current.getBoundingClientRect(), pool.map(el => el.getBoundingClientRect()), dir);
+      if (index >= 0) { next = pool[index]; break; }
+    }
   }
   if (next) {
     next.focus({ preventScroll: true });
@@ -94,9 +100,18 @@ class GamepadUI {
     this.#reader.reset();
   }
 
+  /** On a TV there is no pointer: focus is always shown. */
+  #sticky = false;
+
   setNavigating(on: boolean) {
+    if (this.#sticky && !on) return;
     this.navigating = on;
     document.documentElement.classList.toggle('gp-nav', on);
+  }
+
+  stickyNavigation() {
+    this.#sticky = true;
+    this.setNavigating(true);
   }
 
   /** The game takes the controller (true) or gives it back to the interface (false). */
@@ -116,14 +131,19 @@ class GamepadUI {
     };
   }
 
-  #handle(action: NavAction) {
+  /** Navigation from another source (the TV remote); true when something handled it. */
+  dispatch(action: NavAction): boolean {
+    return this.#handle(action);
+  }
+
+  #handle(action: NavAction): boolean {
     const scope = this.#scopes[this.#scopes.length - 1];
     const root = scope?.root() || document.body;
     if (!this.navigating) this.setNavigating(true);
     const focused = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) && document.activeElement !== document.body ? document.activeElement : null;
     for (let i = this.#scopes.length - 1; i >= 0; i--) {
       const layer = this.#scopes[i];
-      if (layer.onAction?.(action, focused)) return;
+      if (layer.onAction?.(action, focused)) return true;
       if (layer.modal) break;
     }
     if (action.type === 'move') {
@@ -131,23 +151,24 @@ class GamepadUI {
         if (action.dir === 'left') focused.stepDown(); else focused.stepUp();
         focused.dispatchEvent(new Event('input', { bubbles: true }));
         focused.dispatchEvent(new Event('change', { bubbles: true }));
-        return;
+        return true;
       }
       moveFocus(root, action.dir);
-      return;
+      return true;
     }
     if (action.type === 'confirm') {
-      if (!focused) { moveFocus(root, 'down'); return; }
+      if (!focused) { moveFocus(root, 'down'); return true; }
       if (focused instanceof HTMLInputElement && (focused.type === 'checkbox' || focused.type === 'radio')) focused.click();
       else if (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) focused.focus();
       else focused.click();
-      return;
+      return true;
     }
     if (action.type === 'x' || action.type === 'y') {
       const target = focused?.closest<HTMLElement>(`[data-nav-${action.type}]`);
       const id = target?.getAttribute(`data-nav-${action.type}`);
-      if (target && id) target.dispatchEvent(new CustomEvent(`nav-${action.type}`, { bubbles: true, detail: id }));
+      if (target && id) { target.dispatchEvent(new CustomEvent(`nav-${action.type}`, { bubbles: true, detail: id })); return true; }
     }
+    return false;
   }
 }
 

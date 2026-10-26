@@ -15,4 +15,5 @@
   .toast[data-tone='error'] { border-color: #5B2622; background: #2A1517; }
   @media (min-width: 960px) { .toast { bottom: 24px; left: calc(50% + var(--sidebar-w) / 2); } }
   :global(.player-open) .toast { bottom: 24px; left: 50%; z-index: 2500; }
+  :global(html.tv) .toast { bottom: calc(var(--tv-y) + 12px); }
 </style>

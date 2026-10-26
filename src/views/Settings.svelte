@@ -17,6 +17,9 @@
   import { DISPLAY_SCALES, DISPLAY_FILTERS, type DisplayScale, type DisplayFilter } from '../display-modes.js';
   import { loadHistory, historyReport, PERF_HISTORY_KEY } from '../performance-meter.js';
   import { inspectGamepads, describeGamepads } from '../gamepad-status.js';
+  import { tv } from '../lib/tv.svelte.ts';
+  import { TV_APK_URL } from '../lib/tv.ts';
+  const tvInstallUrl = typeof location !== 'undefined' ? `${location.host}/tv` : 'retroplay/tv';
 
   const scales = Object.entries(DISPLAY_SCALES) as Array<[DisplayScale, { label: string; hint: string }]>;
   const filters = Object.entries(DISPLAY_FILTERS) as Array<[DisplayFilter, { label: string; hint: string }]>;
@@ -208,6 +211,27 @@
     </div>
   </div>
 
+  <h2 class="eyebrow section" id="settings-tv" lang="en">Google TV / Android TV</h2>
+  <div class="panel">
+    {#if tv.bridge}
+      <div class="row stack">
+        <span class="label">RetroPlay TV {tv.info?.versionName || ''}{tv.info?.model ? ` · ${tv.info.model}` : ''}</span>
+        <p class="hint">Oyun eklemek için Oyun ekle → Telefondan gönder. Kontrolcüyü TV'nin Bluetooth ayarlarından eşle; düğmeler konumlarına göre eşlenir. Oyun menüsü: kumandanın Geri tuşu. Kütüphane ve kayıtlar bu TV'de saklanır.</p>
+        <div class="inline"><button type="button" class="btn btn-sm" id="tv-exit" onclick={() => tv.exit()}>Uygulamadan çık</button></div>
+      </div>
+    {:else}
+      <div class="row stack">
+        <span class="label">RetroPlay'i televizyonda oyna</span>
+        <ol class="tv-steps hint">
+          <li>TV'de Google Play'den <b>Downloader</b> uygulamasını kur; Ayarlar → Sistem → Hakkında'da "Android TV OS derlemesi"ne 7 kez basıp geliştirici seçeneklerini aç, Downloader'a "bilinmeyen uygulama yükleme" izni ver.</li>
+          <li>Downloader'a şu adresi yaz: <b class="mono">{tvInstallUrl}</b></li>
+          <li>İnen RetroPlay TV'yi kur ve aç; oyunları Oyun ekle → Telefondan gönder ile ekle.</li>
+        </ol>
+        <div class="inline"><a class="btn btn-sm" href={TV_APK_URL} id="tv-apk">APK'yı indir</a></div>
+      </div>
+    {/if}
+  </div>
+
   <h2 class="eyebrow section" id="settings-about">Hakkında</h2>
   <div class="panel">
     <a class="row" href="#/help"><Icon name="help" size={20} /><span class="grow"><span class="label">Nasıl çalışır?</span><span class="hint">Oyun ekleme, kayıtlar, dokunmatik tuşlar, kontrolcü</span></span><Icon name="chevron" size={18} /></a>
@@ -238,6 +262,8 @@
   .legend li { display: flex; align-items: center; gap: 8px; }
   .legend .grow { flex: 1; }
   .sw { width: 8px; height: 8px; border-radius: 2px; }
+  .tv-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
+  .mono { font-family: var(--mono); color: var(--text); }
   .backup { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .tile { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 84px; padding: 12px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--text); text-align: left; }
   .tile:hover { background: var(--surface-3); }

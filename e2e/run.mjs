@@ -939,6 +939,77 @@ await scenario('settings: accent colour, display filter and "Çıkışta devam n
   assert.match(await page.evaluate(() => document.querySelector('.detail [data-play]').textContent), /Oyna/);
 });
 
+// The RetroPlay TV app (tv/android) as the page sees it: window.RetroPlayTV, here a stand-in.
+const tvStub = () => {
+  if (window !== window.top) return;
+  const state = { version: 0, pads: [], inbox: [], deleted: [], keepOn: [], uploads: 0 };
+  window.__tv = state;
+  window.RetroPlayTV = {
+    info: () => JSON.stringify({ app: 'RetroPlayTV', versionName: '1.0.9', versionCode: 9, sdk: 34, model: 'Test TV', device: 'Salon TV', address: '192.168.1.20', filePicker: false }),
+    gamepadVersion: () => state.version,
+    gamepads: () => JSON.stringify({ v: state.version, pads: state.pads }),
+    inbox: () => JSON.stringify(state.inbox),
+    inboxDelete: id => { state.deleted.push(id); state.inbox = state.inbox.filter(file => file.id !== id); return true; },
+    startUpload: () => { state.uploads++; return JSON.stringify({ url: 'http://192.168.1.20:8686/?k=4821', address: '192.168.1.20:8686', port: 8686, code: '4821' }); },
+    stopUpload: () => {},
+    setKeepScreenOn: on => state.keepOn.push(on),
+    exit: () => { state.exited = true; }
+  };
+};
+const tvPad = pressed => ({ index: 0, id: 'Test Pad', timestamp: Date.now(), axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, b) => [pressed.includes(b) ? 1 : 0, pressed.includes(b) ? 1 : 0]) });
+
+await scenario('TV app: files sent from a phone are imported, the remote moves the focus, Back goes back and opens the game menu, controllers come from the app', async (page, context) => {
+  assert.equal(await page.evaluate(() => document.documentElement.classList.contains('tv') && document.documentElement.classList.contains('gp-nav')), true);
+  // Oyun ekle opens on "Telefondan gönder": QR code, address and code; no folder or Drive.
+  await page.evaluate(() => { location.hash = '#/import'; });
+  await page.waitForSelector('#tv-upload svg.qr');
+  assert.deepEqual(await page.evaluate(() => [document.querySelector('#tv-upload-address')?.textContent, document.querySelector('#tv-upload-code')?.textContent, Boolean(document.querySelector('#choose-folder')), Boolean(document.querySelector('#choose-drive')), Boolean(document.querySelector('#choose-files'))]), ['192.168.1.20:8686', '4821', false, false, false]);
+  // A file arrives from the phone; the TV app answers /__tv/inbox/<id> (stood in for here).
+  const rom = fs.readFileSync(checkerRom);
+  await context.route('**/__tv/inbox/*', route => route.fulfill({ status: 200, contentType: 'application/octet-stream', body: rom }));
+  await page.evaluate(size => { window.__tv.inbox = [{ id: 'ab12cd34ef', name: 'checkerboard.nes', size, time: Date.now() }]; window.RetroPlayTVHost.inboxChanged(); }, rom.length);
+  await page.waitForSelector('#tv-inbox-add');
+  // The remote: arrows move the focus to the add button, OK presses it.
+  for (let i = 0; i < 6 && await page.evaluate(() => document.activeElement?.id) !== 'tv-inbox-add'; i++) await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'tv-inbox-add', 'the remote reached the add button');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#import-commit');
+  assert.match(await page.evaluate(() => document.querySelector('#import-review').textContent), /checkerboard[\s\S]*NES · Oynatılabilir dosya/);
+  await click(page, '#import-commit');
+  await page.waitForFunction(() => /Tamamlandı: 1/.test(document.querySelector('#import-results')?.textContent || ''));
+  assert.deepEqual(await page.evaluate(() => window.__tv.deleted), ['ab12cd34ef'], 'added files leave the inbox');
+  // Back: previous screen; on the home screen the app steps aside.
+  await page.evaluate(() => { location.hash = '#/library'; });
+  await page.waitForSelector('#library-games .game-card');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  await page.waitForFunction(() => location.hash === '#/import' || location.hash === '' || location.hash === '#/');
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForTimeout(200);
+  // Play: full screen at once, the bar steps away, Back opens the menu and closes it again.
+  await play(page, 'checkerboard');
+  assert.equal(await page.evaluate(() => document.querySelector('#player-modal').classList.contains('tv')), true);
+  await notice(page, /Oyun menüsü: kumandanın Geri tuşu/);
+  await page.waitForFunction(() => document.querySelector('#player-modal').classList.contains('idle'), null, { timeout: 5000 });
+  const frame = await page.evaluate(() => { const r = document.querySelector('.player-screen-frame').getBoundingClientRect(); return [Math.round(r.height), Math.round(innerHeight)]; });
+  assert.equal(frame[0], frame[1], 'the picture fills the screen height');
+  assert.ok(await page.evaluate(() => window.__tv.keepOn.at(-1) === true), 'the screen stays on while playing');
+  await recordInputs(page);
+  await page.evaluate(pad => { window.__tv.pads = [pad]; window.__tv.version++; }, tvPad([1]));
+  await page.waitForTimeout(250);
+  assert.equal(await heldInputs(page), 'A', 'right face button from the TV app = A');
+  await page.evaluate(pad => { window.__tv.pads = [pad]; window.__tv.version++; }, tvPad([]));
+  await page.waitForTimeout(250);
+  assert.equal(await heldInputs(page), '-');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  await waitStatus(page, /^Duraklatıldı/);
+  assert.equal(await page.evaluate(() => document.querySelector('#fullscreen-game')), null, 'no fullscreen item: the TV app is always full screen');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'quick-save', 'the remote moves in the menu');
+  assert.ok(await page.evaluate(() => window.__tv.keepOn.at(-1) === false), 'the screen may sleep while paused');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  await waitStatus(page, /^Çalışıyor/);
+}, { init: tvStub, viewport: { width: 960, height: 540 } });
+
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
   assert.deepEqual(cdnRequests, []);
 });

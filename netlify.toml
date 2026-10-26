@@ -30,6 +30,11 @@
     Cache-Control = "no-cache"
 
 [[headers]]
+  for = "/build.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
   for = "/manifest.webmanifest"
   [headers.values]
     Content-Type = "application/manifest+json; charset=utf-8"
@@ -44,3 +49,16 @@
   for = "/index.html"
   [headers.values]
     Cache-Control = "no-cache"
+
+# RetroPlay TV (Android TV / Google TV): a short address to type into a TV's Downloader app.
+[[redirects]]
+  from = "/tv"
+  to = "https://github.com/emircangencer-ctrl/retroteo1/releases/download/tv-latest/RetroPlayTV.apk"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/tv.apk"
+  to = "https://github.com/emircangencer-ctrl/retroteo1/releases/download/tv-latest/RetroPlayTV.apk"
+  status = 302
+  force = true

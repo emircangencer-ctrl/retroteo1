@@ -4,12 +4,17 @@
   import { importer } from '../lib/importer.svelte.ts';
   import { router } from '../lib/router.svelte.ts';
   import { formatBytes } from '../lib/format.ts';
+  import { tv } from '../lib/tv.svelte.ts';
 
   let fileInput: HTMLInputElement | null = $state(null);
   let folderInput: HTMLInputElement | null = $state(null);
-  let source = $state<'files' | 'folder' | 'drive' | ''>('');
+  // On a TV files come from a phone or computer; there is rarely a file picker and never a folder one.
+  let source = $state<'files' | 'folder' | 'drive' | 'phone' | ''>(tv.active ? 'phone' : '');
+  const filePicker = !tv.active || !tv.bridge || tv.info?.filePicker !== false;
+  let inboxIds: string[] = [];
+  let fetchingInbox = $state(false);
   let dragging = $state(false);
-  const folderSupported = typeof HTMLInputElement !== 'undefined' && 'webkitdirectory' in HTMLInputElement.prototype;
+  const folderSupported = !tv.active && typeof HTMLInputElement !== 'undefined' && 'webkitdirectory' in HTMLInputElement.prototype;
   const ACCEPT = '.nes,.sfc,.smc,.md,.gen,.bin,.zip,.z64,.n64,.v64,.cue,.iso';
 
   const selected = $derived(importer.selected);
@@ -39,6 +44,23 @@
     if (files.length) void importer.add(files, { source: 'Bırakılan dosyalar' });
   }
   function toggleAll() { for (const item of selectable) importer.toggle(item.key, !allOn); }
+  /** The files sent to the TV go through the same review; they leave the inbox once added. */
+  async function addInbox() {
+    if (fetchingInbox) return;
+    fetchingInbox = true;
+    try {
+      const entries = [...tv.inbox];
+      const files = await tv.inboxFiles(entries);
+      inboxIds = entries.map(entry => entry.id);
+      if (files.length) await importer.add(files, { source: "TV'ye gönderilenler" });
+    } finally { fetchingInbox = false; }
+  }
+  async function commit() {
+    const summary = await importer.commit();
+    // Kept when something failed, so it can be tried again.
+    if (inboxIds.length && summary && !summary.failed) tv.removeFromInbox(inboxIds);
+    inboxIds = [];
+  }
   function close() { if (importer.phase === 'done') importer.reset(); router.back('library'); }
   function again() { importer.reset(); }
 </script>
@@ -59,25 +81,38 @@
     </div>
   </header>
 
-  <div class="sources">
-    <button type="button" class="source" class:on={source === 'files'} id="choose-files" data-nav-default onclick={chooseFiles}>
-      <Icon name="file" size={22} /><span><b>Dosya seç</b><small>ROM veya ZIP</small></span>
-    </button>
+  <div class="sources" class:tv-hide={tv.active && !filePicker}>
+    {#if tv.active}
+      <button type="button" class="source" class:on={source === 'phone'} id="choose-phone" data-nav-default onclick={() => (source = 'phone')}>
+        <Icon name="upload" size={22} /><span><b>Telefondan gönder</b><small>Aynı ağdaki telefon veya bilgisayar</small></span>
+      </button>
+    {/if}
+    {#if filePicker}
+      <button type="button" class="source" class:on={source === 'files'} id="choose-files" data-nav-default={tv.active ? undefined : true} onclick={chooseFiles}>
+        <Icon name="file" size={22} /><span><b>Dosya seç</b><small>{tv.active ? 'USB bellek veya TV\'deki dosyalar' : 'ROM veya ZIP'}</small></span>
+      </button>
+    {/if}
     {#if folderSupported}
       <button type="button" class="source" class:on={source === 'folder'} id="choose-folder" onclick={chooseFolder}>
         <Icon name="folder" size={22} /><span><b>Klasör tara</b><small>Alt klasörler dahil</small></span>
       </button>
     {/if}
-    <button type="button" class="source" class:on={source === 'drive'} id="choose-drive" aria-expanded={source === 'drive'} onclick={() => (source = source === 'drive' ? '' : 'drive')}>
-      <Icon name="cloud" size={22} /><span><b>Google Drive</b><small>Salt okunur</small></span>
-    </button>
+    {#if !tv.active}
+      <button type="button" class="source" class:on={source === 'drive'} id="choose-drive" aria-expanded={source === 'drive'} onclick={() => (source = source === 'drive' ? '' : 'drive')}>
+        <Icon name="cloud" size={22} /><span><b>Google Drive</b><small>Salt okunur</small></span>
+      </button>
+    {/if}
   </div>
   <input bind:this={fileInput} type="file" id="import-file-input" hidden multiple accept={ACCEPT} onchange={e => onFiles(e)} />
   <input bind:this={folderInput} type="file" id="import-folder-input" hidden multiple webkitdirectory onchange={e => onFiles(e, true)} />
 
   {#if source === 'drive'}<DrivePanel />{/if}
+  {#if source === 'phone' && (importer.phase === 'idle' || importer.phase === 'done')}
+    <!-- Loaded only on a TV (it carries the QR code generator). -->
+    {#await import('../components/TvUpload.svelte') then upload}<upload.default onadd={addInbox} busy={fetchingInbox} />{/await}
+  {/if}
 
-  {#if importer.phase === 'idle'}
+  {#if importer.phase === 'idle' && !tv.active}
     <div class="drop" class:active={dragging}>
       <Icon name="upload" size={26} />
       <strong>Dosyaları buraya bırak ya da yukarıdan seç</strong>
@@ -124,7 +159,7 @@
       {/each}
     </ul>
     <div class="more-row">
-      <button type="button" class="btn btn-sm" onclick={chooseFiles} disabled={importer.phase === 'importing'}><Icon name="plus" size={16} />Başka dosya</button>
+      {#if filePicker}<button type="button" class="btn btn-sm" onclick={chooseFiles} disabled={importer.phase === 'importing'}><Icon name="plus" size={16} />Başka dosya</button>{/if}
       <button type="button" class="btn btn-sm btn-ghost" onclick={() => importer.reset()} disabled={importer.phase === 'importing'}>Temizle</button>
     </div>
   {/if}
@@ -158,7 +193,7 @@
           {#if importer.freeBytes !== null}<span class:warn={tight}>Tarayıcıda {formatBytes(importer.freeBytes)} boş</span>{/if}
         </div>
         {#if tight}<p class="tight">Boş alan bu dosyalar için yetmeyebilir; dosyalar tek tek eklenir, sığmayan bildirilir.</p>{/if}
-        <button type="button" class="btn btn-primary btn-block" id="import-commit" disabled={!selected.length} onclick={() => importer.commit()}>{addLabel}</button>
+        <button type="button" class="btn btn-primary btn-block" id="import-commit" disabled={!selected.length} onclick={commit}>{addLabel}</button>
       {/if}
     </div>
   {/if}
