@@ -831,6 +831,22 @@ await scenario('desktop: sidebar instead of the bottom bar; the game fills the w
   await waitStatus(page, /^Duraklatıldı/);
   await page.keyboard.press('Escape');
   await waitStatus(page, /^Çalışıyor/);
+  // Fullscreen: the picture fills the screen height at 4:3 and the game is drawn (it was a black,
+  // zero-height box when the bar left the grid).
+  await click(page, '#bar-fullscreen');
+  await page.waitForFunction(() => document.fullscreenElement?.id === 'player-modal');
+  await page.waitForTimeout(800);
+  const full = await page.evaluate(() => { const r = document.querySelector('.player-screen-frame').getBoundingClientRect(); const c = document.querySelector('#player-screen iframe').contentDocument.querySelector('canvas'); return { w: Math.round(r.width), h: Math.round(r.height), canvas: [c.width, c.height] }; });
+  assert.deepEqual(full, { w: 1147, h: 860, canvas: [1147, 860] }, JSON.stringify(full));
+  const { image } = await gameScreenshot(page);
+  let lit = 0;
+  for (let y = 100; y < image.height - 100; y += 37) for (let x = 100; x < image.width - 100; x += 41) if (image.luminance(x, y) > 40) lit++;
+  assert.ok(lit > 50, `the game is drawn in fullscreen (${lit} lit samples)`);
+  assert.equal(await page.evaluate(() => document.querySelector('#bar-fullscreen').getAttribute('aria-label')), 'Tam ekrandan çık');
+  await click(page, '#bar-fullscreen');
+  await page.waitForFunction(() => !document.fullscreenElement);
+  await page.waitForTimeout(500);
+  assert.ok(await page.evaluate(() => document.querySelector('.player-screen-frame').getBoundingClientRect().height) > 600, 'back to the window size');
   // The emulator frame has focus after a click: Esc still reaches the app.
   await page.mouse.click(640, 430);
   await page.keyboard.press('Escape');

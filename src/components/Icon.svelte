@@ -34,6 +34,7 @@
     clock: { d: 'M12 8v4l3 2', cap: true, shapes: [{ t: 'circle', cx: 12, cy: 12, r: 8 }] },
     info: { d: 'M12 11v5M12 8v.5', cap: true, shapes: [{ t: 'circle', cx: 12, cy: 12, r: 8.5 }] },
     fullscreen: { d: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', cap: true, join: true },
+    'fullscreen-exit': { d: 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5', cap: true, join: true },
     volume: { d: 'M4 10v4h4l5 4V6L8 10zM16 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10', cap: true, join: true },
     refresh: { d: 'M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4', cap: true, join: true },
     gauge: { d: 'M12 14l4-4M5.5 18a8 8 0 1 1 13 0', cap: true, join: true },

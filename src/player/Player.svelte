@@ -71,7 +71,7 @@
     {/if}
     <button type="button" class="play-chip" id="play-save" disabled={!player.canSave || !player.running} onclick={() => player.quickSave()}>Kaydet</button>
     <button type="button" class="play-chip" id="play-load" disabled={!player.canLoad || !player.running} onclick={() => player.quickLoad()}>Yükle</button>
-    <button type="button" class="play-chip desk-only" id="bar-fullscreen" aria-label={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} title="Tam ekran" onclick={() => player.toggleFullscreen()}><Icon name="fullscreen" size={18} /></button>
+    <button type="button" class="play-chip desk-only" id="bar-fullscreen" aria-label={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} title={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} onclick={() => player.toggleFullscreen()}><Icon name={player.fullscreen || player.fullscreenFallback ? 'fullscreen-exit' : 'fullscreen'} size={18} /></button>
     <button type="button" class="play-chip desk-only close" id="player-close" aria-label="Oyunu kapat" title="Kaydedip çık" onclick={() => player.close()}><Icon name="close" size={18} /></button>
   </header>
 
