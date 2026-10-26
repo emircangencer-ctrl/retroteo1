@@ -180,3 +180,8 @@ html.tv ::-webkit-scrollbar { display: none; }
 @supports not (color: color-mix(in srgb, red 50%, blue)) {
   :root { --accent-soft: #2B1A16; --accent-line: #8E3D26; }
 }
+
+/* On the TV only RetroPlay is on screen: anything a host adds next to it (the toolbar Netlify puts
+   into deploy previews, whose frame stays as a white box when its contents are refused) is hidden. */
+html.tv body > :not(#app):not(script):not(style):not(link):not(meta):not(noscript) { display: none !important; }
+html.tv > :not(head):not(body) { display: none !important; }

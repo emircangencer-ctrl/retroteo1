@@ -188,6 +188,9 @@
   </div>
 
   <h2 class="eyebrow section" id="settings-backup">Yedekleme</h2>
+  {#if tv.bridge}
+    <p class="hint plain" id="tv-backup-note">TV uygulaması dosya kaydedemediği için yedek alma ve ROM indirme burada yok. Kütüphane bu TV'de saklanır; uygulamayı kaldırırsan TV'deki oyunlar ve kayıtlar da silinir.</p>
+  {:else}
   <div class="backup">
     <button type="button" class="tile" id="export-library" onclick={exportLibraryBackup}>
       <Icon name="download" size={20} /><span><b>Yedek al</b><small>Oyun listesi, favoriler, süreler (ROM'suz)</small></span>
@@ -198,6 +201,7 @@
     <input bind:this={backupInput} type="file" id="library-backup-input" hidden accept="application/json,.json" onchange={e => { const input = e.currentTarget as HTMLInputElement; void restoreLibraryBackup(input.files?.[0]); input.value = ''; }} />
   </div>
   <p class="hint plain">ROM dosyalarını ve oyun içi kayıtları oyunların sayfasından tek tek indirebilirsin. Tam yedek (ROM, kayıt ve ayarlar tek dosyada) sonraki aşamada geliyor.</p>
+  {/if}
 
   <h2 class="eyebrow section" id="settings-perf">Performans ölçümleri</h2>
   <div class="panel">

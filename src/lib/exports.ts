@@ -2,9 +2,12 @@
 import { getBatterySave } from './db.ts';
 import { safeFilename, formatBytes } from './format.ts';
 import { showToast } from './toast.svelte.ts';
+import { tv } from './tv.svelte.ts';
 import type { Game } from './types.ts';
 
 export function downloadBlob(blob: Blob, filename: string) {
+  // The TV app's WebView has nowhere to save a file (the buttons are hidden there; this is a guard).
+  if (tv.bridge) throw new Error('TV uygulaması dosya kaydedemez; bunu telefonda veya bilgisayarda yap');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

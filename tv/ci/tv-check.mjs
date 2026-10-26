@@ -63,7 +63,11 @@ try {
   await snap('home');
 
   await step('nothing from other sites on the screen (no deploy-preview toolbar)', async () => {
-    const found = await page.evaluate(() => [...document.querySelectorAll('body > *')].filter(el => /netlify/i.test(`${el.id} ${el.className} ${el.tagName} ${el.getAttribute('src') || ''}`)).map(el => el.tagName).join(', '));
+    // Anything visible outside RetroPlay's own root (Netlify's deploy-preview toolbar is an iframe).
+    const found = await page.evaluate(() => [...document.querySelectorAll('body *, html > *')]
+      .filter(el => !el.closest('#app') && !['HEAD', 'BODY', 'SCRIPT', 'STYLE', 'LINK', 'META', 'TITLE'].includes(el.tagName) && !el.closest('head'))
+      .filter(el => { const r = el.getBoundingClientRect(); return r.width > 2 && r.height > 2 && getComputedStyle(el).visibility !== 'hidden'; })
+      .map(el => `${el.tagName}${el.id ? '#' + el.id : ''}`).slice(0, 5).join(', '));
     if (found) throw new Error(`found: ${found}`);
   }, { critical: false });
 

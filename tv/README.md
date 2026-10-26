@@ -28,6 +28,8 @@ with Google TV or Android TV built in.
   pauses for a minute. Many Google TV devices have no file picker; where one exists, *Dosya seç*
   is offered too (USB drives).
 - Keeps the screen on while a game runs (not while paused or browsing).
+- Saves nothing outside itself: the library and saves live in the app's WebView storage on the TV,
+  there is no ROM download or backup export there, and uninstalling the app removes them.
 
 ## Installing on the TV
 

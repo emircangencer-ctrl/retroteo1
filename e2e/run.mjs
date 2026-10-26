@@ -978,11 +978,19 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   await click(page, '#import-commit');
   await page.waitForFunction(() => /Tamamlandı: 1/.test(document.querySelector('#import-results')?.textContent || ''));
   assert.deepEqual(await page.evaluate(() => window.__tv.deleted), ['ab12cd34ef'], 'added files leave the inbox');
+  // The app cannot save files: no download buttons or backup export, a note instead.
+  await openGame(page, 'checkerboard');
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('.detail [data-export-rom], .detail [data-export-sram]'))), false, 'no download buttons on the TV');
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-backup-note');
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('#export-library'))), false, 'no backup export on the TV');
+  // Whatever a host puts next to the app (Netlify's preview toolbar) is not on the TV screen.
+  assert.equal(await page.evaluate(() => { const el = document.createElement('div'); el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:60px;background:#fff'; document.body.append(el); const shown = el.getBoundingClientRect().height; el.remove(); return shown; }), 0);
   // Back: previous screen; on the home screen the app steps aside.
   await page.evaluate(() => { location.hash = '#/library'; });
   await page.waitForSelector('#library-games .game-card');
   assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
-  await page.waitForFunction(() => location.hash === '#/import' || location.hash === '' || location.hash === '#/');
+  await page.waitForFunction(() => location.hash === '#/settings', null, { timeout: 5000 });
   await page.evaluate(() => { location.hash = '#/'; });
   await page.waitForTimeout(200);
   // Play: full screen at once, the bar steps away, Back opens the menu and closes it again.

@@ -14,6 +14,7 @@
   import { showToast } from '../lib/toast.svelte.ts';
   import { exportRom, exportSram } from '../lib/exports.ts';
   import { importer } from '../lib/importer.svelte.ts';
+  import { tv } from '../lib/tv.svelte.ts';
   import { player, slotName } from '../player/session.svelte.ts';
   import { SYSTEM_CORE_LABELS } from '../player/launch.ts';
   import { crc32, diagnoseSuperMarioBros3Rom, inspectNesRom } from '../nes-rom.js';
@@ -130,8 +131,8 @@
           <button type="button" class="icon-btn" aria-label="Diğer seçenekler" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}><Icon name="more" /></button>
           {#if menuOpen}
             <div class="popover" role="menu">
-              {#if game.blob}<button type="button" role="menuitem" onclick={() => { menuOpen = false; exportRom(game); }}><Icon name="download" size={18} />ROM'u indir</button>{/if}
-              {#if hasSram}<button type="button" role="menuitem" onclick={() => { menuOpen = false; void exportSram(game); }}><Icon name="save" size={18} />Oyun içi kaydı indir (.srm)</button>{/if}
+              {#if game.blob && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; exportRom(game); }}><Icon name="download" size={18} />ROM'u indir</button>{/if}
+              {#if hasSram && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; void exportSram(game); }}><Icon name="save" size={18} />Oyun içi kaydı indir (.srm)</button>{/if}
               <button type="button" role="menuitem" class="danger" onclick={remove}><Icon name="trash" size={18} />Kütüphaneden kaldır</button>
             </div>
           {/if}
@@ -244,10 +245,12 @@
       </div>
     </section>
 
-    <div class="downloads">
-      <button type="button" class="btn" disabled={!game.blob} data-export-rom={game.id} onclick={() => exportRom(game)}><Icon name="download" size={18} />ROM'u indir</button>
-      <button type="button" class="btn" disabled={!hasSram} data-export-sram={game.id} onclick={() => exportSram(game)}><Icon name="save" size={18} />Kayıtları indir</button>
-    </div>
+    {#if !tv.bridge}
+      <div class="downloads">
+        <button type="button" class="btn" disabled={!game.blob} data-export-rom={game.id} onclick={() => exportRom(game)}><Icon name="download" size={18} />ROM'u indir</button>
+        <button type="button" class="btn" disabled={!hasSram} data-export-sram={game.id} onclick={() => exportSram(game)}><Icon name="save" size={18} />Kayıtları indir</button>
+      </div>
+    {/if}
     <button type="button" class="btn btn-danger remove" data-remove={game.id} onclick={remove}><Icon name="trash" size={18} />Kütüphaneden kaldır</button>
   </div>
 
