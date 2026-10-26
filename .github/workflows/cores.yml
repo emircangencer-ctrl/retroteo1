@@ -6,8 +6,9 @@ name: RetroPlay cores
 # runtime, its API and RetroPlay's patches work with them unchanged. Each build is published as a
 # release; scripts/emulatorjs-runtime.mjs pins the files it uses by sha512.
 #
-#   mame2003_plus_next: libretro/mame2003-plus-libretro (2026), for the drivers whose 2025 build
-#   was too slow or silent (Namco System 11/12: Tekken 1-3, Tekken Tag, Soul Edge, Soul Calibur …).
+#   mame2003_plus_next: libretro/mame2003-plus-libretro (2026), for Namco System 12 (Tekken 3,
+#   Tekken Tag Tournament, Soul Calibur …), which the 2025 build runs at two thirds of the main
+#   CPU's clock (slow motion) and without sound.
 
 on:
   push:
@@ -39,13 +40,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # O2: the core's release flags. simd: the PSX GPU's NEON span code (psx_vidhrdw.c) compiled
-        # to WebAssembly SIMD (emscripten -mfpu=neon translates the NEON intrinsics); simdall: also
-        # -msimd128 for the whole core; verify: simd with the GPU's own check that every SIMD span
-        # equals the table path (PSX_TEXSPAN_VERIFY, measurement only); *prof: function names kept.
-        # inl: the CPU interpreter's INLINE helpers forced inline (psx_cpu.c); cpuo3: psx_cpu.c and
-        # psx_vidhrdw.c at -O3; inlo3: both.
-        opt: [inl, cpuo3, inlo3]
+        # release: the core's own release flags (-O2) with the PSX CPU interpreter's INLINE helpers
+        # forced inline (psx_cpu.c), about 10 % faster in the browser. Measured and left out: -O3
+        # (no gain), the GPU's NEON span code as WebAssembly SIMD (correct, but slower).
+        opt: [release]
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full >/dev/null
@@ -68,21 +66,10 @@ jobs:
         working-directory: core
         run: |
           source ../emsdk/emsdk_env.sh >/dev/null
-          OPT="${{ matrix.opt }}"
-          case "$OPT" in O3) sed -i 's/CFLAGS += -O2 -DNDEBUG/CFLAGS += -O3 -DNDEBUG/' Makefile; grep -q -- '-O3 -DNDEBUG' Makefile;; esac
-          case "$OPT" in simdall) sed -i 's/CFLAGS += -O2 -DNDEBUG/CFLAGS += -O2 -DNDEBUG -msimd128/' Makefile; grep -q -- '-DNDEBUG -msimd128' Makefile;; esac
-          # NEON only where the core has NEON code written for it: libretro-common's NEON paths
-          # call ARM assembly that a WebAssembly build does not have.
-          case "$OPT" in simd*|verify*) printf '\nsrc/vidhrdw/psx_vidhrdw.o: CFLAGS += -msimd128 -mfpu=neon\n' >> Makefile;; esac
-          case "$OPT" in inl*) printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += "-DINLINE=inline __attribute__((always_inline))"\n' >> Makefile;; esac
-          case "$OPT" in cpuo3|inlo3) printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += -O3\nsrc/vidhrdw/psx_vidhrdw.o: CFLAGS += -O3\n' >> Makefile;; esac
-          case "$OPT" in verify*)
-            printf 'src/vidhrdw/psx_vidhrdw.o: CFLAGS += -DPSX_TEXSPAN_VERIFY\n' >> Makefile
-            # report progress in the browser console (the check itself exits on the first mismatch)
-            sed -i 's/^\tpsx_texspan_checked++;$/\tif( ( ++psx_texspan_checked % 20000 ) == 0 ) fprintf( stderr, "TEXSPAN verified %lu spans\\n", psx_texspan_checked );/' src/vidhrdw/psx_vidhrdw.c
-            grep -n 'TEXSPAN verified' src/vidhrdw/psx_vidhrdw.c;;
-          esac
-          tail -n 3 Makefile
+          # The interpreter's small helpers (mips_load, mips_advance_pc …) are "static inline", which
+          # clang leaves as calls at -O2; the source is unchanged, the flag applies to psx_cpu.c only.
+          printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += "-DINLINE=inline __attribute__((always_inline))"\n' >> Makefile
+          tail -n 2 Makefile
           set -o pipefail
           emmake make -j"$(nproc)" platform=emscripten 2>&1 | tail -n 25
           ls -la *.bc
@@ -91,7 +78,6 @@ jobs:
         run: |
           source ../../emsdk/emsdk_env.sh >/dev/null
           set -o pipefail
-          case "${{ matrix.opt }}" in *prof) sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -q -- '--profiling-funcs' ../Makefile.emulatorjs;; esac
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
           emmake ./build-emulatorjs.sh --clean 2>&1 | tail -n 15
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
@@ -137,6 +123,6 @@ jobs:
             for f in "$dir"/*; do cp "$f" "assets/${opt}-$(basename "$f")"; done
           done
           ls -la assets
-          NOTES="MAME 2003-Plus ${MAME2003_PLUS_COMMIT::8} (libretro/mame2003-plus-libretro) · EmulatorJS/RetroArch ${RETROARCH_COMMIT::9} · emsdk $EMSDK_VERSION · built ${GITHUB_SHA::7}. O2 = the core's release flags; other prefixes are measurement builds (prof = function names kept). GPL-2.0-or-later; source: $MAME2003_PLUS_REPO at the commit above."
+          NOTES="MAME 2003-Plus ${MAME2003_PLUS_COMMIT::8} (libretro/mame2003-plus-libretro) · EmulatorJS/RetroArch ${RETROARCH_COMMIT::9} · emsdk $EMSDK_VERSION · built ${GITHUB_SHA::7}. Flags: the core's release flags with the PSX CPU interpreter's helpers forced inline (see the workflow). License: MAME non-commercial license (license.txt inside each .data). Source: $MAME2003_PLUS_REPO at the commit above, unmodified."
           gh release create "$TAG" --prerelease --title "MAME 2003-Plus (2026) for RetroPlay · run ${GITHUB_RUN_NUMBER}" --notes "$NOTES" --target "$GITHUB_SHA" assets/*
           echo "::notice title=core release::$TAG"
