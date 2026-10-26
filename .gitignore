@@ -9,3 +9,6 @@ tv/android/local.properties
 tv-ci/
 tv/android/*.p12
 tv/android/*.jks
+
+# Made by npm install in e2e/; the E2E job installs from package.json.
+e2e/package-lock.json
