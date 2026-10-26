@@ -61,7 +61,11 @@ uninstalled first, which deletes the app's data). Changes to the site never need
 To set the secrets once: create a keystore (`keytool -genkeypair -keystore tv.p12 -storetype
 pkcs12 -alias retroplay-tv -keyalg RSA -keysize 3072 -validity 36500`), then in GitHub →
 Settings → Secrets and variables → Actions add `TV_KEYSTORE_BASE64` (`base64 -w0 tv.p12`) and
-`TV_KEYSTORE_PASSWORD`. Keep the keystore file somewhere safe.
+`TV_KEYSTORE_PASSWORD`. Keep the keystore file somewhere safe. Then run the workflow once
+(Actions → RetroPlay TV → Run workflow, on this branch): an APK signed for a single run is replaced
+by the permanently signed one even without app changes, and a permanently signed APK is never
+replaced by a per-run one. Best before the first install on the TV; otherwise the switch needs one
+uninstall (which deletes the app's data on the TV).
 
 ## Building
 

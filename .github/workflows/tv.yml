@@ -82,16 +82,25 @@ jobs:
           name: RetroPlayTV
           path: RetroPlayTV.apk
       - name: Publish as tv-latest
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # The app's own code decides when a new APK is published: a site change reaches the TV
           # without one, and an APK signed with another key would not install over the old one.
+          # Exception: once the TV_KEYSTORE_* secrets exist, an APK signed for one run is replaced
+          # by the permanently signed one (a single reinstall); a permanent one is never replaced
+          # by a per-run one.
           SOURCE=$(git ls-files -s tv/android | sha256sum | cut -c1-16)
           NOTES="RetroPlay TV 1.0.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
           if gh release view tv-latest >/dev/null 2>&1; then
-            if gh release view tv-latest --json body -q .body | grep -q "kaynak $SOURCE" && gh release view tv-latest --json assets -q '.assets[].name' | grep -qx RetroPlayTV.apk; then
+            BODY=$(gh release view tv-latest --json body -q .body)
+            HAS_APK=$(gh release view tv-latest --json assets -q '.assets[].name' | grep -cx RetroPlayTV.apk || true)
+            if [ "$TV_SIGNING" = run ] && echo "$BODY" | grep -q "imza stable"; then
+              echo "::warning title=TV release::tv-latest is signed with the permanent key and this build is not (TV_KEYSTORE_* secrets missing); not replaced."
+              exit 0
+            fi
+            if echo "$BODY" | grep -q "kaynak $SOURCE" && [ "$HAS_APK" = 1 ] && ! { [ "$TV_SIGNING" = stable ] && echo "$BODY" | grep -q "imza run"; }; then
               echo "::notice title=TV release::The app's code did not change; tv-latest keeps its APK."
               exit 0
             fi
