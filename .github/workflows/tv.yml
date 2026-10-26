@@ -4,11 +4,16 @@ name: RetroPlay TV
 # (the site's /tv address points there) and runs it on an Android TV emulator against the
 # deploy of the same commit (tv/ci/tv-check.mjs).
 
+# Parked (2026-10-27): runs when the TV app or this workflow changes, or by hand; the web side's TV
+# mode stays covered by the browser E2E (TV scenario).
 on:
   push:
     branches:
       - main
       - "fix/**"
+    paths:
+      - "tv/**"
+      - ".github/workflows/tv.yml"
   workflow_dispatch:
 
 permissions:
