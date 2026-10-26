@@ -62,6 +62,11 @@ try {
   await sleep(1500);
   await snap('home');
 
+  await step('nothing from other sites on the screen (no deploy-preview toolbar)', async () => {
+    const found = await page.evaluate(() => [...document.querySelectorAll('body > *')].filter(el => /netlify/i.test(`${el.id} ${el.className} ${el.tagName} ${el.getAttribute('src') || ''}`)).map(el => el.tagName).join(', '));
+    if (found) throw new Error(`found: ${found}`);
+  }, { critical: false });
+
   await step('the remote moves the focus', async () => {
     const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');
     await key('DPAD_DOWN');
@@ -120,8 +125,10 @@ try {
     const state = await waitForPlayer(page, 180_000);
     if (!/^Çalışıyor/.test(state.status)) throw new Error(`${state.status} ${state.error}`);
     await sleep(2500);
-    const frame = await page.evaluate(() => { const r = document.querySelector('.player-screen-frame').getBoundingClientRect(); return `${Math.round(r.width)}×${Math.round(r.height)} of ${innerWidth}×${innerHeight}`; });
-    return `${state.status} · picture ${frame}`;
+    const frame = await page.evaluate(() => { const r = document.querySelector('.player-screen-frame').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), vw: innerWidth, vh: innerHeight }; });
+    // The picture fills the screen height at 4:3 (it collapsed to 0×0 on WebView 101 before the fallback).
+    if (frame.h < frame.vh - 2 || Math.abs(frame.w - Math.round(frame.h * 4 / 3)) > 2) throw new Error(`picture ${frame.w}×${frame.h} of ${frame.vw}×${frame.vh}`);
+    return `${state.status} · picture ${frame.w}×${frame.h} of ${frame.vw}×${frame.vh}`;
   });
   await snap('playing');
 

@@ -71,15 +71,32 @@ final class GamepadBridge {
         }
     }
 
-    /** A key event this bridge takes over (a controller button). */
+    /**
+     * A key event this bridge takes over. Gamepad buttons always; the d-pad and Back only from a
+     * device that is really a controller, because some TV remotes (and virtual devices) carry the
+     * gamepad source bit too and their Back must stay Back.
+     */
     static boolean wants(KeyEvent event) {
-        return isControllerSource(event.getSource()) && buttonFor(event.getKeyCode()) >= 0;
+        int code = event.getKeyCode();
+        if (buttonFor(code) < 0 || !isControllerSource(event.getSource())) return false;
+        if (KeyEvent.isGamepadButton(code)) return true;
+        return looksLikeController(event.getDevice());
     }
 
+    /** Sticks or A/B buttons: a controller, not a remote. */
+    static boolean looksLikeController(InputDevice device) {
+        if (device == null || device.isVirtual()) return false;
+        if (device.getMotionRange(MotionEvent.AXIS_X, InputDevice.SOURCE_JOYSTICK) != null) return true;
+        boolean[] keys = device.hasKeys(KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B);
+        return keys.length == 2 && keys[0] && keys[1];
+    }
+
+    /**
+     * A controller appears once it is used (like in browsers, which wait for a button press), so
+     * a remote or a virtual device that only claims to be a gamepad never shows up as one.
+     */
     synchronized void deviceAdded(int deviceId) {
-        InputDevice device = InputDevice.getDevice(deviceId);
-        if (device == null || device.isVirtual() || !isControllerSource(device.getSources())) return;
-        pad(deviceId, device);
+        // nothing until the first press or stick movement
     }
 
     synchronized void deviceRemoved(int deviceId) {
@@ -87,7 +104,10 @@ final class GamepadBridge {
     }
 
     synchronized void scanDevices() {
-        for (int id : InputDevice.getDeviceIds()) deviceAdded(id);
+        // Controllers unplugged while the app was away.
+        List<Integer> gone = new ArrayList<>();
+        for (Integer id : pads.keySet()) if (InputDevice.getDevice(id) == null && id >= 0) gone.add(id);
+        for (Integer id : gone) deviceRemoved(id);
     }
 
     synchronized boolean onKey(KeyEvent event) {
@@ -107,7 +127,6 @@ final class GamepadBridge {
 
     synchronized boolean onMotion(MotionEvent event) {
         if (!isControllerSource(event.getSource()) || event.getAction() != MotionEvent.ACTION_MOVE) return false;
-        Pad pad = pad(event.getDeviceId(), event.getDevice());
         InputDevice device = event.getDevice();
         float[] next = {
             centered(event, device, MotionEvent.AXIS_X),
@@ -119,6 +138,11 @@ final class GamepadBridge {
         float hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y);
         float lt = Math.max(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE));
         float rt = Math.max(event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS));
+        Pad known = pads.get(event.getDeviceId());
+        boolean active = hatX != 0f || hatY != 0f || lt > 0.5f || rt > 0.5f;
+        for (float v : next) if (Math.abs(v) > 0.5f) active = true;
+        if (known == null && !active) return true; // resting sticks do not make a controller appear
+        Pad pad = known != null ? known : pad(event.getDeviceId(), device);
         boolean moved = hatX != pad.hatX || hatY != pad.hatY || Math.abs(lt - pad.leftTrigger) > 0.01f || Math.abs(rt - pad.rightTrigger) > 0.01f;
         for (int i = 0; i < 4; i++) if (Math.abs(next[i] - pad.axes[i]) > 0.01f) moved = true;
         if (moved) {

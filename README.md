@@ -163,6 +163,18 @@ nearest item in that direction, A opens or confirms, B goes back, X adds to favo
 the game page, L/R change the system filter, Start opens the pause menu in a game. Dialogs and
 the pause menu keep the focus inside them.
 
+## Google TV / Android TV
+
+`tv/android` is a small Android TV app (RetroPlay TV) that shows the site full screen on a TV;
+see `tv/README.md`. The web app switches to a TV layout when it runs there (or with `?tv=1`):
+content inside the TV safe area, focus always shown, the remote's arrows move the focus, Back goes
+back and opens the game menu in a game, the player is always full screen. Controllers are read by
+the app and polled by the page as standard gamepads. Games get onto the TV with Oyun ekle →
+**Telefondan gönder**: a QR code, the TV's address and a 4-digit code for an upload page on the
+home network; the files then go through the usual review. The site's `/tv` address redirects to
+the latest APK (`tv-latest` release, built by `.github/workflows/tv.yml`, which also runs the app
+on Google TV and Android TV emulators).
+
 ## Arcade sets and BIOS files
 
 Arcade emulators identify a game by its set name (the zip name) and the ROM files inside, and a set

@@ -39,14 +39,11 @@ export function moveFocus(root: HTMLElement, dir: NavDirection): HTMLElement | n
     next = preferred || (content ? items.find(el => content.contains(el)) : undefined) || items[0];
   } else {
     const others = items.filter(el => el !== current);
-    // Up and down stay in the same column (the sidebar or the page) while it has somewhere to go;
-    // left and right cross between them.
+    // Up and down stay in the same column (the sidebar or the page); left and right cross between them.
     const region = dir === 'up' || dir === 'down' ? current.closest('[data-nav-region]') : null;
-    const near = region ? others.filter(el => region.contains(el)) : [];
-    for (const pool of near.length ? [near, others] : [others]) {
-      const index = pickNeighbor(current.getBoundingClientRect(), pool.map(el => el.getBoundingClientRect()), dir);
-      if (index >= 0) { next = pool[index]; break; }
-    }
+    const pool = region ? others.filter(el => region.contains(el)) : others;
+    const index = pickNeighbor(current.getBoundingClientRect(), pool.map(el => el.getBoundingClientRect()), dir);
+    next = index >= 0 ? pool[index] : null;
   }
   if (next) {
     next.focus({ preventScroll: true });

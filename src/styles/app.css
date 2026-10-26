@@ -175,3 +175,8 @@ html.tv .sidebar { padding-left: calc(var(--tv-x) - 8px); padding-top: var(--tv-
 html.tv :focus-visible, html.tv.gp-nav :focus { outline: 4px solid var(--accent); outline-offset: 3px; }
 html.tv .tv-hide { display: none !important; }
 html.tv ::-webkit-scrollbar { display: none; }
+
+/* Browsers without color-mix() (older Android TV WebViews): fixed tints of the default accent. */
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
+  :root { --accent-soft: #2B1A16; --accent-line: #8E3D26; }
+}

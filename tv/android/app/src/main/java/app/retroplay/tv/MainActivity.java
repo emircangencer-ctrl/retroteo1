@@ -248,11 +248,18 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
 
     /** https://<site>/__tv/inbox/<id> → the uploaded file (read by the page with fetch). */
     WebResourceResponse intercept(Uri url) {
-        if (url == null || !origin.equals(originOf(url))) return null;
-        String path = url.getPath();
-        if (path == null || !path.startsWith(INBOX_PATH)) return null;
+        if (url == null) return null;
         Map<String, String> headers = new HashMap<>();
         headers.put("Cache-Control", "no-store");
+        String scheme = url.getScheme();
+        if (!origin.equals(originOf(url))) {
+            // RetroPlay needs nothing from other sites on the TV; this also keeps out the toolbar
+            // Netlify adds to deploy previews, which would cover the bottom of the screen.
+            if ("http".equals(scheme) || "https".equals(scheme)) return new WebResourceResponse("text/plain", "utf-8", 204, "No Content", headers, new ByteArrayInputStream(new byte[0]));
+            return null;
+        }
+        String path = url.getPath();
+        if (path == null || !path.startsWith(INBOX_PATH)) return null;
         File file = inbox.file(path.substring(INBOX_PATH.length()));
         try {
             if (file == null) return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found", headers, new ByteArrayInputStream(new byte[0]));

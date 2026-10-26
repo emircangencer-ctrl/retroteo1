@@ -43,6 +43,16 @@
 .player.is-vertical:not(.touch-play) .player-screen-frame { width: min(100cqw, 100cqh * 3 / 4); aspect-ratio: 3 / 4; }
 .player:not(.touch-play) .player-screen, .player:not(.touch-play) #player-screen iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: #000; }
 .player:not(.touch-play) #touch-controls { display: none; }
+/* Browsers without container query units (WebView before Chrome 105, found on an Android TV 13
+   image): the picture is sized from the window instead (bar 65 px, hints and padding). */
+@supports not (width: 1cqw) {
+  .player:not(.touch-play) .player-screen-frame { width: min(calc(100vw - 32px), calc((100vh - 140px) * 4 / 3)); }
+  .player.is-vertical:not(.touch-play) .player-screen-frame { width: min(calc(100vw - 32px), calc((100vh - 140px) * 3 / 4)); }
+  .player.is-fallback:not(.touch-play) .player-screen-frame { width: min(100vw, calc((100vh - 65px) * 4 / 3)); }
+  .player.is-fallback.is-vertical:not(.touch-play) .player-screen-frame { width: min(100vw, calc((100vh - 65px) * 3 / 4)); }
+  .player:not(.touch-play):fullscreen .player-screen-frame, .player.tv:not(.touch-play) .player-screen-frame { width: min(100vw, calc(100vh * 4 / 3)); }
+  .player.is-vertical:not(.touch-play):fullscreen .player-screen-frame, .player.tv.is-vertical:not(.touch-play) .player-screen-frame { width: min(100vw, calc(100vh * 3 / 4)); }
+}
 .player:not(.touch-play):fullscreen, .player.is-fallback:not(.touch-play) { grid-template-rows: auto minmax(0, 1fr) 0; }
 .player:not(.touch-play):fullscreen .stage, .player.is-fallback:not(.touch-play) .stage { padding: 0; }
 .player:not(.touch-play):fullscreen .player-screen-frame, .player.is-fallback:not(.touch-play) .player-screen-frame { border-radius: 0; box-shadow: none; }
