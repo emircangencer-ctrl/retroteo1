@@ -169,7 +169,7 @@ input[type='range'] { width: 100%; height: 28px; margin: 0; accent-color: var(--
 /* ---- TV (RetroPlay TV app on Android TV / Google TV, or ?tv=1) ----
    Content stays inside the TV safe area (48 × 27 px at 960 × 540), focus is always shown and a
    little stronger, and nothing depends on hovering. */
-html.tv { --tv-x: 48px; --tv-y: 27px; --sidebar-w: 268px; cursor: none; }
+html.tv { --tv-x: 48px; --tv-y: 27px; --sidebar-w: 268px; cursor: none; scroll-padding-block: calc(var(--tv-y) + 16px); }
 html.tv .page { padding-top: calc(var(--tv-y) + 4px); padding-right: calc(var(--pad-x) + var(--tv-x) - 20px); padding-bottom: calc(var(--tv-y) + 24px); }
 html.tv .sidebar { padding-left: calc(var(--tv-x) - 8px); padding-top: var(--tv-y); padding-bottom: var(--tv-y); }
 html.tv :focus-visible, html.tv.gp-nav :focus { outline: 4px solid var(--accent); outline-offset: 3px; }

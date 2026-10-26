@@ -1017,10 +1017,16 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
     el.hidden = false; if (wasHidden) el.firstElementChild.textContent = 'Hız payı 0,6× (35 kare/sn) · Yetersiz · oyun yavaşlar';
     const notice = el.getBoundingClientRect(), menu = document.querySelector('#player-menu, .player-menu').getBoundingClientRect();
     el.hidden = wasHidden; if (wasHidden) el.firstElementChild.textContent = text;
-    return notice.left >= menu.right && notice.right <= innerWidth;
-  }), 'the notice does not cover the menu');
+    return notice.left >= menu.right && notice.right <= innerWidth - 48;
+  }), 'the notice does not cover the menu and stays inside the TV safe area');
   await page.keyboard.press('ArrowDown');
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'quick-save', 'the remote moves in the menu');
+  // The last menu item, reached with the remote, ends inside the TV safe area (27 px at the bottom).
+  for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(400);
+  assert.ok(await page.evaluate(() => document.activeElement.getBoundingClientRect().bottom <= innerHeight - 27), `the focused item ${await page.evaluate(() => document.activeElement?.id)} stays inside the safe area`);
+  for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowDown');
   assert.ok(await page.evaluate(() => window.__tv.keepOn.at(-1) === false), 'the screen may sleep while paused');
   assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
   await waitStatus(page, /^Çalışıyor/);
