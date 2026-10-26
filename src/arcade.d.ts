@@ -1,4 +1,4 @@
-export interface ArcadeCore { id: string; label: string; systemId: string; catalog: string; opensParentZip?: boolean }
+export interface ArcadeCore { id: string; label: string; systemId: string; catalog: string; opensParentZip?: boolean; supersedes?: string }
 export const ARCADE_CORES: Readonly<Record<string, ArcadeCore>>;
 export const KNOWN_BIOS_LABELS: Readonly<Record<string, string>>;
 export interface ArcadeCatalog { games: Record<string, any[]> }

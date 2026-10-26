@@ -1,8 +1,19 @@
 // What the library keeps about a recognised arcade set (the full ROM list stays in the catalog).
 import type { ArcadeMeta } from './types.ts';
 
-/** Changes whenever the arcade cores or their game lists change: incomplete sets are checked again. */
-export const ARCADE_CATALOG_REV = 'fbneo-dedd04f2+fba2012cps2-3fb5b89+mame2003p-3a72dae';
+/** Changes whenever the arcade cores or their game lists change: records are checked again (needsArcadeRecheck). */
+export const ARCADE_CATALOG_REV = 'fbneo-dedd04f2+fba2012cps2-3fb5b89+mame2003p-3a72dae+mame2003pnext-64b3c38a';
+
+/**
+ * Whether a library record is identified again with the current cores: an incomplete set (a newer
+ * core may run it) or a MAME 2003-Plus set (a game RetroPlay's own build runs better moves to it),
+ * once per catalog revision.
+ */
+export function needsArcadeRecheck(game: { platform?: string; blob?: unknown; arcade?: Partial<ArcadeMeta> | null }): boolean {
+  const arcade = game?.arcade;
+  if (game?.platform !== 'ARCADE' || !(game.blob instanceof Blob) || !arcade || arcade.checkedWith === ARCADE_CATALOG_REV) return false;
+  return arcade.status === 'incomplete' || arcade.core === 'mame2003_plus';
+}
 
 /**
  * FB Alpha 2012 opens a clone's parent zip even when the clone zip holds every file. Stand-in: a

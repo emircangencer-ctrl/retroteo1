@@ -3,6 +3,7 @@
 // data. Run when the cores change:
 //
 //   node scripts/build-arcade-catalogs.mjs <fbneo-arcade.dat> <mame2003-plus.xml> <fba2012-d_cps2.c>
+//   node scripts/build-arcade-catalogs.mjs --next <mame2003-plus src/drivers>   (RetroPlay's own MAME 2003-Plus build)
 //
 // Sources:
 //   FinalBurn Neo:  EmulatorJS/FBNeo @ dedd04f2 — dats/FinalBurn Neo (ClrMame Pro XML, Arcade only).dat (v1.0.0.03)
@@ -10,6 +11,8 @@
 //   FB Alpha 2012 CPS2: EmulatorJS/fbalpha2012_cps2 @ 3fb5b89 — src/burn/drv/capcom/d_cps2.c (the
 //                   core ships no DAT; its ROM tables are read from the driver source)
 // (the commits the EmulatorJS 4.2.3 cores were built from on 2025-06-14).
+//   MAME 2003-Plus (2026): libretro/mame2003-plus-libretro @ 64b3c38a — src/drivers/namcos12.c
+//                   (NEXT_DRIVERS; read from the driver source, the core's DAT lags behind it).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,7 +107,57 @@ function write(file, catalog) {
   return json.length;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/**
+ * Same compact form from MAME driver sources (ROM_START … ROM_END blocks and GAMEX lines), for
+ * RetroPlay's own MAME 2003-Plus build: its shipped DAT (metadata/mame2003-plus.xml) lags behind
+ * the drivers, so the sets are read from the source the core is compiled from. Undumped ROMs are
+ * left out; bad dumps are kept (the core loads them by CRC). A clone file with a CRC of its parent's
+ * gets the parent's name as merge.
+ */
+export function compactMameDriverSource(source) {
+  const sets = {};
+  for (const match of source.matchAll(/ROM_START\(\s*(\w+)\s*\)([\s\S]*?)ROM_END/g)) {
+    const roms = [];
+    for (const rom of match[2].matchAll(/ROMX?_LOAD\w*\(\s*"([^"]+)"\s*,\s*[^,]+,\s*(0x[0-9a-fA-F]+|\d+)\s*,\s*([^)]*?CRC\(([0-9a-fA-F]{1,8})\)|NO_DUMP)/g)) {
+      if (!rom[4]) continue; // NO_DUMP
+      roms.push([rom[1], Number(rom[2]), rom[4].toLowerCase().padStart(8, '0')]);
+    }
+    sets[match[1]] = roms;
+  }
+  const games = {};
+  const entries = [];
+  for (const match of source.matchAll(/GAMEX?\(\s*(\d{4}|\?{4}|19\?\?)\s*,\s*(\w+)\s*,\s*(\w+)\s*,\s*\w+\s*,\s*\w+\s*,\s*\w+\s*,\s*(ROT\d+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*(?:,\s*([^)]*))?\)/g)) {
+    const [, year, name, parent, rot, maker, title, flags = ''] = match;
+    if (!sets[name] || /NOT_A_DRIVER/.test(flags)) continue;
+    entries.push({ year, name, parent: parent === '0' ? '' : parent, vertical: rot === 'ROT90' || rot === 'ROT270', maker, title });
+  }
+  for (const entry of entries) {
+    const parentRoms = new Map((sets[entry.parent] || []).map(([name, , crc]) => [crc, name]));
+    const roms = sets[entry.name].map(([name, size, crc]) => [name, size, crc, parentRoms.get(crc) || '']);
+    games[entry.name] = [entry.title.replace(/\\(.)/g, '$1'), entry.year, entry.maker, entry.parent, entry.parent, entry.vertical ? 2 : 0, roms];
+  }
+  return games;
+}
+
+/**
+ * Drivers RetroPlay runs with its own build of the current MAME 2003-Plus (mame2003_plus_next,
+ * .github/workflows/cores.yml) instead of the 2025 EmulatorJS build. Namco System 12 (Tekken 3,
+ * Tekken Tag Tournament, Soul Calibur …): the 2025 build runs its main CPU at two thirds of the
+ * board's clock and has no sound; the current sources run it at the clock of current MAME, emulate
+ * the sound CPU and C352, and skip the CPU's wait loops.
+ */
+export const NEXT_DRIVERS = Object.freeze(['namcos12.c']);
+export const NEXT_SOURCE = 'libretro/mame2003-plus-libretro 64b3c38a';
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--next') {
+  // node scripts/build-arcade-catalogs.mjs --next <src/drivers directory of the pinned commit>
+  const dir = process.argv[3];
+  if (!dir) { console.error('usage: node scripts/build-arcade-catalogs.mjs --next <mame2003-plus src/drivers>'); process.exit(2); }
+  const games = Object.assign({}, ...NEXT_DRIVERS.map(file => compactMameDriverSource(fs.readFileSync(path.join(dir, file), 'utf8'))));
+  const next = { core: 'mame2003_plus_next', label: 'MAME 2003-Plus (2026)', version: `MAME 2003-Plus (${NEXT_SOURCE}; ${NEXT_DRIVERS.join(', ')})`, games };
+  const size = write('arcade-mame2003plus-next.json', next);
+  console.log(`mame2003_plus_next: ${Object.keys(next.games).length} sets, ${(size / 1e3).toFixed(1)} KB`);
+} else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [fbneoDat, mameXml, fbaCps2Source] = process.argv.slice(2);
   if (!fbneoDat || !mameXml || !fbaCps2Source) {
     console.error('usage: node scripts/build-arcade-catalogs.mjs <fbneo-arcade.dat> <mame2003-plus.xml> <fba2012-d_cps2.c>');

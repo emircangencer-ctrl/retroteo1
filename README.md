@@ -9,7 +9,7 @@ serves from its own site together with the cores it uses (no CDN at runtime).
 | NES | `.nes` | Nestopia UE 1.53.1 | If Nestopia cannot open a file, FCEUmm is offered and remembered; `?nescore=fceumm` forces FCEUmm |
 | SNES | `.sfc`, `.smc` | Snes9x 1.63 | |
 | Mega Drive / Genesis | `.md`, `.gen`, `.bin` (SEGA header only) | Genesis Plus GX 1.7.4 | |
-| Arcade | `.zip` (ROM set) | FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2, MAME 2003-Plus | Set checked against the core's own list; Neo Geo needs `neogeo.zip`; old CPS2 sets without `.key` run on FB Alpha 2012 CPS2 |
+| Arcade | `.zip` (ROM set) | FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2, MAME 2003-Plus (2025 and, for Namco System 12, current) | Set checked against the core's own list; Neo Geo needs `neogeo.zip`; old CPS2 sets without `.key` run on FB Alpha 2012 CPS2 |
 
 The interface (Faz 2) is written in Svelte 5 and TypeScript: a home screen that continues the last
 game, a library with search, system filters, sorting and three layouts, a page per game (save
@@ -66,6 +66,14 @@ Source layout:
 - WebGL1 (`-legacy`) and WebGL2 builds of Nestopia, FCEUmm, Snes9x, Genesis Plus GX, FinalBurn Neo,
   FB Alpha 2012 CPS2 and MAME 2003-Plus are shipped with their build reports (EmulatorJS needs the reports to cache
   cores). Thread builds are not shipped; they need cross-origin isolation.
+- One core is built by RetroPlay itself: the current libretro MAME 2003-Plus (`mame2003_plus_next`,
+  commit `64b3c38a`) for Namco System 12 (Tekken 3, Tekken Tag Tournament, Soul Calibur …). The
+  2025 build in the EmulatorJS packages runs that board's main CPU at 16.9 MHz instead of 25 MHz
+  and without sound, so Tekken 3 drops to half its frame rate in a fight and plays in slow motion on
+  any device. `.github/workflows/cores.yml` builds the pinned source with the toolchain of the 4.2.3
+  cores (emsdk 3.1.74, EmulatorJS/RetroArch `6dd43539`), so the runtime and RetroPlay's patches work
+  with it unchanged; the result is published as a release of this repository and the build pins
+  its files by sha512 (`BUILT_CORES` in `scripts/emulatorjs-runtime.mjs`).
 - `/emulatorjs/runtime-manifest.json` lists the files for the service worker.
 
 ## Offline and updates
@@ -188,8 +196,12 @@ sets), MAME 2003-Plus (`3a72dae`, 5257 sets) and FB Alpha 2012 CPS2 (EmulatorJS/
   name, or by checksums if it was renamed. FinalBurn Neo is preferred; FB Alpha 2012 CPS2 runs CPS2
   sets from before MAME 0.178 (2016), which lack the 20-byte `.key` file FinalBurn Neo and MAME
   2003-Plus need (it has the keys built in; a self-contained clone gets a stand-in parent zip because
-  its loader opens one); MAME 2003-Plus covers sets the others lack. Incomplete sets already in the
-  library are checked again when the cores change, keeping the ROM, saves and record ID. The import result says whether the set is complete, needs its parent zip
+  its loader opens one); MAME 2003-Plus covers sets the others lack. Namco System 12 sets go to the
+  current MAME 2003-Plus build whenever it can run them (its list is read from `namcos12.c`, since the
+  core's DAT lags behind the driver), found by checksums under its current set names: the 2025 build's
+  `tekken3` (TET1/VER.E) is `tekken3je1` there; the 2025 build stays as the alternative. Incomplete
+  sets and MAME 2003-Plus sets already in the library are checked again when the cores change,
+  keeping the ROM, saves and record ID. The import result says whether the set is complete, needs its parent zip
   (split sets; prefer "non-merged" sets) or which files are missing or different.
 - `neogeo.zip` and other BIOS sets are stored in the `bios` store (IndexedDB version 4; the upgrade
   only adds this store) and checked for the files FinalBurn Neo cannot start without

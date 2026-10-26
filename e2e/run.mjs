@@ -36,6 +36,8 @@ fs.writeFileSync(brokenZip, placeholderSet(fbneoCatalog.games.puckman[6], { omit
 const mslugZip = arcadeFile('mslug.zip', fbneoCatalog.games.mslug[6]);
 const neogeoZip = arcadeFile('neogeo.zip', fbneoCatalog.games.neogeo[6].filter(([name]) => ['sp-s3.sp1', 'sm1.sm1', 'sfix.sfix', '000-lo.lo'].includes(name)));
 const zigzagZip = arcadeFile('zigzag.zip', mameCatalog.games.zigzag[6]);
+// Tekken 3 (Namco System 12) as the 2025 MAME 2003-Plus lists it: TET1/VER.E with its file names.
+const tekken3Zip = arcadeFile('tekken3.zip', mameCatalog.games.tekken3[6]);
 // An old CPS2 set: every file right except the 20-byte decryption key (sets before MAME 0.178).
 const noKeyZip = path.join(tmp, 'old', 'spf2t.zip');
 fs.mkdirSync(path.dirname(noKeyZip));
@@ -494,6 +496,36 @@ await scenario('a set only MAME 2003-Plus has is started with MAME 2003-Plus', a
   assert.match(text, /MAME 2003-Plus · tam set/);
   const state = await play(page, 'Zig Zag');
   assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · MAME 2003-Plus/, state.error);
+});
+
+await scenario("a Namco System 12 set (Tekken 3) starts with RetroPlay's current MAME 2003-Plus build, also when an earlier build imported it", async page => {
+  const text = await importFile(page, tekken3Zip);
+  assert.match(text, /Eklendi: tekken3\.zip — Tekken 3 \(Japan, TET1\/VER\.E1\) · MAME 2003-Plus \(2026\) · tam set · dosya adı tekken3je1\.zip olarak tanındı/);
+  const inFrame = () => page.evaluate(() => { const emu = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator; return { zip: emu.gameManager.FS.analyzePath('/tekken3je1.zip').exists, core: emu.getCore(), kind: emu.getCore(true), state: emu.gameManager.functions.saveStateInfo() }; });
+  let state = await play(page, 'Tekken 3');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · MAME 2003-Plus \(2026\)/, state.error);
+  let loaded = await inFrame();
+  assert.deepEqual([loaded.zip, loaded.core, loaded.kind], [true, 'mame2003_plus_next', 'mame'], 'the set under its current name, on the built core, treated as MAME');
+  assert.doesNotMatch(loaded.state, /^Size is zero/, 'the game itself is loaded, not just the core');
+  await closeGame(page);
+  // What an earlier build stored: MAME 2003-Plus (2025), set tekken3.
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('retroplay-local-v1');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { const tx = req.result.transaction('games', 'readwrite'); const store = tx.objectStore('games'); const all = store.getAll();
+      all.onsuccess = () => { for (const game of all.result) if (game.arcade) { game.arcade = { checkedWith: 'fbneo-dedd04f2+fba2012cps2-3fb5b89+mame2003p-3a72dae', core: 'mame2003_plus', set: 'tekken3', status: 'complete', missing: [], missingCount: 0, different: [], cps2Key: false, parent: '', bios: '', vertical: false, manufacturer: 'Namco', renamedFrom: '', alternatives: [] }; store.put(game); } };
+      tx.oncomplete = () => { req.result.close(); resolve(); }; tx.onerror = () => reject(tx.error); };
+  }));
+  await page.reload({ waitUntil: 'networkidle' });
+  await waitFor(async () => (await appGames(page)).find(g => g.arcade?.core === 'mame2003_plus_next'), { timeout: 15000, interval: 300 });
+  const [record] = (await appGames(page)).filter(g => g.arcade);
+  assert.deepEqual([record.arcade.core, record.arcade.set, record.arcade.status], ['mame2003_plus_next', 'tekken3je1', 'complete']);
+  assert.deepEqual(record.arcade.alternatives, [{ core: 'mame2003_plus', status: 'complete', set: 'tekken3' }], 'the 2025 build stays as the alternative');
+  assert.equal(record.hasBlob, true, 'the ROM stays');
+  state = await play(page, 'Tekken 3');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · MAME 2003-Plus \(2026\)/, state.error);
+  loaded = await inFrame();
+  assert.deepEqual([loaded.zip, loaded.core], [true, 'mame2003_plus_next']);
 });
 
 await scenario('when Nestopia cannot open an NES file, FCEUmm is offered instead of switching silently', async page => {

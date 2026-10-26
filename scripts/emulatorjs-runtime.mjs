@@ -10,6 +10,7 @@
 //   emulator.min.<hash>.js / emulator.min.<hash>.css       – the runtime bundle with RetroPlay's patch
 //   cores/<core>-legacy-wasm.data, cores/<core>-wasm.data  – WebGL1 and WebGL2 builds of each core
 //   cores/reports/<core>.json                              – build reports (EmulatorJS uses them to cache cores)
+//   cores/mame2003_plus_next-*                              – RetroPlay's own MAME 2003-Plus build (BUILT_CORES)
 // plus <outDir>/emulatorjs/runtime-manifest.json for the service worker.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -35,6 +36,26 @@ export const PACKAGES = Object.freeze({
 
 /** Cores RetroPlay ships. Thread variants are omitted: they need cross-origin isolation. */
 export const CORES = Object.freeze(['nestopia', 'fceumm', 'snes9x', 'genesis_plus_gx', 'fbneo', 'mame2003_plus', 'fbalpha2012_cps2']);
+
+/**
+ * Cores RetroPlay builds itself (.github/workflows/cores.yml) with the toolchain of the 4.2.3 cores,
+ * published as releases of this repository and pinned here by sha512 like the npm packages.
+ * mame2003_plus_next: the current libretro MAME 2003-Plus (64b3c38a, GPL; source at the commit
+ * below) for the drivers listed in scripts/build-arcade-catalogs.mjs (NEXT_DRIVERS).
+ */
+export const BUILT_CORES = Object.freeze({
+  mame2003_plus_next: Object.freeze({
+    source: 'https://github.com/libretro/mame2003-plus-libretro/tree/64b3c38ac6dae0fb513e6b881fb3bfc31fca54c4',
+    release: 'https://github.com/emircangencer-ctrl/retroteo1/releases/download/core-mame2003_plus_next-64b3c38a-r6/',
+    files: Object.freeze({
+      'mame2003_plus_next-wasm.data': Object.freeze({ asset: 'release-mame2003_plus_next-wasm.data', integrity: 'sha512-D+FcPSMXxQ8UcIHPTAJH7Js5wK6Fz84RNwsbayXxHDuk9GFVBhw8+zdNTb2aOw9rch6EsTPgOfuDZzp3V2GPLQ==' }),
+      'mame2003_plus_next-legacy-wasm.data': Object.freeze({ asset: 'release-mame2003_plus_next-legacy-wasm.data', integrity: 'sha512-FreSB44ie/nYDAvrAZGC6LCqwdgFE4r2wnwI56YmSDo6Tv8HjMKbN+LEx8Geawyf3Xr+KEPDtdMoSSkoxqJDGA==' }),
+      'reports/mame2003_plus_next.json': Object.freeze({ asset: 'release-mame2003_plus_next.json', integrity: 'sha512-LqtMaB8DscV+lVB0wynk3DCP+x3C4jRNE0vCnBn8469SjFOHIe2tOaliV4J5FI5kKcn8fe8O4Zp+/uR05PdV8g==' })
+    })
+  })
+});
+/** Every core the runtime serves. */
+export const ALL_CORES = Object.freeze([...CORES, ...Object.keys(BUILT_CORES)]);
 /** Cores stored for offline use when the app is installed (the default console cores, ~3.5 MB). */
 export const PRECACHED_CORES = Object.freeze(['nestopia', 'snes9x', 'genesis_plus_gx']);
 const CORE_VARIANTS = Object.freeze(['-legacy-wasm.data', '-wasm.data']);
@@ -75,6 +96,19 @@ export const RETROPLAY_PATCH = `
     };
   }
   var Emulator = window.EmulatorJS;
+  // RetroPlay's own MAME 2003-Plus build is a MAME core to EmulatorJS (arcade zips are written as
+  // they are, MAME controls and settings), like the cores it knows by name.
+  var BUILT_MAME_CORES = ['mame2003_plus_next'];
+  if (Emulator && Emulator.prototype && typeof Emulator.prototype.getCores === 'function') {
+    var baseGetCores = Emulator.prototype.getCores;
+    Emulator.prototype.getCores = function () {
+      var cores = baseGetCores.call(this);
+      if (cores && Array.isArray(cores.mame)) {
+        cores.mame = cores.mame.concat(BUILT_MAME_CORES.filter(function (core) { return cores.mame.indexOf(core) === -1; }));
+      }
+      return cores;
+    };
+  }
   var CANVAS_SIZE_CODE = 'if(entry.devicePixelContentBoxSize){width=entry.devicePixelContentBoxSize[0].inlineSize;height=entry.devicePixelContentBoxSize[0].blockSize}';
   var CANVAS_SIZE_FIX = 'if(entry.devicePixelContentBoxSize&&Math.abs(entry.devicePixelContentBoxSize[0].inlineSize-entry.contentRect.width*window.devicePixelRatio)<1.5&&Math.abs(entry.devicePixelContentBoxSize[0].blockSize-entry.contentRect.height*window.devicePixelRatio)<1.5){width=entry.devicePixelContentBoxSize[0].inlineSize;height=entry.devicePixelContentBoxSize[0].blockSize}';
   if (Emulator && Emulator.prototype && typeof Emulator.prototype.initGameCore === 'function') {
@@ -143,6 +177,41 @@ export function ensurePackage(key, cacheDir) {
   return path.join(unpacked, 'package');
 }
 
+const curlDownload = (url, file) => execFileSync('curl', ['-fsSL', '--retry', '3', '--retry-delay', '2', '-o', file, url], { stdio: ['ignore', 'ignore', 'inherit'] });
+
+/**
+ * Downloads (once) files pinned by sha512 into `dir`: { name: { asset, integrity } } from `release`.
+ * A download with other contents is refused and not kept. Returns { name: local path }.
+ */
+export function ensurePinnedFiles(dir, release, files, download = curlDownload) {
+  fs.mkdirSync(dir, { recursive: true });
+  const local = {};
+  for (const [name, file] of Object.entries(files)) {
+    const target = path.join(dir, file.asset);
+    if (!fs.existsSync(target) || sha512(fs.readFileSync(target)) !== file.integrity) {
+      const partial = `${target}.part`;
+      fs.rmSync(partial, { force: true });
+      download(release + file.asset, partial);
+      const actual = fs.existsSync(partial) ? sha512(fs.readFileSync(partial)) : 'nothing downloaded';
+      if (actual !== file.integrity) {
+        fs.rmSync(partial, { force: true });
+        throw new Error(`${file.asset} integrity mismatch: expected ${file.integrity}, got ${actual}`);
+      }
+      fs.renameSync(partial, target);
+    }
+    local[name] = target;
+  }
+  return local;
+}
+
+/** The pinned files of a core RetroPlay builds: { 'cores/…': local path }. */
+export function ensureBuiltCore(key, cacheDir, download = curlDownload) {
+  const core = BUILT_CORES[key];
+  if (!core) throw new Error(`Unknown built core: ${key}`);
+  const local = ensurePinnedFiles(path.join(cacheDir, 'built', key), core.release, core.files, download);
+  return Object.fromEntries(Object.entries(local).map(([name, file]) => [`cores/${name}`, file]));
+}
+
 function copyFile(from, to) {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.copyFileSync(from, to);
@@ -188,8 +257,13 @@ export async function buildRuntime({ cacheDir, outDir }) {
     put(`cores/reports/${core}.json`, path.join(dir, 'reports', `${core}.json`));
     cores[core] = { report: `cores/reports/${core}.json`, files };
   }
+  for (const core of Object.keys(BUILT_CORES)) {
+    const local = ensureBuiltCore(core, cacheDir);
+    for (const [relative, from] of Object.entries(local)) put(relative, from);
+    cores[core] = { report: `cores/reports/${core}.json`, files: CORE_VARIANTS.map(variant => `cores/${core}${variant}`) };
+  }
 
-  const essential = ['loader.js', scriptFile, styleFile, 'localization/tr-TR.json', 'compression/extract7z.js', 'compression/extractzip.js', ...CORES.map(core => cores[core].report)];
+  const essential = ['loader.js', scriptFile, styleFile, 'localization/tr-TR.json', 'compression/extract7z.js', 'compression/extractzip.js', ...ALL_CORES.map(core => cores[core].report)];
   const manifest = {
     version: EJS_VERSION,
     dataPath: DATA_PATH,

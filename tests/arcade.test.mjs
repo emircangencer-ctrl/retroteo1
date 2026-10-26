@@ -253,3 +253,77 @@ test('cabinet controls come from MAME 2003-Plus by set name, then parent', async
   assert.deepEqual(shipped.games['1942'][7], [2, 8]);
   assert.deepEqual(shipped.games.mslug[7], [4, 8]);
 });
+
+// ---- RetroPlay's own MAME 2003-Plus build (mame2003_plus_next) for Namco System 12 ----------------
+// Tekken 3: the 2025 build's "tekken3" is TET1/VER.E with older file names; in the current sources
+// "tekken3" is TET2/VER.E1 and the TET1/VER.E1 program is the clone tekken3je1.
+const T3_COMMON = [['rm0l', 4194304, '2886bb32'], ['rm0u', 4194304, 'c5705b92'], ['wav0', 4194304, '77ba7975']];
+const stockTekken3 = ['Tekken 3 (TET1-VER.E)', '1996', 'Namco', '', '', 0, [['tet1vere.2e', 2097152, '8b01113b', ''], ['tet1vere.2j', 2097152, 'df4c96fb', ''], ...T3_COMMON.map(([n, s, c]) => [`tet1${n}.x`, s, c, ''])]];
+const nextCatalog = { games: {
+  tekken3: ['Tekken 3 (World, TET2/VER.E1)', '1997', 'Namco', '', '', 0, [['tet2vere1.2e', 2097152, '7ded5461', ''], ['tet2vere1.2j', 2097152, '25c96e1e', ''], ...T3_COMMON.map(([n, s, c]) => [`tet1${n}.new`, s, c, ''])]],
+  tekken3je1: ['Tekken 3 (Japan, TET1/VER.E1)', '1997', 'Namco', 'tekken3', 'tekken3', 0, [['tet1vere1.2e', 2097152, '8b01113b', ''], ['tet1vere1.2j', 2097152, 'df4c96fb', ''], ...T3_COMMON.map(([n, s, c]) => [`tet1${n}.new`, s, c, `tet1${n}.new`])]]
+} };
+const s12Catalogs = { fbneo, mame2003_plus: { games: { ...mame.games, tekken3: stockTekken3 } }, mame2003_plus_next: nextCatalog };
+
+test('a Namco System 12 set starts with the current MAME 2003-Plus build, found by checksums under its current name', () => {
+  const result = identifyArcadeZip('tekken3.zip', entriesOf(stockTekken3[6]), s12Catalogs);
+  assert.equal(result.core, 'mame2003_plus_next');
+  assert.equal(result.set, 'tekken3je1');
+  assert.equal(result.status, 'complete', 'every file is in the zip (file names differ; the core loads by CRC)');
+  assert.equal(result.title, 'Tekken 3 (Japan, TET1/VER.E1)');
+  assert.deepEqual(result.alternatives, [{ core: 'mame2003_plus', status: 'complete', set: 'tekken3' }], 'the 2025 build stays as the alternative');
+  assert.match(describeArcadeStatus(result), /^MAME 2003-Plus \(2026\) · tam set · dosya adı tekken3je1\.zip olarak tanındı$/);
+});
+
+test('the current build takes a set by its own name too; games outside its list stay where they were', () => {
+  const tet2 = identifyArcadeZip('tekken3.zip', entriesOf(nextCatalog.games.tekken3[6]), s12Catalogs);
+  assert.deepEqual([tet2.core, tet2.set, tet2.status, tet2.renamedFrom], ['mame2003_plus_next', 'tekken3', 'complete', undefined]);
+  assert.equal(identifyArcadeZip('zigzag.zip', entriesOf(mame.games.zigzag[6]), s12Catalogs).core, 'mame2003_plus');
+  assert.equal(identifyArcadeZip('puckman.zip', entriesOf(fbneo.games.puckman[6]), s12Catalogs).core, 'fbneo');
+  // A zip the current build cannot run (here one program ROM missing) stays with the 2025 build.
+  const partial = identifyArcadeZip('tekken3.zip', entriesOf([...stockTekken3[6].slice(0, 1), ...stockTekken3[6].slice(2)]), s12Catalogs);
+  assert.equal(partial.core, 'mame2003_plus');
+  assert.equal(partial.status, 'incomplete');
+});
+
+test('the System 12 list is read from the driver source the core is built from', async () => {
+  const { compactMameDriverSource } = await import('../scripts/build-arcade-catalogs.mjs');
+  const source = `
+ROM_START( tekken3 )
+	ROM_REGION32_LE( 0x00400000, REGION_USER1, 0 ) /* main prg */
+	ROM_LOAD16_BYTE( "tet2vere1.2e", 0x0000000, 0x200000, CRC(7ded5461) SHA1(3a5638c6ad40bfde6e12fdfd6d469f6ea5e9f4fb) )
+	ROM_LOAD16_BYTE( "tet1rom0l.6",  0x0000000, 0x400000, CRC(2886bb32) SHA1(08ad9da2df25ad8c933a812ac238c81135072929) )
+	ROM_LOAD( "tet1wave0.5",  0x0000000, 0x400000, CRC(77ba7975) SHA1(fe9434dcf0fb232c85efaaae1b4b13d36099620a) )
+	ROM_RELOAD( 0x800000, 0x400000 )
+ROM_END
+
+ROM_START( tekken3je1 )
+	ROM_LOAD16_BYTE( "tet1vere1.2e", 0x0000000, 0x200000, CRC(8b01113b) SHA1(45fdfd58293641ed16bc59c633a85a9cf64ccbaf) )
+	ROM_LOAD16_BYTE( "tet1rom0l.6",  0x0000000, 0x400000, CRC(2886bb32) SHA1(08ad9da2df25ad8c933a812ac238c81135072929) )
+	ROM_LOAD32_BYTE( "teg1flel.4",   0x3000000, 0x200000, NO_DUMP )
+	ROM_LOAD16_BYTE( "teg1vera.2j",  0x0000001, 0x200000, BAD_DUMP CRC(97cd9524) SHA1(8031cb465db378a6d9db9b132cf1169b94cba7dc) )
+ROM_END
+
+GAMEX( 1997, tekken3,   0,        coh700s, tekken3, namcos12_h8, ROT0, "Namco",         "Tekken 3 (World, TET2/VER.E1)", GAME_IMPERFECT_GRAPHICS )
+GAMEX( 1997, tekken3je1, tekken3, coh700s, tekken3, namcos12_h8, ROT90, "Namco",         "Tekken 3 (Japan, TET1/VER.E1)", GAME_IMPERFECT_GRAPHICS )
+`;
+  const games = compactMameDriverSource(source);
+  assert.deepEqual(Object.keys(games), ['tekken3', 'tekken3je1']);
+  assert.deepEqual(games.tekken3, ['Tekken 3 (World, TET2/VER.E1)', '1997', 'Namco', '', '', 0, [['tet2vere1.2e', 2097152, '7ded5461', ''], ['tet1rom0l.6', 4194304, '2886bb32', ''], ['tet1wave0.5', 4194304, '77ba7975', '']]]);
+  assert.deepEqual(games.tekken3je1[6], [['tet1vere1.2e', 2097152, '8b01113b', ''], ['tet1rom0l.6', 4194304, '2886bb32', 'tet1rom0l.6'], ['teg1vera.2j', 2097152, '97cd9524', '']], 'undumped ROMs left out, bad dumps kept, parent files merged');
+  assert.deepEqual([games.tekken3je1[3], games.tekken3je1[4], games.tekken3je1[5]], ['tekken3', 'tekken3', 2]);
+});
+
+test("the shipped System 12 list runs the user's Tekken 3 set (TET1/VER.E, 2025 file names) as tekken3je1", async () => {
+  const next = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus-next.json', import.meta.url), 'utf8'));
+  const m2p = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
+  const fb = JSON.parse(await readFile(new URL('../public/assets/arcade-fbneo.json', import.meta.url), 'utf8'));
+  assert.equal(next.core, 'mame2003_plus_next');
+  assert.match(next.version, /64b3c38a.*namcos12\.c/);
+  assert.equal(Object.keys(next.games).length, 53);
+  for (const set of ['tekken3', 'tekken3je1', 'tekken3ja', 'tektagt', 'soulclbr', 'ehrgeiz', 'kartduel']) assert.ok(next.games[set], set);
+  // The set as the 2025 build lists it (the user's zip has exactly these files).
+  const zip = placeholderSet(m2p.games.tekken3[6]);
+  const result = identifyArcadeZip('tekken3.zip', await readZipDirectory(new Blob([zip])), { fbneo: fb, mame2003_plus: m2p, mame2003_plus_next: next });
+  assert.deepEqual([result.core, result.set, result.status], ['mame2003_plus_next', 'tekken3je1', 'complete']);
+});

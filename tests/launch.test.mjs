@@ -64,3 +64,23 @@ test('the core that opened a game is remembered with it', () => {
   const arcade = rememberCore({ id: 'a', title: 'A', platform: 'ARCADE', arcade: { core: 'fbneo', set: 'a', status: 'complete', missing: [], alternatives: [{ core: 'mame2003_plus', set: 'am', status: 'complete' }] } }, 'mame2003_plus');
   assert.deepEqual([arcade.arcade.core, arcade.arcade.set, arcade.arcade.alternatives[0].core], ['mame2003_plus', 'am', 'fbneo']);
 });
+
+test('library records: MAME 2003-Plus sets and incomplete sets are checked again once per catalog revision', async () => {
+  const { needsArcadeRecheck, ARCADE_CATALOG_REV } = await import('../src/lib/arcade-records.ts');
+  const blob = new Blob(['x']);
+  const record = (arcade, extra = {}) => ({ platform: 'ARCADE', blob, arcade: { core: 'fbneo', set: 's', status: 'complete', missing: [], ...arcade }, ...extra });
+  assert.equal(needsArcadeRecheck(record({ core: 'mame2003_plus', checkedWith: 'fbneo-dedd04f2+fba2012cps2-3fb5b89+mame2003p-3a72dae' })), true, 'a MAME 2003-Plus set from before the current build');
+  assert.equal(needsArcadeRecheck(record({ status: 'incomplete' })), true);
+  assert.equal(needsArcadeRecheck(record({ core: 'mame2003_plus', checkedWith: ARCADE_CATALOG_REV })), false, 'checked with these catalogs already');
+  assert.equal(needsArcadeRecheck(record({})), false, 'a complete FinalBurn Neo set is left alone');
+  assert.equal(needsArcadeRecheck(record({ core: 'mame2003_plus' }, { blob: undefined })), false, 'no file to read');
+  assert.equal(needsArcadeRecheck({ platform: 'NES', blob, arcade: null }), false);
+});
+
+test('arcade: a System 12 game starts with the current MAME 2003-Plus build under its set name; the 2025 build is offered next', async () => {
+  const game = { id: 't3', title: 'Tekken 3', platform: 'ARCADE', blob: blob(), arcade: { core: 'mame2003_plus_next', set: 'tekken3je1', status: 'complete', parent: 'tekken3', missing: [], alternatives: [{ core: 'mame2003_plus', status: 'complete', set: 'tekken3' }] } };
+  const launch = await resolveLaunch(game, ARC, {}, deps());
+  assert.deepEqual(launch.cores.map(c => [c.coreId, c.systemId, c.gameName, c.name]), [['mame2003_plus_next', 'mame', 'tekken3je1.zip', 'MAME 2003-Plus (2026)'], ['mame2003_plus', 'mame', 'tekken3.zip', 'MAME 2003-Plus']]);
+  assert.deepEqual(launch.extraFiles, [], 'a complete clone needs no parent zip on MAME');
+  assert.deepEqual((await resolveLaunch(game, ARC, { coreOverride: 'mame2003_plus' }, deps())).cores.map(c => c.gameName), ['tekken3.zip']);
+});

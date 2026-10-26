@@ -3,17 +3,22 @@
 // Arcade emulators identify a game by its set name (the zip name, e.g. "mslug.zip") and load the
 // ROM files inside by name/CRC32. A set only works if it matches the core's own ROM set version,
 // so RetroPlay ships the game lists (set name, title, ROM sizes and CRC32s) of the cores it serves:
-// FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2 and MAME 2003-Plus (scripts/build-arcade-catalogs.mjs).
+// FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2, MAME 2003-Plus and RetroPlay's own build of the
+// current MAME 2003-Plus for Namco System 12 (scripts/build-arcade-catalogs.mjs).
 // FB Alpha 2012 CPS2 carries the CPS2 decryption keys itself, so it runs CPS2 sets from before
 // MAME 0.178 (2016) that have no .key file, which FinalBurn Neo and MAME 2003-Plus cannot start.
 
 export const ARCADE_CORES = Object.freeze({
   fbneo: Object.freeze({ id: 'fbneo', label: 'FinalBurn Neo', systemId: 'arcade', catalog: '/assets/arcade-fbneo.json' }),
   mame2003_plus: Object.freeze({ id: 'mame2003_plus', label: 'MAME 2003-Plus', systemId: 'mame', catalog: '/assets/arcade-mame2003plus.json' }),
+  // RetroPlay's own build of the current MAME 2003-Plus (.github/workflows/cores.yml). Its list holds
+  // only the drivers it runs better than the 2025 build (Namco System 12: full CPU clock, sound), and
+  // a set it can run is started with it even when the older build also knows the zip.
+  mame2003_plus_next: Object.freeze({ id: 'mame2003_plus_next', label: 'MAME 2003-Plus (2026)', systemId: 'mame', catalog: '/assets/arcade-mame2003plus-next.json', supersedes: 'mame2003_plus' }),
   // Its loader opens every zip a clone names (clone and parent) before looking at files.
   fbalpha2012_cps2: Object.freeze({ id: 'fbalpha2012_cps2', label: 'FB Alpha 2012 CPS2', systemId: 'arcade', catalog: '/assets/arcade-fba2012-cps2.json', opensParentZip: true })
 });
-const CORE_ORDER = Object.freeze(['fbneo', 'fbalpha2012_cps2', 'mame2003_plus']);
+const CORE_ORDER = Object.freeze(['fbneo', 'fbalpha2012_cps2', 'mame2003_plus_next', 'mame2003_plus']);
 
 // Game tuple indexes (see compactDat in scripts/build-arcade-catalogs.mjs).
 const TITLE = 0, YEAR = 1, MAKER = 2, CLONE_OF = 3, ROM_OF = 4, FLAGS = 5, ROMS = 6;
@@ -206,13 +211,20 @@ export function identifyArcadeZip(fileName, entries, catalogs) {
   const usable = result => result && result.status !== 'incomplete';
   // An exact set name wins over a checksum guess; FinalBurn Neo first (faster, more accurate for
   // CPS and Neo Geo), then FB Alpha 2012 CPS2 (old CPS2 sets without .key), MAME 2003-Plus for the
-  // rest; an incomplete named set is still kept so the player learns what is missing.
+  // rest; an incomplete named set is still kept so the player learns what is missing (the core's
+  // set that lacks the fewest files: the version the zip is closest to).
   const order = [
     ...CORE_ORDER.map(id => byName[id]).filter(usable),
     ...CORE_ORDER.map(id => byCrc[id]).filter(usable),
-    ...CORE_ORDER.map(id => byName[id]).filter(Boolean)
+    ...CORE_ORDER.map(id => byName[id]).filter(Boolean).sort((a, b) => a.missing.length - b.missing.length)
   ];
-  const chosen = order[0];
+  let chosen = order[0];
+  // A core that supersedes another takes the game over from it whenever it can run the set.
+  for (const id of CORE_ORDER) {
+    const over = ARCADE_CORES[id].supersedes;
+    const result = usable(byName[id]) ? byName[id] : usable(byCrc[id]) ? byCrc[id] : null;
+    if (over && result && (!chosen || chosen.core === over || !usable(chosen))) { chosen = result; break; }
+  }
   if (!chosen) return null;
   const others = CORE_ORDER.filter(id => id !== chosen.core).map(id => (usable(byName[id]) ? byName[id] : byCrc[id] || byName[id])).filter(Boolean);
   const alternatives = others.map(result => ({ core: result.core, status: result.status, set: result.set }));
@@ -254,6 +266,7 @@ export function missingSummary(arcade) {
 export function arcadeInputInfo(arcade, catalogs) {
   const mame = catalogs?.mame2003_plus?.games;
   if (!mame || !arcade) return null;
+  // (the current MAME 2003-Plus build's sets, e.g. tekken3je1, are found through their parent)
   for (const name of [arcade.set, arcade.parent, ...(arcade.alternatives || []).map(alt => alt.set)]) {
     const input = name && mame[name]?.[7];
     if (Array.isArray(input)) return { buttons: Number(input[0]) || 0, ways: Number(input[1]) || 0 };

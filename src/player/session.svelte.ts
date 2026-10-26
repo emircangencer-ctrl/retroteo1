@@ -9,6 +9,7 @@ import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllow
 import { emulatorGameId, createBatterySaveRecord } from '../save-data.js';
 import { createSaveCapture, decideSaveRestore } from '../save-sync.js';
 import { loadCatalogs, loadCatalog, arcadeLayout, arcadeInputInfo, ARCADE_CORES, missingSummary } from '../arcade.js';
+import { needsArcadeRecheck } from '../lib/arcade-records.ts';
 import { readZipDirectory } from '../zip-rom.js';
 import { TouchController } from '../touch-controller.js';
 import { computeTouchLayout, padSpecFor } from '../touch-layout.js';
@@ -205,7 +206,8 @@ class PlayerSession {
       showToast('Bu kayıt için henüz desteklenen bir sistemde oynatılabilir ROM bulunamadı.', 'error');
       return;
     }
-    if (game.platform === 'ARCADE' && game.arcade?.status === 'incomplete') game = await library.recheckArcadeGame(game);
+    // A set checked with older cores is checked again first (it may start with a better core now).
+    if (needsArcadeRecheck(game)) game = await library.recheckArcadeGame(game);
     const session = ++this.#session;
     this.#stopClock();
     void this.#endSaveSession('switch');

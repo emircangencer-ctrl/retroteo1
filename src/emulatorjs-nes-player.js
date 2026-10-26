@@ -39,7 +39,7 @@ const CORES_BY_SYSTEM = Object.freeze({
   snes: new Set(['snes']),
   segaMD: new Set(['segaMD']),
   arcade: new Set(['fbneo', 'fbalpha2012_cps2']),
-  mame: new Set(['mame2003_plus'])
+  mame: new Set(['mame2003_plus', 'mame2003_plus_next'])
 });
 const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
 const ALLOWED_SHADERS = new Set([...Object.values(DISPLAY_MODES), ...Object.values(DISPLAY_SCALES), ...Object.values(DISPLAY_FILTERS)].map(mode => mode.shader).filter(Boolean));
@@ -210,7 +210,7 @@ export class EmulatorJsPlayer {
    * unknown. MAME 2003-Plus has no state support for some games, so a zero size proves nothing there.
    */
   contentLoaded() {
-    if (this.coreId === 'mame2003_plus') return null;
+    if (/^mame2003_plus/.test(this.coreId)) return null;
     const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
     try {
       const info = gm?.functions?.saveStateInfo?.();

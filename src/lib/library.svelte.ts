@@ -6,7 +6,7 @@ import type { BiosRecord, Game, SlotId } from './types.ts';
 import { SLOT_IDS } from './types.ts';
 import { readZipDirectory } from '../zip-rom.js';
 import { loadCatalogs, identifyArcadeZip } from '../arcade.js';
-import { ARCADE_CATALOG_REV, arcadeRecord } from './arcade-records.ts';
+import { ARCADE_CATALOG_REV, arcadeRecord, needsArcadeRecheck } from './arcade-records.ts';
 import { showToast } from './toast.svelte.ts';
 
 class Library {
@@ -133,15 +133,19 @@ class Library {
   }
 
   /**
-   * Checks an incomplete arcade set again with the current cores (an old CPS2 set without its
-   * .key runs on FB Alpha 2012). Only the arcade metadata changes; ROM, saves and record ID stay.
+   * Checks an arcade set again with the current cores, once per catalog revision: an incomplete set
+   * (an old CPS2 set without its .key runs on FB Alpha 2012), and a MAME 2003-Plus set that
+   * RetroPlay's own build of the current MAME 2003-Plus runs better (Namco System 12: full speed,
+   * sound), which then starts with that build; the older build stays as the alternative. Other
+   * records only get the revision stamp. Only the arcade metadata changes; ROM, saves and record ID stay.
    */
   async recheckArcadeGame(game: Game): Promise<Game> {
-    if (game?.platform !== 'ARCADE' || !(game.blob instanceof Blob) || game.arcade?.status !== 'incomplete' || game.arcade?.checkedWith === ARCADE_CATALOG_REV) return game;
+    if (!needsArcadeRecheck(game) || !game.arcade) return game;
     try {
-      const [entries, catalogs] = await Promise.all([readZipDirectory(game.blob), loadCatalogs()]);
+      const [entries, catalogs] = await Promise.all([readZipDirectory(game.blob!), loadCatalogs()]);
       const found = identifyArcadeZip(game.fileName || `${game.arcade.set}.zip`, entries, catalogs);
-      const arcade = found?.kind === 'game' ? arcadeRecord(found) : { ...game.arcade, checkedWith: ARCADE_CATALOG_REV };
+      const moves = game.arcade.status === 'incomplete' || (found?.kind === 'game' && found.core === 'mame2003_plus_next' && found.status !== 'incomplete');
+      const arcade = found?.kind === 'game' && moves ? arcadeRecord(found) : { ...game.arcade, checkedWith: ARCADE_CATALOG_REV };
       const current = this.get(game.id) || game;
       const updated = { ...current, arcade };
       await this.save(updated);
@@ -153,12 +157,13 @@ class Library {
   }
 
   async recheckArcadeLibrary() {
-    const pending = this.games.filter(g => g.platform === 'ARCADE' && g.arcade?.status === 'incomplete' && g.arcade?.checkedWith !== ARCADE_CATALOG_REV && g.blob instanceof Blob);
+    const pending = this.games.filter(needsArcadeRecheck);
     if (!pending.length) return;
     let playable = 0;
     for (const game of pending) {
+      const wasIncomplete = game.arcade?.status === 'incomplete';
       const updated = await this.recheckArcadeGame(game);
-      if (updated.arcade?.status !== 'incomplete') playable++;
+      if (wasIncomplete && updated.arcade?.status !== 'incomplete') playable++;
     }
     if (playable) showToast(`${playable} arcade oyunu artık açılabiliyor.`);
   }
