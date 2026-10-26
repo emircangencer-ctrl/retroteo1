@@ -39,9 +39,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # O2: the core's release flags; O3: compared against it; prof: O2 with function names kept
-        # (--profiling-funcs) for profiling in a browser, not for release.
-        opt: [O2, prof]
+        # O2: the core's release flags. simd: the PSX GPU's NEON span code (psx_vidhrdw.c) compiled
+        # to WebAssembly SIMD (emscripten -mfpu=neon translates the NEON intrinsics); simdall: also
+        # -msimd128 for the whole core; verify: simd with the GPU's own check that every SIMD span
+        # equals the table path (PSX_TEXSPAN_VERIFY, measurement only); *prof: function names kept.
+        opt: [simd, simdall, verify, simdprof]
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full >/dev/null
@@ -64,8 +66,19 @@ jobs:
         working-directory: core
         run: |
           source ../emsdk/emsdk_env.sh >/dev/null
-          # The core's release flags are -O2; the O3 build is measured against it.
-          if [ "${{ matrix.opt }}" = O3 ]; then sed -i 's/CFLAGS += -O2 -DNDEBUG/CFLAGS += -O3 -DNDEBUG/' Makefile; grep -q -- '-O3 -DNDEBUG' Makefile; fi
+          OPT="${{ matrix.opt }}"
+          case "$OPT" in O3) sed -i 's/CFLAGS += -O2 -DNDEBUG/CFLAGS += -O3 -DNDEBUG/' Makefile; grep -q -- '-O3 -DNDEBUG' Makefile;; esac
+          case "$OPT" in simdall) sed -i 's/CFLAGS += -O2 -DNDEBUG/CFLAGS += -O2 -DNDEBUG -msimd128/' Makefile; grep -q -- '-DNDEBUG -msimd128' Makefile;; esac
+          # NEON only where the core has NEON code written for it: libretro-common's NEON paths
+          # call ARM assembly that a WebAssembly build does not have.
+          case "$OPT" in simd*|verify*) printf '\nsrc/vidhrdw/psx_vidhrdw.o: CFLAGS += -msimd128 -mfpu=neon\n' >> Makefile;; esac
+          case "$OPT" in verify*)
+            printf 'src/vidhrdw/psx_vidhrdw.o: CFLAGS += -DPSX_TEXSPAN_VERIFY\n' >> Makefile
+            # report progress in the browser console (the check itself exits on the first mismatch)
+            sed -i 's/^\tpsx_texspan_checked++;$/\tif( ( ++psx_texspan_checked % 20000 ) == 0 ) fprintf( stderr, "TEXSPAN verified %lu spans\\n", psx_texspan_checked );/' src/vidhrdw/psx_vidhrdw.c
+            grep -n 'TEXSPAN verified' src/vidhrdw/psx_vidhrdw.c;;
+          esac
+          tail -n 3 Makefile
           set -o pipefail
           emmake make -j"$(nproc)" platform=emscripten 2>&1 | tail -n 25
           ls -la *.bc
@@ -74,7 +87,7 @@ jobs:
         run: |
           source ../../emsdk/emsdk_env.sh >/dev/null
           set -o pipefail
-          if [ "${{ matrix.opt }}" = prof ]; then sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -q -- '--profiling-funcs' ../Makefile.emulatorjs; fi
+          case "${{ matrix.opt }}" in *prof) sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -q -- '--profiling-funcs' ../Makefile.emulatorjs;; esac
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
           emmake ./build-emulatorjs.sh --clean 2>&1 | tail -n 15
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
