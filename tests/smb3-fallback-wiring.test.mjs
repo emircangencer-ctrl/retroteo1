@@ -5,7 +5,6 @@ import { readFile } from 'node:fs/promises';
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const player = await readFile(new URL('../src/emulatorjs-nes-player.js', import.meta.url), 'utf8');
 const publicWorker = await readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
-const rootWorker = await readFile(new URL('../service-worker.js', import.meta.url), 'utf8');
 
 test('unknown SMB3 payloads never start without explicit consent, asked before any emulator player is created', () => {
   assert.match(app, /if \(!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)\) \{/);
@@ -26,10 +25,9 @@ test('FCEUmm requires an explicit query parameter and Nestopia remains the defau
   assert.match(player, /window\.EJS_core = /);
 });
 
-test('both service-worker entry files invalidate the stale shell/runtime cache generations', () => {
-  for (const source of [publicWorker, rootWorker]) {
-    assert.match(source, /CACHE_NAME = 'retroplay-shell-v12'/);
-    assert.match(source, /EMULATORJS_CACHE_NAME = 'retroplay-emulatorjs-runtime-v4'/);
-  }
-  assert.equal(publicWorker, rootWorker, 'deployed and root service worker sources must remain identical');
+test('there is a single service worker source and it starts new cache generations', async () => {
+  const { access } = await import('node:fs/promises');
+  await assert.rejects(access(new URL('../service-worker.js', import.meta.url)), 'the old duplicate root service-worker.js must stay removed');
+  assert.match(publicWorker, /CACHE_NAME = 'retroplay-shell-v13'/);
+  assert.match(publicWorker, /RUNTIME_CACHE_NAME = 'retroplay-emulatorjs-4\.2\.3-v1'/);
 });

@@ -33,7 +33,7 @@ jobs:
       - name: Build production bundle
         run: npm run build
       - name: Verify output exists
-        run: test -s dist/index.html && test -s dist/nes-audio-processor.js && test -s dist/THIRD-PARTY-NOTICES.txt
+        run: test -s dist/index.html && test -s dist/THIRD-PARTY-NOTICES.txt && test -s dist/emulatorjs/runtime-manifest.json && test -s dist/emulatorjs/4.2.3/data/loader.js && test -s dist/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data && ! grep -q "__RETROPLAY_BUILD_ID__" dist/service-worker.js
 
   e2e:
     name: Browser E2E (EmulatorJS 4.2.3)

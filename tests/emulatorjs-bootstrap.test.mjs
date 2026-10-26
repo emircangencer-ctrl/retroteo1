@@ -1,22 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { resolveNesCore } from '../src/nes-engine.js';
-
-test('EmulatorJS is default; Nestopia is default core and FCEUmm is explicit', () => {
-  assert.equal(resolveNesCore(''), 'emulatorjs');
-  assert.equal(resolveNesCore('?view=game'), 'emulatorjs');
-  assert.equal(resolveNesCore('?nescore=emulatorjs'), 'emulatorjs');
-  assert.equal(resolveNesCore('?nescore=fceumm'), 'emulatorjs', 'FCEUmm remains within the EmulatorJS player; the app chooses it explicitly');
-});
-
-test('legacy engines remain explicitly selectable for A/B comparison', () => {
-  assert.equal(resolveNesCore('?nescore=jsnes'), 'jsnes');
-  assert.equal(resolveNesCore('?nescore=nesjs'), 'nesjs');
-  assert.equal(resolveNesCore('?nescore=unknown'), 'emulatorjs');
-});
-
-import { buildEmulatorDocument, EMULATORJS_INPUT_INDEX } from '../src/emulatorjs-nes-player.js';
+import { buildEmulatorDocument, EMULATORJS_INPUT_INDEX, emulatorJsDataPath } from '../src/emulatorjs-nes-player.js';
 
 test('EmulatorJS bootstrap script is valid and uses the NES system ID and starts the default NES core', () => {
   const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Super Mario Bros. 3');
@@ -27,7 +12,9 @@ test('EmulatorJS bootstrap script is valid and uses the NES system ID and starts
   assert.doesNotThrow(() => new Function(script), 'generated iframe JavaScript should parse');
   assert.ok(script.includes('window.EJS_core = "nes"'));
   assert.ok(script.includes('window.EJS_startOnLoaded = true'));
-  assert.ok(script.includes('https://cdn.emulatorjs.org/4.2.3/data/'), 'runtime should use the pinned CDN release');
+  assert.ok(script.includes('https://retroplay.invalid/emulatorjs/4.2.3/data/'), 'runtime is served by RetroPlay itself, not the CDN');
+  assert.ok(script.includes('https://retroplay.invalid/emulatorjs/4.2.3/data/loader.js'));
+  assert.ok(!script.includes('cdn.emulatorjs.org'), 'no CDN dependency');
   assert.ok(script.includes('window.EJS_gameUrl = "blob:'));
 });
 

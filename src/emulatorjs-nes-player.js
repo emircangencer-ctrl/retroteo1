@@ -1,19 +1,60 @@
-const DATA_PATH = 'https://cdn.emulatorjs.org/4.2.3/data/';
+// The runtime is served from RetroPlay's own origin (see scripts/emulatorjs-runtime.mjs). The build
+// injects the hashed bundle names; tests and unbundled use fall back to the fixed data path.
+/* global __EJS_RUNTIME__ */
+const RUNTIME = Object.freeze(typeof __EJS_RUNTIME__ === 'object' && __EJS_RUNTIME__
+  ? __EJS_RUNTIME__
+  : { dataPath: '/emulatorjs/4.2.3/data/', script: '', style: '', buildId: 'dev' });
+export const EMULATORJS_VERSION = '4.2.3';
+export function emulatorJsDataPath(base = globalThis.location?.href) {
+  try { return new URL(RUNTIME.dataPath, base || 'https://retroplay.invalid/').href; }
+  catch { return RUNTIME.dataPath; }
+}
 export const EMULATORJS_INPUT_INDEX = Object.freeze({ BUTTON_B: 0, BUTTON_Y: 1, BUTTON_SELECT: 2, BUTTON_START: 3, BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7, BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11 });
 const INPUT_INDEX = EMULATORJS_INPUT_INDEX;
 const KEY_TO_BUTTON = Object.freeze({ ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT', KeyZ:'BUTTON_B', KeyX:'BUTTON_A', KeyA:'BUTTON_Y', KeyS:'BUTTON_X', KeyQ:'BUTTON_L', KeyW:'BUTTON_R', Enter:'BUTTON_START', ControlRight:'BUTTON_SELECT' });
-const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD']);
+const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD', 'arcade', 'mame']);
 const CORES_BY_SYSTEM = Object.freeze({
   nes: new Set(['nes', 'fceumm', 'nestopia']),
   snes: new Set(['snes']),
-  segaMD: new Set(['segaMD'])
+  segaMD: new Set(['segaMD']),
+  arcade: new Set(['fbneo']),
+  mame: new Set(['mame2003_plus'])
 });
+const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+const SAFE_CFG_KEY = /^[a-z0-9_]{1,64}$/;
+const SAFE_OPTION_KEY = /^[A-Za-z0-9_-]{1,64}$/;
+function sanitizeExtraFiles(files) {
+  if (!Array.isArray(files)) return [];
+  return files.filter(file => file && SAFE_FILE_NAME.test(String(file.name)) && /^blob:/.test(String(file.url)))
+    .map(file => ({ name: String(file.name), url: String(file.url) }));
+}
+function sanitizeSettings(settings, keyPattern) {
+  const result = {};
+  if (!settings || typeof settings !== 'object') return result;
+  for (const [key, value] of Object.entries(settings)) {
+    if (!keyPattern.test(key) || !['string', 'number', 'boolean'].includes(typeof value)) continue;
+    result[key] = String(value).replace(/[\r\n"]/g, '').slice(0, 64);
+  }
+  return result;
+}
 const HIDDEN_BUTTONS = { playPause:false, play:false, pause:false, restart:false, mute:false, unmute:false, volumeSlider:false, settings:false, fullscreen:false, enterFullscreen:false, exitFullscreen:false, saveState:false, loadState:false, quickSave:false, quickLoad:false, screenshot:false, gamepad:true, cheat:false, cacheManager:false, exitEmulation:false, netplay:false, diskButton:false, contextMenu:false, saveSavFiles:false, loadSavFiles:false };
 const literal = value => JSON.stringify(value).replace(/</g, '\\u003c');
-export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameId = 1, coreId = systemId) {
+/**
+ * Builds the iframe document that boots EmulatorJS for one game.
+ * options.extraFiles: [{ name, url }] blob URLs written next to the game (for example a BIOS zip).
+ * options.retroarchConfig: extra retroarch.cfg keys; options.coreOptions: core option defaults.
+ */
+export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameId = 1, coreId = systemId, options = {}) {
   if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
   if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
   if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
+  const dataPath = emulatorJsDataPath(options.baseUrl);
+  const paths = {};
+  if (RUNTIME.script) paths['emulator.min.js'] = new URL(RUNTIME.script, dataPath).href;
+  if (RUNTIME.style) paths['emulator.min.css'] = new URL(RUNTIME.style, dataPath).href;
+  const extraFiles = sanitizeExtraFiles(options.extraFiles);
+  const retroarchConfig = sanitizeSettings(options.retroarchConfig, SAFE_CFG_KEY);
+  const coreOptions = sanitizeSettings(options.coreOptions, SAFE_OPTION_KEY);
   const startup = [
     '(() => {',
     "const notify = (type, details = {}, transfer = []) => parent.postMessage({ source: 'retroplay-emulatorjs', type, ...details }, '*', transfer);",
@@ -29,7 +70,11 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     'window.EJS_core = ' + literal(coreId) + ';',
     'window.EJS_controlScheme = ' + literal(systemId) + ';',
     "window.EJS_language = 'tr-TR';",
-    'window.EJS_pathtodata = ' + literal(DATA_PATH) + ';',
+    'window.EJS_pathtodata = ' + literal(dataPath) + ';',
+    'window.EJS_paths = ' + literal(paths) + ';',
+    'window.RETROPLAY_EXTRA_FILES = ' + literal(extraFiles) + ';',
+    'window.RETROPLAY_RETROARCH_CFG = ' + literal(retroarchConfig) + ';',
+    'window.EJS_defaultOptions = ' + literal(coreOptions) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
     'window.EJS_gameName = ' + literal(gameName) + ';',
     'window.EJS_gameID = ' + String(gameId) + ';',
@@ -38,17 +83,17 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     "window.EJS_onGameStart = () => { const emu = window.EJS_emulator; const missing = []; if (typeof emu?.gameManager?.simulateInput !== 'function') missing.push('kontrol desteği'); if (typeof emu?.pause !== 'function') missing.push('duraklatma'); if (typeof emu?.play !== 'function') missing.push('devam etme'); if (missing.length) { notify('error', { message: 'EmulatorJS yüklendi ancak gerekli API eksik: ' + missing.join(', ') + '. Çalışma zamanı ile kontrol katmanı uyumsuz.' }); return; } const css = document.createElement('style'); css.textContent = 'html,body,#ejs-player{margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;overflow:hidden!important;background:#000!important}#ejs-player .ejs_parent{position:relative!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;background:#000!important;overflow:hidden!important}#ejs-player .ejs_canvas_parent{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;background:#000!important}#ejs-player canvas{display:block!important;flex:0 0 auto!important;width:min(100%,133.333vh)!important;height:min(100%,75vw)!important;width:min(100%,133.333dvh)!important;height:min(100%,75dvw)!important;max-width:100%!important;max-height:100%!important;aspect-ratio:4/3!important;object-fit:fill!important;image-rendering:pixelated!important;image-rendering:crisp-edges!important}#ejs-player .ejs_canvas_parent canvas{margin:auto!important}.ejs_virtualGamepad_parent,.ejs_virtualGamepad_open,.ejs_volume_parent,.ejs_bottom_bar,.ejs_start_button,.ejs_contextMenu{display:none!important}html.retroplay-immersive .ejs_menu_bar,html.retroplay-immersive .ejs_menu,html.retroplay-immersive .ejs_settings,html.retroplay-immersive .ejs_overlay,html.retroplay-immersive .ejs_toolbar,html.retroplay-immersive .ejs_gamepad_settings{display:none!important}'; document.head.appendChild(css); gameStarted = true; notify('started'); };",
     "window.EJS_onExit = () => notify('exit');",
     "window.addEventListener('message', event => { if (event.source !== parent || !event.data || event.data.source !== 'retroplay-app' || event.data.type !== 'immersive') return; document.documentElement.classList.toggle('retroplay-immersive', Boolean(event.data.active)); });",
-    "const loader = document.createElement('script'); loader.src = " + literal(DATA_PATH + 'loader.js') + "; loader.onerror = () => notify('error', { message: 'EmulatorJS yüklenemedi. İnternet bağlantısını kontrol et.' }); document.head.appendChild(loader);",
+    "const loader = document.createElement('script'); loader.src = " + literal(new URL('loader.js', dataPath).href) + "; loader.onerror = () => notify('error', { message: 'EmulatorJS yüklenemedi. Uygulamayı yenileyip tekrar dene; ilk açılışta internet bağlantısı gerekir.' }); document.head.appendChild(loader);",
     '})();'
   ].join('\n');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay EmulatorJS runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsPlayer {
-  constructor(container, { onError = () => {}, onWarning = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId } = {}) {
+  constructor(container, { onError = () => {}, onWarning = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {} } = {}) {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
-    this.container=container; this.onError=onError; this.onWarning=onWarning; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
+    this.container=container; this.onError=onError; this.onWarning=onWarning; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions }; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
@@ -60,7 +105,7 @@ export class EmulatorJsPlayer {
     this.romUrl=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
     const frame=document.createElement('iframe'); frame.title=gameName+' — '+this.systemLabel+' emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad; screen-wake-lock'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
     this.frame=frame; frame.addEventListener('load',this.boundFrameLoad); this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
-    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('Emülatör çekirdeği 75 saniye içinde başlamadı. İnternet bağlantısını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName,this.systemId,this.gameId,this.coreId); });
+    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('Emülatör çekirdeği 75 saniye içinde başlamadı. İlk açılışta çekirdek indirilir; bağlantını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName,this.systemId,this.gameId,this.coreId,this.documentOptions); });
   }
   handleMessage(event) {
     if(!this.frame||event.source!==this.frame.contentWindow||!event.data||event.data.source!=='retroplay-emulatorjs')return;

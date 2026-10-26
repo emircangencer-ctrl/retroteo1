@@ -10,6 +10,7 @@ import { classifyImport } from './import-match.js';
 import { detectRomPlatform } from './rom-detect.js';
 import { inspectGamepads, describeGamepads } from './gamepad-status.js';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from './fullscreen.js';
+import { watchServiceWorkerUpdates, activateUpdate, summarizeRuntimeCache } from './sw-update.js';
 import { getDriveClientId, loadGoogleIdentity, requestDriveAccessToken, listDriveFiles, downloadDriveFile, isDriveFolder, isSupportedDriveGame } from './google-drive.js';
 import './styles.css';
 const $ = (s, root = document) => root.querySelector(s);
@@ -204,10 +205,6 @@ async function handleFiles(fileList){
   showToast(`${success} ROM dosyası içe aktarıldı. Oynatma desteği NES, SNES ve Mega Drive için etkin.`,success?'success':'error');setView('library');
 }
 
-async function requestedNesCore() {
-  const { resolveNesCore } = await import('./nes-engine.js');
-  return resolveNesCore(window.location.search);
-}
 function playerStatus(label) {
   const engine = activeEmulator?.engineName || 'Emülatör';
   const mapper = Number.isInteger(activeEmulator?.romInfo?.mapper)
@@ -302,8 +299,7 @@ async function startGame(id) {
       $('#player-status').textContent = 'Oturum durduruldu';
     };
 
-    const engine = game.platform === 'NES' ? await requestedNesCore() : 'emulatorjs';
-    if (engine === 'emulatorjs') {
+    {
       const player = new EmulatorJsPlayer($('#player-screen'), {
         onError: reportError,
         systemId: system.emulatorJsSystemId,
@@ -336,36 +332,6 @@ async function startGame(id) {
         player.destroy();
         return;
       }
-    } else if (engine === 'jsnes') {
-      // Legacy engine retained only for explicit A/B comparison.
-      const { Browser: NesBrowser, Controller: NesController } = await import('jsnes');
-      const browser = new NesBrowser({ container: $('#player-screen'), onError: reportError });
-      if (browser._speakers) browser._speakers.onBufferUnderrun = null;
-      activeEmulator = {
-        engineName: 'JSNES (karşılaştırma)', romInfo: validation,
-        destroy: () => browser.destroy(),
-        pause: () => browser.stop(), resume: () => browser.start(),
-        fitInParent: () => browser.fitInParent(),
-        pressButton: name => { const button = NesController[name]; if (button !== undefined) browser.nes.buttonDown(1, button); },
-        releaseButton: name => { const button = NesController[name]; if (button !== undefined) browser.nes.buttonUp(1, button); }
-      };
-      browser.loadROM(bytes);
-    } else {
-      const { BrowserNesPlayer } = await import('./nes-core-player.js');
-      const player = new BrowserNesPlayer($('#player-screen'), {
-        onError: reportError,
-        onAudioError: error => {
-          const message = error?.message || String(error);
-          $('#player-error').textContent = `Oyun çalışıyor ancak ses başlatılamadı: ${message}`;
-        }
-      });
-      activeEmulator = player;
-      activeEmulator.romInfo = validation;
-      await player.loadROM(bytes);
-      if (session !== emulatorSession || activeGameId !== game.id) { player.destroy(); return; }
-      activeEmulator.romInfo = player.romInfo || validation;
-      await player.start();
-      if (session !== emulatorSession || activeGameId !== game.id) { player.destroy(); return; }
     }
 
     $('#player-status').textContent = playerStatus('Çalışıyor');
@@ -650,6 +616,8 @@ function closePlayer({ viaHistory = false } = {}) {
   autoPaused = false;
   if (wasOpen && !viaHistory) leaveOverlayState('player');
   Promise.all([pendingState, pendingSave]).then(([stateSaved, result]) => { if (stateSaved || result?.status === 'saved') renderAll(); });
+  showUpdateBanner();
+  void updateOfflineStatus();
 }
 function showPausedState(paused) {
   $('#pause-game').textContent = paused ? '▶ Devam et' : 'Ⅱ Duraklat';
@@ -893,14 +861,35 @@ function setupDrive(){
   }
 }
 
-function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',()=>closeImport());$('#player-close').addEventListener('click',()=>closePlayer());$('#pause-game').addEventListener('click',togglePause);$('#quick-save').addEventListener('click',()=>{void quickSave();});$('#quick-load').addEventListener('click',()=>{void quickLoad();});$('#immersive-save').addEventListener('click',()=>{void quickSave();});$('#immersive-load').addEventListener('click',()=>{void quickLoad();});$('#player-exit').addEventListener('click',()=>closePlayer());wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});window.addEventListener('popstate',()=>{if(!$('#player-modal').classList.contains('hidden')){closePlayer({viaHistory:true});return;}if(!$('#import-modal').classList.contains('hidden'))closeImport({viaHistory:true});});document.addEventListener('visibilitychange',()=>{void handlePlayerVisibility();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
+function setupEvents(){document.addEventListener('click',async e=>{const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return;}if(e.target.closest('[data-action="add"]')||e.target.closest('#add-top')){openImport();return;}const play=e.target.closest('[data-play]');if(play){await startGame(play.dataset.play);return;}const fav=e.target.closest('[data-favorite]');if(fav){await toggleFavorite(fav.dataset.favorite);return;}const exportRom=e.target.closest('[data-export-rom]');if(exportRom){await exportROM(exportRom.dataset.exportRom);return;}const exportSram=e.target.closest('[data-export-sram]');if(exportSram){await exportBatterySave(exportSram.dataset.exportSram);return;}const remove=e.target.closest('[data-remove]');if(remove){await removeFromLibrary(remove.dataset.remove);return;}const filter=e.target.closest('[data-filter]');if(filter){selectedPlatform=filter.dataset.filter;libraryVisibleLimit=GRID_PAGE_SIZE;renderAll();return;}const more=e.target.closest('[data-load-more]');if(more){if(more.dataset.loadMore==='library'){libraryVisibleLimit+=GRID_PAGE_SIZE;renderLibraryResults();}else if(more.dataset.loadMore==='favorites'){favoriteVisibleLimit+=GRID_PAGE_SIZE;renderAll();}else if(more.dataset.loadMore==='recent'){recentVisibleLimit+=GRID_PAGE_SIZE;renderAll();}return;}const system=e.target.closest('[data-system-filter]');if(system){selectedPlatform=system.dataset.systemFilter;setView('library');renderAll();return;}const layout=e.target.closest('[data-layout]');if(layout){layoutMode=layout.dataset.layout;$$('[data-layout]').forEach(b=>b.classList.toggle('selected',b===layout));renderAll();return;}});$('#search-input').addEventListener('input',()=>{if($('#view-library').classList.contains('active')){libraryVisibleLimit=GRID_PAGE_SIZE;scheduleLibraryRender();}});$('#sort-select').addEventListener('change',()=>{libraryVisibleLimit=GRID_PAGE_SIZE;renderLibraryResults();});$('#modal-close').addEventListener('click',()=>closeImport());$('#player-close').addEventListener('click',()=>closePlayer());$('#pause-game').addEventListener('click',togglePause);$('#quick-save').addEventListener('click',()=>{void quickSave();});$('#quick-load').addEventListener('click',()=>{void quickLoad();});$('#immersive-save').addEventListener('click',()=>{void quickSave();});$('#immersive-load').addEventListener('click',()=>{void quickLoad();});$('#player-exit').addEventListener('click',()=>closePlayer());$('#update-reload')?.addEventListener('click',applyUpdate);$('#update-later')?.addEventListener('click',()=>{const banner=$('#update-banner');if(banner)banner.hidden=true;});wireTouchControls();setupGamepadStatus();setupFullscreen();setupDrive();window.addEventListener('resize',()=>{if(activeEmulator&&!$('#player-modal').classList.contains('hidden')){try{activeEmulator.fitInParent();}catch(error){console.warn('Emulator canvas resize failed:',error);}}});$('#import-modal').addEventListener('click',e=>{if(e.target===$('#import-modal'))closeImport();});window.addEventListener('popstate',()=>{if(!$('#player-modal').classList.contains('hidden')){closePlayer({viaHistory:true});return;}if(!$('#import-modal').classList.contains('hidden'))closeImport({viaHistory:true});});document.addEventListener('visibilitychange',()=>{void handlePlayerVisibility();});$('#choose-files').addEventListener('click',e=>{e.preventDefault();$('#modal-file-input').click();});$('#modal-file-input').addEventListener('change',e=>handleFiles(e.target.files));$('#rom-input').addEventListener('change',e=>handleFiles(e.target.files));$('#clear-demo').addEventListener('click',clearDemo);$('#export-library').addEventListener('click',exportLibraryBackup);$('#import-library-trigger').addEventListener('click',()=>$('#library-backup-input').click());$('#library-backup-input').addEventListener('change',e=>{restoreLibraryBackup(e.target.files?.[0]);e.target.value='';});const dz=$('#dropzone');dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');handleFiles(e.dataTransfer.files);});document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeImport();if(isFullscreen(document,$('#player-modal')))return;if(fullscreenFallback){setFullscreenFallback(false);return;}closePlayer();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();setView('library');$('#search-input').focus();}});window.addEventListener('online',updateNetwork);window.addEventListener('offline',updateNetwork);}
 window.addEventListener('pagehide',()=>{void captureState('auto');void endSaveSession('pagehide');if(activeEmulator){try{activeEmulator.destroy();}catch{}activeEmulator=null;}});
 function updateNetwork(){
-  const online=navigator.onLine;
-  $('#network-label').textContent=online?'Bağlantı mevcut':'Çevrimdışı';
-  $('#offline-setting').textContent=online
-    ? 'Oyunlar için internet gerekebilir'
-    : 'Uygulama hazır; oyun motoru bağlantı isteyebilir';
+  $('#network-label').textContent=navigator.onLine?'Bağlantı mevcut':'Çevrimdışı';
+}
+const RUNTIME_CACHE_NAME='retroplay-emulatorjs-4.2.3-v1';
+let swRegistration=null;
+let pendingUpdateWorker=null;
+/** Shows which emulator cores are stored on this device for offline play. */
+async function updateOfflineStatus(){
+  const el=$('#offline-setting');
+  if(!el||!('caches'in window))return;
+  try{
+    const keys=await (await caches.open(RUNTIME_CACHE_NAME)).keys();
+    const {runtimeReady,cores}=summarizeRuntimeCache(keys.map(request=>request.url));
+    el.textContent=runtimeReady?`Hazır · ${cores.length} çekirdek cihazda`:navigator.serviceWorker?.controller?'Hazırlanıyor…':'İlk açılış bekleniyor';
+  }catch{el.textContent='Durum okunamadı';}
+}
+/** The update banner never appears over a running game; it waits until the player closes. */
+function showUpdateBanner(){
+  if(!pendingUpdateWorker||!$('#player-modal').classList.contains('hidden'))return;
+  const banner=$('#update-banner');
+  if(banner)banner.hidden=false;
+}
+function offerUpdate(worker){pendingUpdateWorker=worker;showUpdateBanner();}
+function applyUpdate(){
+  const banner=$('#update-banner');
+  if(banner)banner.hidden=true;
+  if(!activateUpdate(pendingUpdateWorker,{serviceWorker:navigator.serviceWorker,reload:()=>window.location.reload()}))window.location.reload();
 }
 async function registerSW(){
   if(!('serviceWorker'in navigator)){
@@ -908,8 +897,13 @@ async function registerSW(){
     return;
   }
   try{
-    await navigator.serviceWorker.register('/service-worker.js');
+    swRegistration=await navigator.serviceWorker.register('/service-worker.js');
+    watchServiceWorkerUpdates(swRegistration,{serviceWorker:navigator.serviceWorker,onUpdateReady:offerUpdate});
+    navigator.serviceWorker.ready.then(()=>updateOfflineStatus());
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{void updateOfflineStatus();});
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&navigator.onLine)swRegistration?.update().catch(()=>{});});
     updateNetwork();
+    void updateOfflineStatus();
   }catch(e){
     $('#offline-setting').textContent='Önbellek kaydı başarısız';
     console.warn('Service worker registration failed:',e);

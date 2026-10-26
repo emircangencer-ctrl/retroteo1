@@ -1,11 +1,11 @@
-// RetroPlay browser E2E: runs the production build (dist/) with the real EmulatorJS 4.2.3 runtime.
+// RetroPlay browser E2E: runs the production build (dist/), which serves the real EmulatorJS 4.2.3 runtime itself.
 // Usage: npm run build (repo root) → cd e2e && npm install && npx playwright install chromium && npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST } from './harness.mjs';
+import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST, cdnRequests } from './harness.mjs';
 import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom } from './fixtures/make-roms.mjs';
 
 if (!fs.existsSync(path.join(DIST, 'index.html'))) {
@@ -24,11 +24,11 @@ const { server, base } = await startServer();
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 const results = [];
 
-async function scenario(name, fn) {
+async function scenario(name, fn, options = {}) {
   const started = Date.now();
-  const { context, page, logs } = await newPage(browser, base);
+  const { context, page, logs } = await newPage(browser, base, options);
   try {
-    await fn(page);
+    await fn(page, context);
     results.push({ name, ok: true, ms: Date.now() - started });
     console.log(`ok   ${name} (${Date.now() - started} ms)`);
   } catch (error) {
@@ -204,6 +204,28 @@ await scenario('a Mega Drive .bin with a SEGA header is imported as a playable M
   await page.evaluate(() => document.querySelector('[data-view="library"]').click());
   const label = await page.evaluate(() => [...document.querySelectorAll('#library-games .game-card')].find(card => card.textContent.includes('genesis stub'))?.querySelector('.game-foot')?.textContent || '');
   assert.match(label, /Mega Drive · Oynatılabilir dosya/);
+});
+
+await scenario('after one online visit, a game starts with no network at all (service worker cache)', async (page, context) => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'emulatorjs', 'runtime-manifest.json'), 'utf8'));
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  const cached = await waitFor(() => page.evaluate(async urls => {
+    const cache = await caches.open('retroplay-emulatorjs-4.2.3-v1');
+    const hits = await Promise.all(urls.map(url => cache.match(url)));
+    return hits.every(Boolean);
+  }, manifest.precache), { timeout: 60000, interval: 500 });
+  assert.equal(cached, true, 'runtime and default cores are stored by the service worker');
+  await context.setOffline(true);
+  await page.reload({ waitUntil: 'load' });
+  assert.equal(await page.evaluate(() => navigator.onLine), false);
+  await importFile(page, batteryRom);
+  const state = await play(page, 'battery test');
+  assert.match(state.status, /^Çalışıyor/, `offline start failed: ${state.error}`);
+  await context.setOffline(false);
+}, { serviceWorkers: 'allow' });
+
+await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
+  assert.deepEqual(cdnRequests, []);
 });
 
 await browser.close();

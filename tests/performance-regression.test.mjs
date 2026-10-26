@@ -6,12 +6,11 @@ const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const drive = await readFile(new URL('../src/google-drive.js', import.meta.url), 'utf8');
 
-test('legacy NES diagnostic engines are loaded on demand, not in the initial app module', () => {
-  assert.doesNotMatch(app, /import\s+\{\s*Browser\s+as\s+NesBrowser[^\n]*\}\s+from\s+['"]jsnes['"]/);
-  assert.doesNotMatch(app, /import\s+\{\s*BrowserNesPlayer\s*\}\s+from\s+['"]\.\/nes-core-player\.js['"]/);
-  assert.match(app, /await import\(['"]jsnes['"]\)/);
-  assert.match(app, /await import\(['"]\.\/nes-core-player\.js['"]\)/);
-  assert.match(app, /await import\(['"]\.\/nes-engine\.js['"]\)/);
+test('EmulatorJS is the only engine: the legacy JavaScript NES engines are gone from the app', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.dependencies, undefined, 'no runtime npm dependencies remain');
+  assert.equal(pkg.scripts.postinstall, undefined, 'the JSNES mapper patch step is gone');
+  assert.doesNotMatch(app, /jsnes|nesjs|nes-core-player|nes-engine|requestedNesCore/);
 });
 
 test('library search schedules only the library results instead of rebuilding every view per keystroke', () => {

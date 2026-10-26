@@ -19,6 +19,17 @@
     Service-Worker-Allowed = "/"
 
 [[headers]]
+  # Versioned EmulatorJS runtime and cores; file names never change for a given release.
+  for = "/emulatorjs/4.2.3/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/emulatorjs/runtime-manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
   for = "/manifest.webmanifest"
   [headers.values]
     Content-Type = "application/manifest+json; charset=utf-8"

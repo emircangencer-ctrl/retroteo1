@@ -244,3 +244,7 @@
 .player-consent-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
 .player-consent-actions .button{min-height:44px;padding:0 18px;font-size:14px}
 .player-toolbar .button:disabled{opacity:.42;cursor:not-allowed;filter:none;transform:none}
+/* Stage 31: "new version ready" banner (never shown over a running game). */
+.update-banner{position:fixed;left:50%;bottom:25px;transform:translateX(-50%);z-index:85;display:flex;align-items:center;gap:12px;padding:10px 12px 10px 16px;border:1px solid #6e59c2;border-radius:12px;background:#1d1838;color:#efeaff;font-size:12px;box-shadow:0 15px 50px #0008}
+.update-banner[hidden]{display:none}
+@media(max-width:760px){.update-banner{bottom:calc(84px + env(safe-area-inset-bottom));width:calc(100vw - 30px);justify-content:space-between}}

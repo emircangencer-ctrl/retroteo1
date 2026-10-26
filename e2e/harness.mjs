@@ -1,17 +1,15 @@
-// Shared helpers: a static server for dist/, a browser context that serves the pinned EmulatorJS
-// 4.2.3 runtime from this folder's node_modules instead of cdn.emulatorjs.org, and app actions.
+// Shared helpers: a static server for dist/ (which now contains the self-hosted EmulatorJS 4.2.3
+// runtime and cores), a browser context that refuses every request to cdn.emulatorjs.org (so a
+// passing run proves the app no longer depends on the CDN), and app actions.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
-const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const DIST = path.resolve(here, '..', 'dist');
-const EJS_DATA = path.dirname(require.resolve('@emulatorjs/emulatorjs/package.json')) + '/data';
-const CORE_DIRS = ['@emulatorjs/core-nestopia'].map(name => path.dirname(require.resolve(`${name}/package.json`)));
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain', '.wasm': 'application/wasm', '.data': 'application/octet-stream' };
+export const cdnRequests = [];
 
 export function startServer(port = 0) {
   const server = http.createServer((req, res) => {
@@ -26,31 +24,15 @@ export function startServer(port = 0) {
   return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}/` })));
 }
 
-function resolveRuntimeFile(pathname) {
-  const rel = pathname.replace(/^\/4\.2\.3\/data\//, '');
-  if (rel === pathname) return null;
-  if (rel.startsWith('cores/')) {
-    const name = rel.slice('cores/'.length);
-    for (const dir of CORE_DIRS) {
-      const candidate = path.join(dir, name);
-      if (candidate.startsWith(dir) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
-    }
-    return null;
-  }
-  const candidate = path.join(EJS_DATA, rel);
-  return candidate.startsWith(EJS_DATA) && fs.existsSync(candidate) && fs.statSync(candidate).isFile() ? candidate : null;
-}
-
-export async function newPage(browser, base, { mobile = false } = {}) {
+export async function newPage(browser, base, { mobile = false, serviceWorkers = 'block' } = {}) {
   const context = await browser.newContext({
     viewport: mobile ? { width: 393, height: 873 } : { width: 1280, height: 860 },
     deviceScaleFactor: mobile ? 2.75 : 1, isMobile: mobile, hasTouch: mobile,
-    serviceWorkers: 'block', acceptDownloads: true
+    serviceWorkers, acceptDownloads: true
   });
   await context.route('https://cdn.emulatorjs.org/**', route => {
-    const file = resolveRuntimeFile(new URL(route.request().url()).pathname);
-    if (!file) return route.fulfill({ status: 404, body: 'not available offline' });
-    return route.fulfill({ status: 200, body: fs.readFileSync(file), headers: { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'access-control-allow-origin': '*' } });
+    cdnRequests.push(route.request().url());
+    return route.abort('blockedbyclient');
   });
   const page = await context.newPage();
   page.on('dialog', dialog => dialog.accept());
