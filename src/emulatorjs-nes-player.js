@@ -1,3 +1,4 @@
+import { RETROPLAY_SHADERS, DISPLAY_MODES } from './display-modes.js';
 // The runtime is served from RetroPlay's own origin (see scripts/emulatorjs-runtime.mjs). The build
 // injects the hashed bundle names; tests and unbundled use fall back to the fixed data path.
 /* global __EJS_RUNTIME__ */
@@ -21,6 +22,8 @@ const CORES_BY_SYSTEM = Object.freeze({
   mame: new Set(['mame2003_plus'])
 });
 const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+const ALLOWED_SHADERS = new Set(Object.values(DISPLAY_MODES).map(mode => mode.shader));
+const safeShader = name => (ALLOWED_SHADERS.has(name) ? name : 'disabled');
 const SAFE_CFG_KEY = /^[a-z0-9_]{1,64}$/;
 const SAFE_OPTION_KEY = /^[A-Za-z0-9_-]{1,64}$/;
 function sanitizeExtraFiles(files) {
@@ -38,6 +41,17 @@ function sanitizeSettings(settings, keyPattern) {
   return result;
 }
 const HIDDEN_BUTTONS = { playPause:false, play:false, pause:false, restart:false, mute:false, unmute:false, volumeSlider:false, settings:false, fullscreen:false, enterFullscreen:false, exitFullscreen:false, saveState:false, loadState:false, quickSave:false, quickLoad:false, screenshot:false, gamepad:true, cheat:false, cacheManager:false, exitEmulation:false, netplay:false, diskButton:false, contextMenu:false, saveSavFiles:false, loadSavFiles:false };
+// Inside the emulator iframe: the canvas fills the player and RetroArch letterboxes the picture with
+// the core's own aspect ratio (4:3 for consoles, the cabinet ratio for arcade, rotated when vertical).
+// EmulatorJS's menu bar would cover the bottom of the game; RetroPlay has its own controls.
+const RUNTIME_CSS = [
+  'html,body,#ejs-player{margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;overflow:hidden!important;background:#000!important}',
+  '#ejs-player .ejs_parent{position:relative!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;background:#000!important;overflow:hidden!important}',
+  '#ejs-player .ejs_canvas_parent{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;display:block!important;overflow:hidden!important;background:#000!important}',
+  '#ejs-player canvas{display:block!important;width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;margin:0!important;image-rendering:pixelated!important}',
+  '.ejs_virtualGamepad_parent,.ejs_virtualGamepad_open,.ejs_volume_parent,.ejs_bottom_bar,.ejs_start_button,.ejs_contextMenu,.ejs_menu_bar{display:none!important}',
+  'html.retroplay-immersive .ejs_menu,html.retroplay-immersive .ejs_settings,html.retroplay-immersive .ejs_overlay,html.retroplay-immersive .ejs_toolbar,html.retroplay-immersive .ejs_gamepad_settings{display:none!important}'
+].join('');
 const literal = value => JSON.stringify(value).replace(/</g, '\\u003c');
 /**
  * Builds the iframe document that boots EmulatorJS for one game.
@@ -55,6 +69,7 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   const extraFiles = sanitizeExtraFiles(options.extraFiles);
   const retroarchConfig = sanitizeSettings(options.retroarchConfig, SAFE_CFG_KEY);
   const coreOptions = sanitizeSettings(options.coreOptions, SAFE_OPTION_KEY);
+  const shader = safeShader(options.shader);
   const startup = [
     '(() => {',
     "const notify = (type, details = {}, transfer = []) => parent.postMessage({ source: 'retroplay-emulatorjs', type, ...details }, '*', transfer);",
@@ -75,12 +90,13 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     'window.RETROPLAY_EXTRA_FILES = ' + literal(extraFiles) + ';',
     'window.RETROPLAY_RETROARCH_CFG = ' + literal(retroarchConfig) + ';',
     'window.EJS_defaultOptions = ' + literal(coreOptions) + ';',
+    'window.EJS_shaders = ' + literal(RETROPLAY_SHADERS) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
     'window.EJS_gameName = ' + literal(gameName) + ';',
     'window.EJS_gameID = ' + String(gameId) + ';',
     'window.EJS_volume = 0.7;',
     'window.EJS_Buttons = ' + literal(HIDDEN_BUTTONS) + ';',
-    "window.EJS_onGameStart = () => { const emu = window.EJS_emulator; const missing = []; if (typeof emu?.gameManager?.simulateInput !== 'function') missing.push('kontrol desteği'); if (typeof emu?.pause !== 'function') missing.push('duraklatma'); if (typeof emu?.play !== 'function') missing.push('devam etme'); if (missing.length) { notify('error', { message: 'EmulatorJS yüklendi ancak gerekli API eksik: ' + missing.join(', ') + '. Çalışma zamanı ile kontrol katmanı uyumsuz.' }); return; } const css = document.createElement('style'); css.textContent = 'html,body,#ejs-player{margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;overflow:hidden!important;background:#000!important}#ejs-player .ejs_parent{position:relative!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;background:#000!important;overflow:hidden!important}#ejs-player .ejs_canvas_parent{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;background:#000!important}#ejs-player canvas{display:block!important;flex:0 0 auto!important;width:min(100%,133.333vh)!important;height:min(100%,75vw)!important;width:min(100%,133.333dvh)!important;height:min(100%,75dvw)!important;max-width:100%!important;max-height:100%!important;aspect-ratio:4/3!important;object-fit:fill!important;image-rendering:pixelated!important;image-rendering:crisp-edges!important}#ejs-player .ejs_canvas_parent canvas{margin:auto!important}.ejs_virtualGamepad_parent,.ejs_virtualGamepad_open,.ejs_volume_parent,.ejs_bottom_bar,.ejs_start_button,.ejs_contextMenu{display:none!important}html.retroplay-immersive .ejs_menu_bar,html.retroplay-immersive .ejs_menu,html.retroplay-immersive .ejs_settings,html.retroplay-immersive .ejs_overlay,html.retroplay-immersive .ejs_toolbar,html.retroplay-immersive .ejs_gamepad_settings{display:none!important}'; document.head.appendChild(css); gameStarted = true; notify('started'); };",
+    "window.EJS_onGameStart = () => { const emu = window.EJS_emulator; const missing = []; if (typeof emu?.gameManager?.simulateInput !== 'function') missing.push('kontrol desteği'); if (typeof emu?.pause !== 'function') missing.push('duraklatma'); if (typeof emu?.play !== 'function') missing.push('devam etme'); if (missing.length) { notify('error', { message: 'EmulatorJS yüklendi ancak gerekli API eksik: ' + missing.join(', ') + '. Çalışma zamanı ile kontrol katmanı uyumsuz.' }); return; } const css = document.createElement('style'); css.textContent = " + literal(RUNTIME_CSS) + "; document.head.appendChild(css); if (typeof emu.enableShader === 'function') { try { emu.enableShader(" + literal(shader) + "); } catch (error) { notify('warning', { message: 'Görüntü modu uygulanamadı: ' + (error && error.message || error) }); } } gameStarted = true; notify('started'); };",
     "window.EJS_onExit = () => notify('exit');",
     "window.addEventListener('message', event => { if (event.source !== parent || !event.data || event.data.source !== 'retroplay-app' || event.data.type !== 'immersive') return; document.documentElement.classList.toggle('retroplay-immersive', Boolean(event.data.active)); });",
     "const loader = document.createElement('script'); loader.src = " + literal(new URL('loader.js', dataPath).href) + "; loader.onerror = () => notify('error', { message: 'EmulatorJS yüklenemedi. Uygulamayı yenileyip tekrar dene; ilk açılışta internet bağlantısı gerekir.' }); document.head.appendChild(loader);",
@@ -89,11 +105,11 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay EmulatorJS runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsPlayer {
-  constructor(container, { onError = () => {}, onWarning = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {} } = {}) {
+  constructor(container, { onError = () => {}, onWarning = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled' } = {}) {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
-    this.container=container; this.onError=onError; this.onWarning=onWarning; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions }; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
+    this.container=container; this.onError=onError; this.onWarning=onWarning; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
@@ -119,7 +135,8 @@ export class EmulatorJsPlayer {
   }
   fail(error){ if(this.destroyed)return; window.clearTimeout(this.timer); this.timer=null; const reject=this.rejectStart; this.resolveStart=null; this.rejectStart=null; this.onError(error); reject?.(error); }
   setImmersive(active){try{this.frame?.contentWindow?.postMessage({source:'retroplay-app',type:'immersive',active:Boolean(active)},'*');}catch{}}
-  fitInParent(){try{this.frame?.contentWindow?.EJS_emulator?.frontend?.handleResize?.();}catch{}}
+  // RetroArch re-measures its canvas (in device pixels) on the iframe's resize event.
+  fitInParent(){const win=this.frame?.contentWindow;try{win?.dispatchEvent(new win.Event('resize'));}catch{}try{win?.EJS_emulator?.handleResize?.();}catch{}}
   pause(){const e=this.frame?.contentWindow?.EJS_emulator;if(!this.started||!e)throw new Error('Emülatör henüz hazır değil.');this.releaseAllButtons();e.pause();}
   resume(){const e=this.frame?.contentWindow?.EJS_emulator;if(!this.started||!e)throw new Error('Emülatör henüz hazır değil.');e.play();}
   /**
@@ -195,6 +212,13 @@ export class EmulatorJsPlayer {
       try { this.onWarning(`Kayıt noktası yüklenemedi: ${error?.message || error}`); } catch {}
       return false;
     }
+  }
+  /** Switches the shader of the running game (display mode); returns false if it is not possible. */
+  setShader(name) {
+    const emu = this.frame?.contentWindow?.EJS_emulator;
+    if (!this.started || this.destroyed || typeof emu?.enableShader !== 'function') return false;
+    try { emu.enableShader(safeShader(name)); return true; }
+    catch (error) { try { this.onWarning(`Görüntü modu uygulanamadı: ${error?.message || error}`); } catch {} return false; }
   }
   /** Soft-resets the running game; battery-backed RAM is preserved by the core. */
   restartGame() {

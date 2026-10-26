@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, play, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, liveSram, waitFor, DIST, cdnRequests } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom } from './fixtures/make-roms.mjs';
+import { decodePng, rowRuns } from './png.mjs';
 
 if (!fs.existsSync(path.join(DIST, 'index.html'))) {
   console.error('dist/ is missing — run `npm run build` in the repository root first.');
@@ -19,6 +20,19 @@ fs.writeFileSync(batteryRom, batteryTestRom());
 fs.writeFileSync(mdBin, megaDriveBinStub());
 const unverifiedRom = path.join(tmp, 'Super Mario Bros. 3 (U) (PRG 1) [h2].nes');
 fs.writeFileSync(unverifiedRom, unverifiedMmc3Rom());
+const checkerRom = path.join(tmp, 'checkerboard.nes');
+fs.writeFileSync(checkerRom, checkerboardRom());
+
+async function gameScreenshot(page) {
+  const box = await page.evaluate(() => {
+    const frame = document.querySelector('#player-screen iframe');
+    const canvas = frame.contentWindow.document.querySelector('canvas');
+    const outer = frame.getBoundingClientRect(); const inner = canvas.getBoundingClientRect();
+    return { x: outer.left + inner.left, y: outer.top + inner.top, width: inner.width, height: inner.height, backing: [canvas.width, canvas.height], ratio: frame.contentWindow.devicePixelRatio };
+  });
+  const image = decodePng(await page.screenshot({ clip: { x: box.x, y: box.y, width: box.width, height: box.height } }));
+  return { box, image };
+}
 
 const { server, base } = await startServer();
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
@@ -223,6 +237,31 @@ await scenario('after one online visit, a game starts with no network at all (se
   assert.match(state.status, /^Çalışıyor/, `offline start failed: ${state.error}`);
   await context.setOffline(false);
 }, { serviceWorkers: 'allow' });
+
+await scenario('on a phone the game is drawn at full screen resolution and no pixel is lost', async page => {
+  await importFile(page, checkerRom);
+  const state = await play(page, 'checkerboard');
+  assert.match(state.status, /^Çalışıyor/);
+  await page.waitForTimeout(1500);
+  const { box, image } = await gameScreenshot(page);
+  assert.equal(box.backing[0], Math.round(box.width * box.ratio), 'canvas backing store uses device pixels');
+  const runs = rowRuns(image, Math.floor(image.height / 2));
+  assert.ok(runs.length >= 250, `all 256 NES columns are visible (${runs.length})`);
+  assert.ok(Math.max(...runs) <= Math.ceil(image.width / 256) + 1, `no two NES pixels merge into one (widest run ${Math.max(...runs)})`);
+  assert.match(await page.evaluate(() => document.querySelector('#display-mode').textContent), /Keskin/);
+}, { mobile: true });
+
+await scenario('"Tam sayı" display mode makes every NES pixel exactly the same size', async page => {
+  await page.evaluate(() => localStorage.setItem('retroplay-display-mode', 'integer'));
+  await page.reload({ waitUntil: 'networkidle' });
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  await page.waitForTimeout(1500);
+  const { image } = await gameScreenshot(page);
+  const runs = rowRuns(image, Math.floor(image.height / 2));
+  assert.ok(runs.length >= 250, `all columns visible (${runs.length})`);
+  assert.equal(new Set(runs).size, 1, `one pixel width only, got ${[...new Set(runs)].join('/')}`);
+}, { mobile: true });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
   assert.deepEqual(cdnRequests, []);

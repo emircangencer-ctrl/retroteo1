@@ -406,22 +406,28 @@ test('the emulator iframe may request a screen wake lock', () => {
 });
 
 
-test('EmulatorJS canvas scales to the largest centered 4:3 area and keeps Nestopia selected for NES', () => {
+test("the canvas fills the player and RetroArch keeps each core's own aspect ratio; Nestopia stays the NES core", () => {
   const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Super Mario Bros. 3', 'nes', 8, 'nestopia');
   assert.ok(html.includes('window.EJS_core = "nestopia";'));
-  assert.ok(html.includes('aspect-ratio:4/3!important'));
-  assert.ok(html.includes('object-fit:fill!important'));
-  assert.ok(html.includes('133.333dvh'));
-  assert.ok(html.includes('75dvw'));
+  assert.ok(html.includes('#ejs-player canvas{display:block!important;width:100%!important;height:100%!important'));
+  assert.ok(!html.includes('aspect-ratio:4/3'), 'no fixed 4:3 box: vertical arcade games must not be squeezed');
   assert.ok(html.includes('overflow:hidden!important'));
 });
 
+test('the display mode shader is registered and applied when the game starts', () => {
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Test ROM', 'nes', 8, 'nestopia', { shader: 'retroplay-sharp' });
+  assert.ok(html.includes('window.EJS_shaders = {"retroplay-sharp"'));
+  assert.ok(html.includes('emu.enableShader("retroplay-sharp")'));
+  const unknown = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Test ROM', 'nes', 8, 'nestopia', { shader: '../../evil' });
+  assert.ok(unknown.includes('emu.enableShader("disabled")'), 'unknown shader names fall back to none');
+});
 
-test('immersive mode hides the emulator-owned menu only when the parent requests it', () => {
+test('the emulator menu bar never covers the game; other emulator menus are hidden in immersive mode', () => {
   const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Test ROM', 'nes', 9, 'nestopia');
   assert.ok(html.includes("event.data.source !== 'retroplay-app'"));
   assert.ok(html.includes("type !== 'immersive'"));
-  assert.ok(html.includes('html.retroplay-immersive .ejs_menu_bar'));
+  assert.ok(html.includes('.ejs_contextMenu,.ejs_menu_bar{display:none!important}'));
+  assert.ok(html.includes('html.retroplay-immersive .ejs_menu,'));
   assert.ok(html.includes("window.addEventListener('message'"));
 });
 

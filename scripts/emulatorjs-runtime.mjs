@@ -48,6 +48,10 @@ const LANGUAGES = Object.freeze(['tr-TR.json', 'en-US.json']);
  * - RETROPLAY_EXTRA_FILES: files (for example a BIOS zip) written next to the game before it loads.
  *   EmulatorJS's own BIOS download unpacks archives and names files after blob URLs, which breaks
  *   arcade BIOS sets that must stay a zip with their set name.
+ * - Canvas resolution: RetroArch sizes its canvas from ResizeObserver's devicePixelContentBoxSize.
+ *   When a browser reports that box in CSS pixels (seen with emulated device pixel ratios), the game
+ *   is drawn at CSS resolution and stretched, so pixels come out uneven. The core's glue code is
+ *   patched to use CSS size × devicePixelRatio whenever the reported box disagrees with it.
  */
 export const RETROPLAY_PATCH = `
 ;(function () {
@@ -70,6 +74,23 @@ export const RETROPLAY_PATCH = `
     };
   }
   var Emulator = window.EmulatorJS;
+  var CANVAS_SIZE_CODE = 'if(entry.devicePixelContentBoxSize){width=entry.devicePixelContentBoxSize[0].inlineSize;height=entry.devicePixelContentBoxSize[0].blockSize}';
+  var CANVAS_SIZE_FIX = 'if(entry.devicePixelContentBoxSize&&Math.abs(entry.devicePixelContentBoxSize[0].inlineSize-entry.contentRect.width*window.devicePixelRatio)<1.5&&Math.abs(entry.devicePixelContentBoxSize[0].blockSize-entry.contentRect.height*window.devicePixelRatio)<1.5){width=entry.devicePixelContentBoxSize[0].inlineSize;height=entry.devicePixelContentBoxSize[0].blockSize}';
+  if (Emulator && Emulator.prototype && typeof Emulator.prototype.initGameCore === 'function') {
+    var baseInitGameCore = Emulator.prototype.initGameCore;
+    Emulator.prototype.initGameCore = function (js, wasm, thread) {
+      try {
+        var text = typeof js === 'string' ? js : new TextDecoder().decode(js);
+        if (text.indexOf(CANVAS_SIZE_CODE) !== -1) {
+          js = text.split(CANVAS_SIZE_CODE).join(CANVAS_SIZE_FIX);
+          window.RETROPLAY_CANVAS_FIX = true;
+        }
+      } catch (error) {
+        console.warn('RetroPlay: canvas size patch skipped', error);
+      }
+      return baseInitGameCore.call(this, js, wasm, thread);
+    };
+  }
   if (Emulator && Emulator.prototype && typeof Emulator.prototype.downloadRom === 'function') {
     var baseDownloadRom = Emulator.prototype.downloadRom;
     Emulator.prototype.downloadRom = function () {

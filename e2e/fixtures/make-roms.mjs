@@ -54,3 +54,37 @@ export function unverifiedMmc3Rom() {
   rom.set(prg, 16);
   return rom;
 }
+
+/**
+ * checkerboard.nes — NROM: turns on background rendering with tile 0 everywhere, and tile 0 is a
+ * 1-pixel black/white checkerboard. Every NES pixel alternates colour, so the size of each pixel
+ * on screen can be measured exactly (used to check sharp, even pixel scaling).
+ */
+export function checkerboardRom() {
+  const code = [
+    0x78, 0xd8, 0xa2, 0xff, 0x9a,                         // SEI, CLD, LDX #$FF, TXS
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // wait for vblank (BIT $2002 / BPL)
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // and once more (PPU warm-up)
+    0xa9, 0x20, 0x8d, 0x06, 0x20, 0xa9, 0x00, 0x8d, 0x06, 0x20, // PPUADDR = $2000 (nametable 0)
+    0xa2, 0x00, 0xa0, 0x04,                               // X = 0, Y = 4 (4 × 256 bytes)
+    0x8d, 0x07, 0x20, 0xe8, 0xd0, 0xfa, 0x88, 0xd0, 0xf7, // clear: write tile 0 and attributes 0
+    0xa9, 0x3f, 0x8d, 0x06, 0x20, 0xa9, 0x00, 0x8d, 0x06, 0x20, // PPUADDR = $3F00 (palette)
+    0xa9, 0x0f, 0x8d, 0x07, 0x20, 0xa9, 0x30, 0x8d, 0x07, 0x20, // black, white
+    0xa9, 0x16, 0x8d, 0x07, 0x20, 0xa9, 0x2a, 0x8d, 0x07, 0x20, // red, green (unused)
+    0xa9, 0x00, 0x8d, 0x05, 0x20, 0x8d, 0x05, 0x20,       // scroll 0,0
+    0xa9, 0x00, 0x8d, 0x00, 0x20,                         // PPUCTRL: nametable 0, pattern table 0
+    0xa9, 0x0a, 0x8d, 0x01, 0x20                          // PPUMASK: show background incl. left column
+  ];
+  const loop = 0xc000 + code.length;
+  code.push(0x4c, loop & 0xff, loop >> 8);                // loop: JMP loop
+  const rti = 0xc000 + code.length;
+  code.push(0x40);                                        // RTI
+  const vectors = { nmi: rti, reset: 0xc000, irq: rti };
+  const chr = new Uint8Array(8192);
+  for (let row = 0; row < 8; row++) chr[row] = row % 2 ? 0x55 : 0xaa; // tile 0, low plane
+  const rom = new Uint8Array(16 + PRG_BANK + 8192);
+  rom.set([0x4e, 0x45, 0x53, 0x1a, 1, 1, 0x00, 0x00], 0); // iNES, 16 KiB PRG, 8 KiB CHR, mapper 0
+  rom.set(bank(code, vectors), 16);
+  rom.set(chr, 16 + PRG_BANK);
+  return rom;
+}
