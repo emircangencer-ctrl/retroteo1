@@ -16,6 +16,9 @@
 .play-chip:hover:not(:disabled) { background: #20232B; }
 .play-chip:active:not(:disabled) { background: #2A2E37; }
 .play-chip:disabled { opacity: 0.4; }
+.play-chip.arcade-chip { gap: 7px; padding: 0 10px 0 14px; }
+.play-chip.arcade-chip kbd { font: 600 11px/1 var(--mono); padding: 3px 6px; border: 1px solid #3A3F4A; border-radius: 6px; color: #C2C7D0; }
+.play-chip.coin:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 55%, #2E323C); }
 .play-menu-button .bars, .play-menu-button .bars::before, .play-menu-button .bars::after { display: block; width: 16px; height: 2px; border-radius: 1px; background: currentColor; }
 .play-menu-button .bars { position: relative; }
 .play-menu-button .bars::before, .play-menu-button .bars::after { content: ''; position: absolute; left: 0; }
@@ -44,6 +47,7 @@
 .player:not(.touch-play):fullscreen { grid-template-rows: 0 minmax(0, 1fr) 0; }
 .player .desk-hints { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; margin: 0; padding: 10px 16px 14px; font-size: 12px; color: var(--text-3); }
 .player .desk-hints span { display: inline-flex; align-items: center; gap: 4px; }
+.player .desk-hints .key-hint[data-kind='system'] { color: var(--text-2); }
 .player .desk-hints kbd { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border: 1px solid #3A3F4A; border-radius: 6px; color: #C2C7D0; }
 .player .desk-hints .pad { color: var(--ok-fg); }
 .player:fullscreen .desk-hints { display: none; }
@@ -168,6 +172,10 @@
 .player-menu .panel-body .head { display: flex; justify-content: space-between; align-items: baseline; }
 .player-menu .panel-body .value { font-family: var(--mono); font-size: 13px; color: var(--text-2); }
 .player-menu .note { font-size: 12px; line-height: 1.5; color: var(--text-2); }
+.player-menu .note.keys { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.player-menu .note.keys .keys-title { width: 100%; font-weight: 700; color: var(--text); }
+.player-menu .note.keys .key-hint { display: inline-flex; align-items: center; gap: 4px; }
+.player-menu .note.keys kbd { font: 600 11px/1 var(--mono); padding: 3px 6px; border: 1px solid #3A3F4A; border-radius: 6px; color: #C2C7D0; }
 .player-menu .touch-settings { border-radius: var(--r-md); background: #15171C; border: 1px solid var(--line-soft); overflow: hidden; }
 .player-menu .slots { display: flex; flex-direction: column; gap: 8px; }
 .player-menu .slot { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: var(--r); background: #15171C; border: 1px solid var(--line-soft); }

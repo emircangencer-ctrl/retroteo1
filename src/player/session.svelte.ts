@@ -27,6 +27,8 @@ import { fileExt } from '../lib/format.ts';
 import { PlayClock } from '../lib/playtime.ts';
 import { importer } from '../lib/importer.svelte.ts';
 import { resolveLaunch, rememberCore, type ExtraFile } from './launch.ts';
+import { keyHints, PRIMARY_SYSTEM_KEY, type KeyHint } from '../lib/key-hints.ts';
+import { keyboardLabels } from '../lib/keyboard-labels.svelte.ts';
 import type { Game, SaveStateRecord, SlotId, SlotInfo } from '../lib/types.ts';
 
 export const SAVE_CAPTURE_INTERVAL_MS = 30_000;
@@ -69,6 +71,10 @@ class PlayerSession {
   vertical = $state(false);
   padLayout = $state('nes');
   fourWay = $state(false);
+  /** An arcade game: Select is the coin, Start the player-1 start. */
+  isArcade = $state(false);
+  /** Keyboard keys for the current game's pad (desktop hints). */
+  keyHints = $state.raw<KeyHint[]>([]);
   gamepadState = $state('unknown');
   gamepadText = $state('Gamepad durumu kontrol ediliyor…');
   /** Integer scaling chosen at start (changing it applies on the next start). */
@@ -102,6 +108,7 @@ class PlayerSession {
   #navPop: (() => void) | null = null;
   #panelPop: (() => void) | null = null;
   #menuTicket = 0;
+  #arcadeNoticeId = 0;
   #touchQuery: MediaQueryList | null = typeof matchMedia === 'function' ? matchMedia('(hover: none) and (pointer: coarse)') : null;
 
   // ---- set-up ------------------------------------------------------------------------------------
@@ -117,6 +124,7 @@ class PlayerSession {
     });
     this.#touch.setSettings(settings.touch);
     this.touchPlay = this.isTouchPlay();
+    keyboardLabels.load();
     const relayout = () => { if (this.open) { this.#touch?.releaseAll(); this.scheduleLayout(); } };
     window.addEventListener('resize', relayout);
     window.visualViewport?.addEventListener('resize', relayout);
@@ -355,6 +363,8 @@ class PlayerSession {
       else if (!options.fresh && settings.prefs.autoResume) resumed = await this.#resumeFromAutoState(game, player);
       if (unverifiedDump && !resumed) this.showNotice('Doğrulanmamış döküm · grafikler orijinalden farklı olabilir', { timeout: 4000 });
       if (session !== this.#session) { player.destroy(); return; }
+      // Arcade games wait for a coin. Without a touch pad, say which keys insert it and start.
+      if (game.platform === 'ARCADE' && !this.isTouchPlay() && !resumed && !this.notice) this.#showArcadeKeys();
 
       this.running = true;
       this.status = this.#statusLine('Çalışıyor');
@@ -376,6 +386,20 @@ class PlayerSession {
       showToast('Oyun başlatılamadı. Ayrıntı oynatıcı penceresinde.', 'error');
       this.#focusPanel('.player-fail');
     }
+  }
+
+  #showArcadeKeys() {
+    const coin = keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_SELECT);
+    const start = keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_START);
+    const pad = gamepadUI.connected ? ' · kumandada Select / Start' : '';
+    this.showNotice(`Jeton: ${coin} · Başla: ${start}${pad}`, { action: { label: 'Jeton at', run: () => this.tapInput('BUTTON_SELECT') }, timeout: 9000 });
+    this.#arcadeNoticeId = this.notice?.id ?? 0;
+  }
+
+  /** Jeton / Başla from the bar or a notice: a short press the game is sure to see. */
+  tapInput(name: 'BUTTON_SELECT' | 'BUTTON_START'): boolean {
+    if (!this.running || this.paused || !this.#emulator) return false;
+    return this.#emulator.tapButton?.(name) ?? false;
   }
 
   #showBlocked(status: string, message: string, action: PlayerAction | null = null) {
@@ -663,6 +687,8 @@ class PlayerSession {
     if (this.menuOpen || !this.open) return;
     this.menuOpen = true;
     this.panel = 'main';
+    // The coin hint's "Jeton at" cannot act on a paused game.
+    if (this.notice && this.notice.id === this.#arcadeNoticeId) this.hideNotice();
     this.#touch?.releaseAll();
     this.#poller?.stop();
     gamepadUI.suspend(false);
@@ -893,6 +919,8 @@ class PlayerSession {
     this.#padAspect = platform === 'ARCADE' && game?.arcade?.vertical ? 3 / 4 : 4 / 3;
     this.padLayout = this.#padSpec.id;
     this.fourWay = Boolean(this.#padSpec.fourWay);
+    this.isArcade = platform === 'ARCADE';
+    this.keyHints = keyHints(this.#padSpec, { arcade: this.isArcade });
     const root = this.#touchRoot;
     if (root) { root.dataset.platform = platform; root.dataset.layout = this.#padSpec.id; }
     this.applyLayout();

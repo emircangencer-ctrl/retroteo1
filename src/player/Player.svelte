@@ -4,6 +4,9 @@
   import PauseMenu from './PauseMenu.svelte';
   import { player } from './session.svelte.ts';
   import { gamepadUI } from '../lib/gamepad-ui.svelte.ts';
+  import KeyHints from '../components/KeyHints.svelte';
+  import { keyboardLabels } from '../lib/keyboard-labels.svelte.ts';
+  import { PRIMARY_SYSTEM_KEY } from '../lib/key-hints.ts';
 
   let modal: HTMLElement;
   let screen: HTMLElement;
@@ -24,6 +27,13 @@
     idleTimer = setTimeout(() => { if (player.running && !player.paused && !player.menuOpen && player.fullscreen && !player.touchPlay) idle = true; }, 2500);
   }
   $effect(() => { if (!player.fullscreen || player.menuOpen) idle = false; else wake(); });
+
+  // Arcade on a computer: Jeton and Başla in the bar. Focus leaves the button afterwards, so Space or
+  // Enter keep going to the game instead of pressing the button again.
+  function tap(event: MouseEvent, name: 'BUTTON_SELECT' | 'BUTTON_START') {
+    player.tapInput(name);
+    (event.currentTarget as HTMLElement).blur();
+  }
 </script>
 
 <div
@@ -55,6 +65,10 @@
       <span class="status-line" id="player-status" role="status">{player.status}</span>
     </div>
     <button type="button" class="play-chip play-pad-chip" id="play-pad-chip" hidden={!showPadChip} title="Kontrolcü bağlı · dokunmatik tuşları göster/gizle" aria-label="Kontrolcü bağlı · dokunmatik tuşları göster veya gizle" onclick={() => player.togglePadWithGamepad()}>🎮</button>
+    {#if player.isArcade}
+      <button type="button" class="play-chip desk-only arcade-chip coin" id="play-coin" disabled={!player.running || player.paused} title="Jeton at" onclick={event => tap(event, 'BUTTON_SELECT')}>Jeton<kbd>{keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_SELECT)}</kbd></button>
+      <button type="button" class="play-chip desk-only arcade-chip" id="play-start" disabled={!player.running || player.paused} title="Başla (1. oyuncu)" onclick={event => tap(event, 'BUTTON_START')}>Başla<kbd>{keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_START)}</kbd></button>
+    {/if}
     <button type="button" class="play-chip" id="play-save" disabled={!player.canSave || !player.running} onclick={() => player.quickSave()}>Kaydet</button>
     <button type="button" class="play-chip" id="play-load" disabled={!player.canLoad || !player.running} onclick={() => player.quickLoad()}>Yükle</button>
     <button type="button" class="play-chip desk-only" id="bar-fullscreen" aria-label={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} title="Tam ekran" onclick={() => player.toggleFullscreen()}><Icon name="fullscreen" size={18} /></button>
@@ -121,8 +135,8 @@
 
   {#if !player.touchPlay && player.open && player.running && !player.menuOpen}
     <p class="desk-hints" aria-hidden="true">
-      <span><kbd>↑↓←→</kbd> yön</span><span><kbd>Z</kbd><kbd>X</kbd> B·A</span><span><kbd>A</kbd><kbd>S</kbd><kbd>Q</kbd><kbd>W</kbd> Y·X·L·R</span><span><kbd>Enter</kbd> Start</span><span><kbd>Sağ Ctrl</kbd> Select</span><span><kbd>Esc</kbd> menü</span>
-      {#if gamepadUI.connected}<span class="pad"><Icon name="gamepad" size={16} /> kontrolcü hazır · Select+Start menü</span>{/if}
+      <KeyHints hints={player.keyHints} />
+      {#if gamepadUI.connected}<span class="pad"><Icon name="gamepad" size={16} /> kontrolcü hazır · {player.isArcade ? 'Select jeton · Start başla · ' : ''}Select+Start menü</span>{/if}
     </p>
   {/if}
   <input type="file" id="player-bios-input" hidden accept=".zip,application/zip" bind:this={biosInput} />

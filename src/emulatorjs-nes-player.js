@@ -12,7 +12,27 @@ export function emulatorJsDataPath(base = globalThis.location?.href) {
 }
 export const EMULATORJS_INPUT_INDEX = Object.freeze({ BUTTON_B: 0, BUTTON_Y: 1, BUTTON_SELECT: 2, BUTTON_START: 3, BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7, BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11, BUTTON_L2: 12, BUTTON_R2: 13, BUTTON_L3: 14, BUTTON_R3: 15 });
 const INPUT_INDEX = EMULATORJS_INPUT_INDEX;
-const KEY_TO_BUTTON = Object.freeze({ ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT', KeyZ:'BUTTON_B', KeyX:'BUTTON_A', KeyA:'BUTTON_Y', KeyS:'BUTTON_X', KeyQ:'BUTTON_L', KeyW:'BUTTON_R', Enter:'BUTTON_START', ControlRight:'BUTTON_SELECT' });
+/**
+ * Keyboard → RetroPad, by physical key (KeyboardEvent.code). Game buttons follow RetroArch's keyboard
+ * defaults (Z/X/A/S/Q/W). Start: Enter, or 1 as on MAME. Select (an arcade coin): 5 as on MAME, Right
+ * Shift as on RetroArch, V as EmulatorJS had it, or Right Ctrl as earlier RetroPlay builds; many
+ * laptops have no Right Ctrl (new Windows laptops put the Copilot key there).
+ */
+export const KEYBOARD_MAP = Object.freeze({
+  ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT',
+  KeyZ:'BUTTON_B', KeyX:'BUTTON_A', KeyA:'BUTTON_Y', KeyS:'BUTTON_X', KeyQ:'BUTTON_L', KeyW:'BUTTON_R',
+  Enter:'BUTTON_START', NumpadEnter:'BUTTON_START', Digit1:'BUTTON_START',
+  Digit5:'BUTTON_SELECT', ShiftRight:'BUTTON_SELECT', KeyV:'BUTTON_SELECT', ControlRight:'BUTTON_SELECT'
+});
+const KEY_TO_BUTTON = KEYBOARD_MAP;
+/**
+ * Select and Start (coin and start on arcade boards) stay down at least this long, however short
+ * the press: arcade games read their coin switch once per frame and many ignore a pulse shorter than
+ * a few frames, so a quick tap, a one-frame controller press or a click must still count.
+ */
+export const MIN_SYSTEM_PRESS_MS = 100;
+const SYSTEM_INPUTS = new Set([EMULATORJS_INPUT_INDEX.BUTTON_SELECT, EMULATORJS_INPUT_INDEX.BUTTON_START]);
+const now = () => globalThis.performance?.now?.() ?? Date.now();
 const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD', 'arcade', 'mame']);
 const CORES_BY_SYSTEM = Object.freeze({
   nes: new Set(['nes', 'fceumm', 'nestopia']),
@@ -110,8 +130,8 @@ export class EmulatorJsPlayer {
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
     this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
-    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
-    this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
+    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
+    this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
   }
   loadROM(bytes, gameName='RetroPlay game') {
@@ -324,11 +344,16 @@ export class EmulatorJsPlayer {
     return true;
   }
   handleKey(event, pressed) {
-    if (!this.started || this.destroyed || this.container.closest('#player-modal')?.classList.contains('hidden')) return;
-    if (event.altKey || event.metaKey || (event.ctrlKey && event.code !== 'ControlRight')) return;
-    const targetTag = event.target?.tagName?.toLowerCase();
-    if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || event.target?.isContentEditable) return;
-    if (event.code === 'Escape' && pressed && !event.repeat && this.frameWindow && event.currentTarget === this.frameWindow) {
+    if (!this.started || this.destroyed) return;
+    const modal = this.container.closest('#player-modal');
+    if (modal?.classList.contains('hidden')) return;
+    const inFrame = Boolean(this.frameWindow && event.currentTarget === this.frameWindow);
+    // RetroPlay is the only keyboard handler of the game: keys typed while the emulator frame has
+    // focus never reach EmulatorJS's own key handling (its defaults differ: X/Z swapped, V = Select,
+    // and 1/2/3 save, load and change EmulatorJS's own state slots).
+    if (inFrame) event.stopPropagation?.();
+    if (event.code === 'ControlRight') this.rightCtrlDown = pressed;
+    if (event.code === 'Escape' && pressed && !event.repeat && inFrame) {
       // Inside the emulator frame the page never sees Escape; hand it to the app (menu).
       event.preventDefault();
       try { this.onHotkey('Escape'); } catch {}
@@ -336,28 +361,69 @@ export class EmulatorJsPlayer {
     }
     const name = this.keyToButton[event.code] || (event.key === 'Control' && event.location === 2 ? 'BUTTON_SELECT' : null);
     if (!name) return;
+    const source = `key:${event.code || event.key}`;
+    // A key that comes up always lets go of its button, whatever modifiers are held by then.
+    if (!pressed) { if (this.held.get(INPUT_INDEX[name])?.has(source)) { event.preventDefault(); this.releaseButton(name, source); } return; }
+    if (event.altKey || event.metaKey || (event.ctrlKey && event.code !== 'ControlRight' && !this.rightCtrlDown)) return;
+    const targetTag = event.target?.tagName?.toLowerCase();
+    if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || event.target?.isContentEditable) return;
+    // While the menu is open the keyboard drives the menu (Enter activates the focused item).
+    if (!inFrame && modal?.classList.contains('menu-open')) return;
     event.preventDefault();
     // The iframe's own default keyboard handler must not process the same key a second time.
     event.stopPropagation?.();
-    if (pressed) this.pressButton(name, 'keyboard'); else this.releaseButton(name, 'keyboard');
+    this.pressButton(name, source);
   }
   pressButton(name, source = 'pointer') {
     const index = INPUT_INDEX[name], gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
     if (index === undefined || !this.started || !gm) return;
     let sources = this.held.get(index);
-    if (!sources) { sources = new Set(); this.held.set(index, sources); gm.simulateInput(0, index, 1); }
+    if (!sources) {
+      sources = new Set(); this.held.set(index, sources);
+      const pending = this.releaseTimers.get(index);
+      // Pressed again before a short press was let go: it simply stays down.
+      if (pending) { globalThis.clearTimeout(pending); this.releaseTimers.delete(index); }
+      else { gm.simulateInput(0, index, 1); this.pressedAt.set(index, now()); }
+    }
     sources.add(source);
   }
   releaseButton(name, source = 'pointer') {
-    const index = INPUT_INDEX[name], gm = this.frame?.contentWindow?.EJS_emulator?.gameManager, sources = this.held.get(index);
+    const index = INPUT_INDEX[name], sources = this.held.get(index);
     if (index === undefined || !sources) return;
     sources.delete(source);
-    if (sources.size === 0) { this.held.delete(index); if (gm) gm.simulateInput(0, index, 0); }
+    if (sources.size) return;
+    this.held.delete(index);
+    const left = SYSTEM_INPUTS.has(index) ? MIN_SYSTEM_PRESS_MS - (now() - (this.pressedAt.get(index) ?? -Infinity)) : 0;
+    if (left > 0) {
+      this.releaseTimers.set(index, globalThis.setTimeout(() => { this.releaseTimers.delete(index); if (!this.held.has(index)) this.#sendRelease(index); }, left));
+      return;
+    }
+    this.#sendRelease(index);
+  }
+  #sendRelease(index) {
+    this.pressedAt.delete(index);
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (gm) gm.simulateInput(0, index, 0);
+  }
+  /** A short press from an on-screen button (Jeton, Başla): down now, up after `ms`. */
+  tapButton(name, ms = 140) {
+    if (INPUT_INDEX[name] === undefined || !this.started || this.destroyed) return false;
+    const source = `tap:${name}`;
+    this.pressButton(name, source);
+    const timer = globalThis.setTimeout(() => { this.tapTimers.delete(timer); this.releaseButton(name, source); }, ms);
+    this.tapTimers.add(timer);
+    return true;
   }
   releaseAllButtons() {
     const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
-    if (gm) for (const index of this.held.keys()) gm.simulateInput(0, index, 0);
+    for (const timer of this.tapTimers) globalThis.clearTimeout(timer);
+    this.tapTimers.clear();
+    const indices = new Set([...this.held.keys(), ...this.releaseTimers.keys()]);
+    for (const timer of this.releaseTimers.values()) globalThis.clearTimeout(timer);
+    this.releaseTimers.clear();
+    if (gm) for (const index of indices) gm.simulateInput(0, index, 0);
     this.held.clear();
+    this.pressedAt.clear();
   }
   destroy() {
     if (this.destroyed) return;

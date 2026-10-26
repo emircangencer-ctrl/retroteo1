@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { buildEmulatorDocument, EmulatorJsNesPlayer } from '../src/emulatorjs-nes-player.js';
+import { buildEmulatorDocument, EmulatorJsNesPlayer, MIN_SYSTEM_PRESS_MS } from '../src/emulatorjs-nes-player.js';
 
 class FakeFrameWindow extends EventTarget {
   constructor(inputCalls) {
@@ -24,13 +24,18 @@ class FakeFrame extends EventTarget {
   remove() {}
 }
 
-function keyEvent(type, code, key = code) {
+function keyEvent(type, code, key = code, extra = {}) {
   const event = new Event(type, { cancelable: true });
   Object.defineProperties(event, {
     code: { value: code },
     key: { value: key },
-    location: { value: 0 }
+    location: { value: 0 },
+    ...Object.fromEntries(Object.entries(extra).map(([name, value]) => [name, { value }]))
   });
+  let stopped = false;
+  const stop = event.stopPropagation.bind(event);
+  event.stopPropagation = () => { stopped = true; stop(); };
+  Object.defineProperty(event, 'stopped', { get: () => stopped });
   return event;
 }
 
@@ -50,9 +55,9 @@ function installFakeBrowser() {
   };
 }
 
-function makePlayer(calls, options) {
+function makePlayer(calls, options, modalClasses = new Set()) {
   const container = {
-    closest: () => ({ classList: { contains: () => false } }),
+    closest: () => ({ classList: { contains: name => modalClasses.has(name) } }),
     replaceChildren: () => {}
   };
   const player = new EmulatorJsNesPlayer(container, options);
@@ -436,4 +441,145 @@ test('SMB3 compatibility fallback accepts FCEUmm while keeping NES controls', ()
   const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Super Mario Bros. 3 (U) (PRG 1) [h2]', 'nes', 11, 'fceumm');
   assert.ok(html.includes('window.EJS_core = "fceumm";'));
   assert.ok(html.includes('window.EJS_controlScheme = "nes";'));
+});
+
+
+test('coin and start: 5, V, Right Shift and Right Ctrl insert a coin; 1 and Enter start', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    player = makePlayer(calls);
+    player.started = true;
+    player.boundFrameLoad();
+    for (const code of ['Digit5', 'KeyV', 'ShiftRight', 'ControlRight', 'Digit1', 'Enter', 'NumpadEnter']) {
+      calls.length = 0;
+      player.frame.contentWindow.dispatchEvent(keyEvent('keydown', code, code, code === 'ControlRight' ? { ctrlKey: true } : {}));
+      const select = ['Digit5', 'KeyV', 'ShiftRight', 'ControlRight'].includes(code);
+      assert.deepEqual(calls, [[0, select ? 2 : 3, 1]], code);
+      player.releaseAllButtons();
+    }
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('keys typed in the emulator frame never reach EmulatorJS\'s own key handling', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    player = makePlayer(calls);
+    player.started = true;
+    player.boundFrameLoad();
+    // EmulatorJS binds 2 to "load state" and E to R; RetroPlay leaves them unmapped and stops them.
+    for (const code of ['Digit2', 'KeyE', 'Tab', 'Digit5']) {
+      const event = keyEvent('keydown', code);
+      player.frame.contentWindow.dispatchEvent(event);
+      assert.equal(event.stopped, true, code);
+    }
+    assert.deepEqual(calls, [[0, 2, 1]], 'only 5 (coin) presses a button');
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('a quick Select or Start press lasts long enough for an arcade game to see it', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000;
+  t.mock.method(performance, 'now', () => clock);
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    player = makePlayer(calls);
+    player.started = true;
+    player.pressButton('BUTTON_SELECT', 'gamepad');
+    clock += 16; // released one frame later
+    player.releaseButton('BUTTON_SELECT', 'gamepad');
+    assert.deepEqual(calls, [[0, 2, 1]], 'not released yet');
+    clock += MIN_SYSTEM_PRESS_MS - 16; t.mock.timers.tick(MIN_SYSTEM_PRESS_MS - 16);
+    assert.deepEqual(calls, [[0, 2, 1], [0, 2, 0]], `released after ${MIN_SYSTEM_PRESS_MS} ms`);
+    // A long press is released at once; other buttons are never held back.
+    calls.length = 0;
+    player.pressButton('BUTTON_START', 'keyboard'); clock += 300; player.releaseButton('BUTTON_START', 'keyboard');
+    player.pressButton('BUTTON_B', 'keyboard'); clock += 5; player.releaseButton('BUTTON_B', 'keyboard');
+    assert.deepEqual(calls, [[0, 3, 1], [0, 3, 0], [0, 0, 1], [0, 0, 0]]);
+    // Pressed again while a short press is still held: it simply stays down.
+    calls.length = 0;
+    player.pressButton('BUTTON_SELECT', 'touch'); clock += 10; player.releaseButton('BUTTON_SELECT', 'touch');
+    clock += 20; player.pressButton('BUTTON_SELECT', 'touch');
+    t.mock.timers.tick(MIN_SYSTEM_PRESS_MS);
+    assert.deepEqual(calls, [[0, 2, 1]]);
+    player.releaseAllButtons();
+    assert.deepEqual(calls, [[0, 2, 1], [0, 2, 0]]);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('an on-screen tap presses a button and lets go after the given time', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 0;
+  t.mock.method(performance, 'now', () => clock);
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    player = makePlayer(calls);
+    player.started = true;
+    assert.equal(player.tapButton('BUTTON_SELECT', 140), true);
+    assert.deepEqual(calls, [[0, 2, 1]]);
+    clock += 140; t.mock.timers.tick(140);
+    assert.deepEqual(calls, [[0, 2, 1], [0, 2, 0]]);
+    assert.equal(player.tapButton('NOT_A_BUTTON'), false);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('a key always lets go of its button, even with Ctrl held by then; Right Ctrl does not block other keys', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    player = makePlayer(calls);
+    player.started = true;
+    document.dispatchEvent(keyEvent('keydown', 'KeyX'));
+    document.dispatchEvent(keyEvent('keyup', 'KeyX', 'x', { ctrlKey: true }));
+    assert.deepEqual(calls, [[0, 8, 1], [0, 8, 0]]);
+    calls.length = 0;
+    document.dispatchEvent(keyEvent('keydown', 'ControlRight', 'Control', { ctrlKey: true }));
+    document.dispatchEvent(keyEvent('keydown', 'ArrowLeft', 'ArrowLeft', { ctrlKey: true }));
+    assert.deepEqual(calls, [[0, 2, 1], [0, 6, 1]], 'coin held with Right Ctrl, the joystick still moves');
+    document.dispatchEvent(keyEvent('keyup', 'ArrowLeft'));
+    document.dispatchEvent(keyEvent('keyup', 'ControlRight', 'Control'));
+    calls.length = 0;
+    document.dispatchEvent(keyEvent('keydown', 'KeyW', 'w', { ctrlKey: true }));
+    assert.deepEqual(calls, [], 'Ctrl+W stays a browser shortcut when Right Ctrl is not held');
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('while the pause menu is open the keyboard drives the menu, not the game', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    player = makePlayer(calls, undefined, new Set(['menu-open']));
+    player.started = true;
+    const enter = keyEvent('keydown', 'Enter');
+    document.dispatchEvent(enter);
+    assert.equal(enter.defaultPrevented, false, 'Enter activates the focused menu item');
+    assert.deepEqual(calls, []);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
 });

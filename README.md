@@ -146,6 +146,18 @@ pair) opens the menu. EmulatorJS's own gamepad loop is stopped when the game sta
 never delivered twice. While a controller is in use the touch pad steps aside (🎮 in the bar
 brings it back; setting "Kontrolcü kullanılınca … gizle").
 
+Keyboard (`KEYBOARD_MAP` in `src/emulatorjs-nes-player.js`, matched by key position): arrows move,
+Z/X/A/S/Q/W are the game buttons (RetroArch's defaults), Start is Enter or 1, Select is Right Shift,
+5, V or Right Ctrl. On arcade games Select is the coin: 5 inserts a coin and 1 starts, as on MAME;
+on a computer the bar also has **Jeton** and **Başla** buttons, the game opens with a hint naming the
+keys, and the line under the picture lists the keys of that game's own buttons (Neo Geo A–D, a
+2-button cabinet's 1–2, the Mega Drive's A B C / X Y Z), with the letters this keyboard prints on
+those keys when the browser reports its layout. Select and Start stay down at least 100 ms however
+short the press (a key tap, a one-frame controller press, a click), because many arcade games
+ignore a shorter coin pulse. RetroPlay is the only keyboard handler of the game: EmulatorJS's own
+bindings (where 1/2/3 save and load its own states) never see a key. While the pause menu is open
+the keyboard drives the menu.
+
 The whole interface can be used with a controller: the d-pad or stick moves the focus to the
 nearest item in that direction, A opens or confirms, B goes back, X adds to favourites, Y opens
 the game page, L/R change the system filter, Start opens the pause menu in a game. Dialogs and
@@ -214,8 +226,8 @@ device-pixel rendering with no lost NES pixels, integer scaling, the performance
 recognition (by name and by checksums), incomplete sets, CPS2 sets without a key, Neo Geo with BIOS
 added from the player, a MAME-only set, the FCEUmm offer, the touch pads (8-way roll, several
 fingers), controllers, the import review and folder scan, save slots with pictures, play time,
-controller navigation of the interface with Select+Start, the desktop layout and settings that
-are kept (39 scenarios).
+controller navigation of the interface with Select+Start, the desktop layout, coin and start on a
+computer (keyboard, bar buttons, controller) and settings that are kept (40 scenarios).
 
 Run it locally: `npm run build`, then `cd e2e && npm install && npx playwright install chromium && npm test`.
 

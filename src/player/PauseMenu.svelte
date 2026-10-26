@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import TouchSettings from '../components/TouchSettings.svelte';
+  import KeyHints from '../components/KeyHints.svelte';
   import { player, slotName } from './session.svelte.ts';
   import { settings } from '../lib/settings.svelte.ts';
   import { gamepadUI, moveFocus } from '../lib/gamepad-ui.svelte.ts';
@@ -31,8 +32,15 @@
     });
   });
 
+  // A closed menu keeps no focus: the next key (Esc to reopen, game keys) must reach the app.
+  $effect(() => {
+    if (player.menuOpen || !menu) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && menu.contains(active)) active.blur();
+  });
+
   function onKey(event: KeyboardEvent) {
-    if (!menu) return;
+    if (!menu || !player.menuOpen) return;
     const tag = (event.target as HTMLElement)?.tagName;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       if (tag === 'INPUT' && (event.target as HTMLInputElement).type === 'range') return;
@@ -159,9 +167,10 @@
           <span id="gamepad-status-text">{player.gamepadText}</span>
           <button id="refresh-gamepads" class="text-btn" type="button" onclick={() => player.updateGamepadStatus()}>Yeniden tara</button>
         </div>
-        <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır. Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
+        <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.isArcade ? ' Select jeton atar, Start başlatır.' : ''} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
         {#if !player.touchPlay}
-          <p class="note">Klavye: ok tuşları yön · Z/X = B/A · A/S/Q/W = Y/X/L/R · Enter = Start · Sağ Ctrl = Select · Esc = menü.</p>
+          <p class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span><KeyHints hints={player.keyHints} /></p>
+          <p class="note">{player.isArcade ? 'Jeton için 5, Sağ Shift, V veya Sağ Ctrl; başlamak için 1 ya da Enter.' : 'Start için Enter ya da 1; Select için Sağ Shift, 5, V veya Sağ Ctrl.'}</p>
         {/if}
       </div>
     {/if}

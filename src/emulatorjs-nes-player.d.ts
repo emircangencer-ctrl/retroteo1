@@ -1,6 +1,8 @@
 export const EMULATORJS_VERSION: string;
 export function emulatorJsDataPath(base?: string): string;
 export const EMULATORJS_INPUT_INDEX: Readonly<Record<string, number>>;
+export const KEYBOARD_MAP: Readonly<Record<string, string>>;
+export const MIN_SYSTEM_PRESS_MS: number;
 export function buildEmulatorDocument(gameUrl: string, gameName: string, systemId?: string, gameId?: number, coreId?: string, options?: Record<string, unknown>): string;
 export interface EmulatorJsPlayerOptions {
   onError?: (error: Error) => void;
@@ -40,6 +42,7 @@ export class EmulatorJsPlayer {
   restartGame(): boolean;
   pressButton(name: string, source?: string): void;
   releaseButton(name: string, source?: string): void;
+  tapButton(name: string, ms?: number): boolean;
   releaseAllButtons(): void;
   destroy(): void;
 }

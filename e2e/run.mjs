@@ -815,11 +815,20 @@ await scenario('desktop: sidebar instead of the bottom bar; the game fills the w
   const frame = await page.evaluate(() => { const r = document.querySelector('.player-screen-frame').getBoundingClientRect(); return { w: r.width, h: r.height, cx: r.left + r.width / 2 }; });
   assert.ok(Math.abs(frame.w / frame.h - 4 / 3) < 0.01, `4:3 picture (${frame.w}×${frame.h})`);
   assert.ok(frame.h > 600 && Math.abs(frame.cx - 640) < 2, 'large and centred');
+  // A console game: its own keys under the picture, no coin button, no coin hint.
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.desk-hints .key-hint')].map(el => el.textContent.trim())), ['↑↓←→ yön', 'Z B', 'X A', 'Sağ Shift Select', 'Enter Start', 'Esc menü']);
+  assert.equal(await page.evaluate(() => document.querySelector('#play-coin')), null);
   await page.keyboard.press('Escape');
   await waitStatus(page, /^Duraklatıldı/);
   assert.equal(await page.evaluate(() => document.querySelector('#player-modal').classList.contains('menu-open')), true);
   const panel = await page.evaluate(() => { const r = document.querySelector('#player-menu').getBoundingClientRect(); return [r.left, Math.round(r.height)]; });
   assert.deepEqual(panel, [0, 860], 'side panel on the left');
+  // The keyboard drives the menu: Enter on "Oyuna dön" (not Start in the paused game).
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'play-menu-close');
+  await page.keyboard.press('Enter');
+  await waitStatus(page, /^Çalışıyor/);
+  await page.keyboard.press('Escape');
+  await waitStatus(page, /^Duraklatıldı/);
   await page.keyboard.press('Escape');
   await waitStatus(page, /^Çalışıyor/);
   // The emulator frame has focus after a click: Esc still reaches the app.
@@ -827,6 +836,72 @@ await scenario('desktop: sidebar instead of the bottom bar; the game fills the w
   await page.keyboard.press('Escape');
   await waitStatus(page, /^Duraklatıldı/);
 });
+
+// Every call the game receives, with its time, so press lengths can be checked.
+const recordTimedInputs = page => page.evaluate(() => {
+  const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager;
+  const original = gm.simulateInput.bind(gm);
+  window.__timed = [];
+  gm.simulateInput = (player, index, value) => { window.__timed.push([index, value, performance.now()]); return original(player, index, value); };
+});
+const takeTimed = page => page.evaluate(() => window.__timed.splice(0));
+const pressLength = (events, index) => {
+  const down = events.find(([i, v]) => i === index && v);
+  const up = down && events.find(([i, v, t]) => i === index && !v && t >= down[2]);
+  return up ? Math.round(up[2] - down[2]) : null;
+};
+
+await scenario('desktop arcade: Jeton and Başla in the bar and on 5 / 1; a quick press lasts long enough; EmulatorJS\'s own keys are off', async page => {
+  await importFile(page, puckmanZip);
+  const state = await play(page, 'Puck Man');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  await page.waitForFunction(() => /^Jeton: 5 · Başla: 1/.test(document.querySelector('#player-notice-text')?.textContent || ''), null, { timeout: 5000 });
+  // The hint's "Jeton at" cannot act on a paused game: the menu takes it away.
+  await page.keyboard.press('Escape');
+  await waitStatus(page, /^Duraklatıldı/);
+  assert.equal(await page.evaluate(() => document.querySelector('#player-notice').hidden), true);
+  await page.keyboard.press('Escape');
+  await waitStatus(page, /^Çalışıyor/);
+  const bar = await page.evaluate(() => ['#play-coin', '#play-start'].map(sel => { const el = document.querySelector(sel); return el && getComputedStyle(el).display !== 'none' && !el.disabled ? el.textContent.trim() : null; }));
+  assert.deepEqual(bar, ['Jeton5', 'Başla1']);
+  // Pac-Man's cabinet has a joystick and no buttons: the hints say exactly that.
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.desk-hints .key-hint')].map(el => el.textContent.trim())), ['↑↓←→ joystick', '5 Jeton', '1 Başla', 'Esc menü']);
+  await recordTimedInputs(page);
+  for (const [key, index] of [['Digit5', 2], ['Digit1', 3], ['ShiftRight', 2], ['KeyV', 2]]) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(220);
+    const events = await takeTimed(page);
+    const length = pressLength(events, index);
+    assert.ok(length !== null && length >= 95, `${key}: held ${length} ms`);
+    assert.equal(events.filter(([i, v]) => v && i !== index).length, 0, `${key} presses only its button`);
+  }
+  // The bar button: a real mouse click; the focus leaves it so Space/Enter keep going to the game.
+  await page.click('#play-coin');
+  await page.waitForTimeout(300);
+  let events = await takeTimed(page);
+  assert.ok(pressLength(events, 2) >= 130, `Jeton button held ${pressLength(events, 2)} ms`);
+  assert.notEqual(await page.evaluate(() => document.activeElement?.id), 'play-coin');
+  await page.click('#play-start');
+  await page.waitForTimeout(300);
+  assert.ok(pressLength(await takeTimed(page), 3) >= 130, 'Başla button');
+  // Keys typed while the emulator frame has focus: EmulatorJS's own bindings (2 = load its state,
+  // E = R, Tab = L2) stay silent and V inserts one coin, not two.
+  await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.focus());
+  for (const key of ['Digit2', 'KeyE', 'Tab', 'KeyV']) await page.keyboard.press(key);
+  await page.waitForTimeout(250);
+  events = await takeTimed(page);
+  assert.deepEqual(events.filter(([, v]) => v).map(([i]) => i), [2], 'only the coin');
+  // A controller's Select tapped for 30 ms (under the Select+Start wait) still inserts a coin.
+  await page.evaluate(() => { window.__padOn = true; window.dispatchEvent(new Event('gamepadconnected')); });
+  await page.waitForTimeout(150);
+  await page.evaluate(() => { window.__pad.buttons[8].pressed = true; });
+  await page.waitForTimeout(30);
+  await page.evaluate(() => { window.__pad.buttons[8].pressed = false; });
+  await page.waitForTimeout(350);
+  events = await takeTimed(page);
+  assert.ok(pressLength(events, 2) >= 95, `controller Select held ${pressLength(events, 2)} ms`);
+  assert.equal(await page.evaluate(() => document.querySelector('#player-modal').classList.contains('menu-open')), false, 'Select alone is not the menu');
+}, { init: fakePad });
 
 await scenario('settings: accent colour, display filter and "Çıkışta devam noktası" are kept and used', async page => {
   await page.evaluate(() => { location.hash = '#/settings'; });
