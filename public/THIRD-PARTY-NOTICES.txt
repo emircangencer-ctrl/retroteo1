@@ -30,3 +30,14 @@ EmulatorJS. RetroPlay is a personal, non-commercial project.
    - MAME 2003-Plus metadata/mame2003-plus.xml (EmulatorJS/mame2003-plus-libretro, commit 3a72dae)
    - FB Alpha 2012 CPS2 ROM tables from src/burn/drv/capcom/d_cps2.c (EmulatorJS/fbalpha2012_cps2, commit 3fb5b89)
    These lists contain no game data. No ROM, BIOS or game file is distributed with RetroPlay.
+
+5. Interface libraries and fonts bundled into the app (Faz 2)
+   - Svelte 5 (compiled into the app's JavaScript) — MIT License — https://github.com/sveltejs/svelte
+     License text: /licenses/Svelte-MIT.txt
+   - Archivo (variable, width and weight axes; latin and latin-ext subsets) — SIL Open Font License 1.1
+     Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+     Packaged by Fontsource (@fontsource-variable/archivo). License text: /licenses/Archivo-OFL-1.1.txt
+   - IBM Plex Mono (400, 500, 600; latin and latin-ext subsets) — SIL Open Font License 1.1
+     Copyright 2017 IBM Corp. (https://github.com/IBM/plex)
+     Packaged by Fontsource (@fontsource/ibm-plex-mono). License text: /licenses/IBM-Plex-Mono-OFL-1.1.txt
+   The font files are served unmodified (WOFF2 subsets as published by Fontsource).

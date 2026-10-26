@@ -293,7 +293,7 @@
   .stats dt { font-size: 12px; color: var(--text-2); }
   .stats dd { margin: 0; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .saves, .details { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
-  .slot-rail { display: flex; gap: 12px; overflow-x: auto; margin: 0 calc(var(--pad-x) * -1); padding: 2px var(--pad-x) 4px; scrollbar-width: none; }
+  .slot-rail { position: relative; display: flex; gap: 12px; overflow-x: auto; margin: 0 calc(var(--pad-x) * -1); padding: 2px var(--pad-x) 4px; scrollbar-width: none; }
   .slot-rail::-webkit-scrollbar { display: none; }
   .slot { flex: none; width: 150px; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; display: flex; flex-direction: column; gap: 8px; border-radius: 12px; }
   .slot:disabled { cursor: default; }

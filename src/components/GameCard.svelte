@@ -16,7 +16,7 @@
 </script>
 
 <a
-  class={`game-card ${layout}`}
+  class={`game-card is-${layout}`}
   href={routeHref('game', game.id)}
   data-game-id={game.id}
   data-nav-x={game.id}
@@ -46,23 +46,23 @@
 </a>
 
 <style>
-  .game-card { display: flex; flex-direction: column; gap: 8px; color: var(--text); text-decoration: none; min-width: 0; border-radius: 16px; }
+  .game-card { position: relative; display: flex; flex-direction: column; gap: 8px; color: var(--text); text-decoration: none; min-width: 0; border-radius: 16px; }
   .game-card:hover :global(.cover) { border-color: #3A3F4A; }
   .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0 2px; }
   .game-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .meta { font-family: var(--mono); font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .meta.warn { color: var(--warn-fg); }
-  .row { width: 108px; flex: none; }
-  .row .game-title { font-size: 13px; }
+  .is-row { width: 108px; flex: none; }
+  .is-row .game-title { font-size: 13px; }
 
-  .list { flex-direction: row; align-items: center; gap: 12px; padding: 8px 10px 8px 8px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line-soft); }
-  .list:hover { background: var(--surface-3); }
+  .is-list { flex-direction: row; align-items: center; gap: 12px; padding: 8px 10px 8px 8px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line-soft); }
+  .is-list:hover { background: var(--surface-3); }
   .thumb { width: 48px; flex: none; }
-  .list .info { flex: 1; gap: 3px; }
-  .list .game-title { font-size: 15px; }
-  .list .game-foot { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .list .game-foot.warn { color: var(--warn-fg); }
+  .is-list .info { flex: 1; gap: 3px; }
+  .is-list .game-title { font-size: 15px; }
+  .is-list .game-foot { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .is-list .game-foot.warn { color: var(--warn-fg); }
   .fav-mark { color: var(--accent); }
-  .list :global(.chev) { color: var(--text-3); }
+  .is-list :global(.chev) { color: var(--text-3); }
   .resume { flex: none; }
 </style>

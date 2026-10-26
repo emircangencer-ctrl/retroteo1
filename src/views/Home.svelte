@@ -147,7 +147,7 @@
 
   .shelf { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
   .shelf-head { display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
-  .rail { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity; margin: 0 calc(var(--pad-x) * -1); padding: 2px var(--pad-x) 6px; scrollbar-width: none; }
+  .rail { position: relative; display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity; margin: 0 calc(var(--pad-x) * -1); padding: 2px var(--pad-x) 6px; scrollbar-width: none; }
   .rail::-webkit-scrollbar { display: none; }
   .rail > :global(*) { scroll-snap-align: start; }
   .add-tile { width: 108px; height: 144px; flex: none; border-radius: 12px; border: 1px dashed #3A3F4A; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-2); text-decoration: none; font-size: 13px; font-weight: 600; }
@@ -165,7 +165,7 @@
     .actions .btn-primary { flex: none; padding: 0 24px; }
     .details { display: inline-flex; }
     .rail { flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; gap: 20px 16px; }
-    .rail :global(.game-card.row) { width: 150px; }
-    .add-tile { width: 150px; height: auto; aspect-ratio: 3 / 4; }
+    .rail :global(.game-card.is-row) { width: 150px; }
+    .add-tile { display: none; }
   }
 </style>

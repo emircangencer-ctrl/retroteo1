@@ -24,9 +24,9 @@ export function startServer(port = 0) {
   return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}/` })));
 }
 
-export async function newPage(browser, base, { mobile = false, serviceWorkers = 'block', init = null } = {}) {
+export async function newPage(browser, base, { mobile = false, serviceWorkers = 'block', init = null, viewport = null } = {}) {
   const context = await browser.newContext({
-    viewport: mobile ? { width: 393, height: 873 } : { width: 1280, height: 860 },
+    viewport: viewport || (mobile ? { width: 393, height: 873 } : { width: 1280, height: 860 }),
     deviceScaleFactor: mobile ? 2.75 : 1, isMobile: mobile, hasTouch: mobile,
     serviceWorkers, acceptDownloads: true
   });

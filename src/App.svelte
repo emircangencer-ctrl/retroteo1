@@ -110,6 +110,6 @@
 <UpdateBanner />
 
 <style>
-  .app-content { min-height: 100vh; min-height: 100dvh; }
+  .app-content { min-height: 100vh; min-height: 100dvh; overflow-x: clip; }
   @media (min-width: 960px) { .app-content.with-sidebar { margin-left: var(--sidebar-w); } }
 </style>

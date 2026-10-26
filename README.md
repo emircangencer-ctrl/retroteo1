@@ -11,6 +11,12 @@ serves from its own site together with the cores it uses (no CDN at runtime).
 | Mega Drive / Genesis | `.md`, `.gen`, `.bin` (SEGA header only) | Genesis Plus GX 1.7.4 | |
 | Arcade | `.zip` (ROM set) | FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2, MAME 2003-Plus | Set checked against the core's own list; Neo Geo needs `neogeo.zip`; old CPS2 sets without `.key` run on FB Alpha 2012 CPS2 |
 
+The interface (Faz 2) is written in Svelte 5 and TypeScript: a home screen that continues the last
+game, a library with search, system filters, sorting and three layouts, a page per game (save
+slots with pictures, play time, files, emulator), an import screen that shows every file before
+it is added, settings and help. It works with touch, mouse and keyboard, and with a game
+controller from the couch. On a computer a sidebar replaces the bottom bar.
+
 `src/emulator-systems.js` defines each system (extensions, EmulatorJS system ID); the touch pads
 are in `src/touch-layout.js`.
 N64 can appear in the library but is not playable (see `docs/` and the emulator research: N64 in a
@@ -18,7 +24,8 @@ phone browser has no dynamic recompiler and is not expected to reach full speed)
 
 ## Local development
 
-Requires Node.js 20+ and access to the npm registry.
+Requires Node.js 22.18+ (unit tests import TypeScript modules directly) and access to the npm
+registry.
 
 ```bash
 npm install
@@ -26,8 +33,23 @@ npm run dev        # serves the app and /emulatorjs/ from the local runtime buil
 npm run check && npm test && npm run build && npm run preview
 ```
 
-Netlify runs `npm install`, `npm run check`, `npm test` and `npm run build` (Node 20) before
-publishing `dist/`.
+`npm run check` runs `node --check` on the JavaScript modules and `svelte-check` (TypeScript and
+Svelte, warnings fail). Netlify runs `npm install`, `npm run check`, `npm test` and
+`npm run build` (Node 22) before publishing `dist/`.
+
+Source layout:
+
+- `src/App.svelte`, `src/views/` (Home, Library, GameDetail, Import, Settings, Help) and
+  `src/components/` — the screens. Hash routes: `#/`, `#/library`, `#/game/<id>`, `#/import`,
+  `#/settings`, `#/help`; browser back stays inside the app.
+- `src/lib/` — state and logic in TypeScript: IndexedDB access (`db.ts`), the library store,
+  import scanning and review (`import-scan.ts`, `importer.svelte.ts`), settings, controller
+  navigation (`gamepad-nav.ts`, `gamepad-ui.svelte.ts`), play time (`playtime.ts`).
+- `src/player/` — the game session (`session.svelte.ts`: start, saves, menu, display, touch pad,
+  controller), core choice (`launch.ts`), the player and pause menu components.
+- `src/*.js` — the emulator, input, save, arcade and ROM modules from Faz 1, unchanged in behaviour
+  and typed by the `.d.ts` file next to each.
+- Fonts (Archivo, IBM Plex Mono; latin and latin-ext) are bundled and cached for offline use.
 
 ## Self-hosted EmulatorJS runtime
 
@@ -59,15 +81,23 @@ game) and reloads when the player taps it.
 
 ## Playing
 
-1. Import files (or a ZIP of console ROMs, or an arcade set zip) with **Oyun ekle**.
-2. Choose **Oyna**. On phones and tablets the player becomes a handheld (see *Touch controls and
-   controllers*); on a computer keyboard and controllers work.
-3. **Görüntü** switches the display mode live: **Keskin** (default; sharp-bilinear shader, every
-   pixel the same size), **Piksel** (nearest neighbour), **CRT** (crt-easymode), **Tam sayı**
-   (integer scale on both axes; applied when a game starts). The game is drawn at the screen's real
-   resolution; RetroArch letterboxes with each core's own aspect ratio, and vertical arcade games
-   get a portrait screen.
-4. **⏱ Performans** measures how many times real speed the device runs the current game (the core
+1. **Oyun ekle**: choose files, a ZIP of console ROMs, an arcade set zip or a whole folder
+   (sub-folders included; files that are not games are passed over and counted). Every file is
+   checked first and listed — playable, flagged (for example an unrecognised SMB3 dump), already in
+   the library or chosen twice, not supported — and only the ticked ones are added.
+2. **Oyna** / **Devam et** on the game page or the home screen. On phones and tablets the player
+   becomes a handheld (see *Touch controls and controllers*); on a computer the game fills the
+   window at 4:3 and keyboard and controllers work.
+3. The menu (☰, Esc, the controller's guide button or Select+Start) pauses the game: Oyuna dön,
+   Hızlı kaydet / Hızlı yükle, Kayıt yuvaları, Ekran ve ses, Kontroller, Tam ekran, Performansı ölç,
+   Yeniden başlat, Oyundan çık. On a phone held upright it opens from the top; held sideways and on
+   a computer it is a side panel.
+4. **Ekran ve ses** changes the picture live. Scaling: **Keskin** (default; sharp-bilinear shader,
+   every pixel the same size), **Piksel** (nearest neighbour), **Tam sayı** (integer scale on both
+   axes). Filter: **Yok**, **CRT** (crt-easymode), **LCD** (pixel grid). The game is drawn at the
+   screen's real resolution; RetroArch letterboxes with each core's own aspect ratio, and vertical
+   arcade games get a portrait screen. The volume slider is kept per device.
+5. **Performansı ölç** measures how many times real speed the device runs the current game (the core
    runs unthrottled for four seconds) and also checks the normal pace (a game following a 120 Hz
    screen would run too fast). Results are kept on the device and listed in Settings with a copy
    button.
@@ -111,9 +141,15 @@ settings brings the full panel back.
 Controllers (`src/gamepad-input.js`): RetroPlay polls the Gamepad API once per frame and maps a
 standard controller by position like RetroArch (bottom = RetroPad B, right = A, left = Y, top = X,
 bumpers L/R, triggers L2/R2), the left stick as an 8-way d-pad with a dead zone, a hat switch on
-non-standard controllers, the guide button opens the menu. EmulatorJS's own gamepad loop is stopped
-when the game starts so a press is never delivered twice. While a controller is in use the touch
-pad steps aside (🎮 in the bar brings it back; setting "Kontrolcü kullanılınca … gizle").
+non-standard controllers, the guide button or Select+Start (within 90 ms; the game never sees the
+pair) opens the menu. EmulatorJS's own gamepad loop is stopped when the game starts so a press is
+never delivered twice. While a controller is in use the touch pad steps aside (🎮 in the bar
+brings it back; setting "Kontrolcü kullanılınca … gizle").
+
+The whole interface can be used with a controller: the d-pad or stick moves the focus to the
+nearest item in that direction, A opens or confirms, B goes back, X adds to favourites, Y opens
+the game page, L/R change the system filter, Start opens the pause menu in a game. Dialogs and
+the pause menu keep the focus inside them.
 
 ## Arcade sets and BIOS files
 
@@ -149,11 +185,20 @@ files (`bios`) live in IndexedDB `retroplay-local-v1`. Migrations only add store
 every 5 minutes and on unload, so RetroPlay copies the live SRAM out of the core when the player is
 paused or closed, when the page is hidden or unloaded, and every 30 seconds; unchanged data is not
 rewritten (`src/save-sync.js`). On start a differing app copy is written into the core and the game
-is soft-reset; an emulator-only save is adopted. Cards offer **SRAM yedeği indir**.
+is soft-reset; an emulator-only save is adopted. The game page offers **Kayıtları indir** (the
+SRAM file) and **ROM'u indir**.
 
-**Save states and resume.** **Kaydet / Yükle** keeps one quick state per game; closing or
-backgrounding stores a resume point, the next launch continues from it (same core only) and offers
-**Baştan başla**.
+**Save states and resume.** Each game has a resume point (**Devam noktası**, stored when the game
+is closed or sent to the background; can be turned off in Settings), a quick slot (**Kaydet /
+Yükle** in the bar) and three slots in the menu. Every save keeps a picture of the moment it was
+taken; the game page shows them and continues from any of them, and a slot can be deleted there.
+Saving over a filled slot asks first. A resume point is used only with the core that made it;
+**Baştan başla** starts over.
+
+**Play time** counts only while the game runs on screen (not paused or in the background) and is
+shown on the game page and the home screen. Pictures (`saveState.thumb`), play time
+(`game.playtimeMs`) and the file's CRC32 (`game.crc32`) are optional fields on existing records;
+the database version is unchanged.
 
 The JSON library backup contains metadata only; re-importing a ROM whose hash matches a restored
 record relinks it (favourites, history and saves are kept).
@@ -166,8 +211,11 @@ self-authored test cartridges and CRC-matched placeholder arcade sets (all zeros
 solved so the file has the listed CRC32; no game data) and covers saves, states and resume, back
 button and backdrop, backup relink, Mega Drive `.bin`, offline start through the service worker,
 device-pixel rendering with no lost NES pixels, integer scaling, the performance meter, arcade
-recognition (by name and by checksums), incomplete sets, Neo Geo with BIOS added from the player, a
-MAME-only set, and the FCEUmm offer.
+recognition (by name and by checksums), incomplete sets, CPS2 sets without a key, Neo Geo with BIOS
+added from the player, a MAME-only set, the FCEUmm offer, the touch pads (8-way roll, several
+fingers), controllers, the import review and folder scan, save slots with pictures, play time,
+controller navigation of the interface with Select+Start, the desktop layout and settings that
+are kept (39 scenarios).
 
 Run it locally: `npm run build`, then `cd e2e && npm install && npx playwright install chromium && npm test`.
 

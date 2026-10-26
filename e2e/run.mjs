@@ -369,7 +369,9 @@ await scenario('the performance meter measures the speed factor and normal play 
   await page.evaluate(() => { location.hash = '#/settings'; });
   await page.waitForSelector('#perf-history');
   assert.match(await page.evaluate(() => document.querySelector('#perf-history').textContent), /checkerboard · NES\/nestopia/);
-});
+// Headless Chromium draws WebGL in software (SwiftShader), where the speed depends on the canvas size
+// far more than on any device: a ~800×600 picture keeps this a test of the meter, not of the machine.
+}, { viewport: { width: 1060, height: 680 } });
 
 // ---- arcade ----------------------------------------------------------------------------------------
 await scenario('an arcade zip is recognised by its set name, checked against FinalBurn Neo and started with it', async page => {
@@ -719,7 +721,8 @@ await scenario('save slots: the menu saves to a slot with a picture, the game pa
   await page.waitForTimeout(400);
   await closeGame(page);
   await page.waitForFunction(() => document.querySelector('.detail [data-slot="2"] img')?.naturalWidth > 0, null, { timeout: 5000 });
-  assert.match(await page.evaluate(() => document.querySelector('.detail .stats').textContent), /2 \/ 5/);
+  // The resume point is written after the player closes (with its picture); the page follows it.
+  await page.waitForFunction(() => /2 \/ 5/.test(document.querySelector('.detail .stats')?.textContent || ''), null, { timeout: 5000 });
   await click(page, '.detail [data-slot="2"]');
   await page.waitForSelector('.sheet');
   await page.evaluate(() => [...document.querySelectorAll('.sheet button')].find(b => b.textContent.includes('Bu kayıttan devam et')).click());

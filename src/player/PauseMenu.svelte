@@ -23,7 +23,9 @@
     if (!player.menuOpen || !menu) return;
     void player.panel;
     queueMicrotask(() => {
-      const target = menu?.querySelector<HTMLElement>('[data-nav-default]') || menu?.querySelector<HTMLElement>('button:not([disabled])');
+      // The menu starts on "Oyuna dön"; a sub-panel on its first setting (not on its header).
+      const content = menu?.querySelector<HTMLElement>('.items, .slots, .panel-body');
+      const target = content?.querySelector<HTMLElement>('[data-nav-default]') || content?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled])') || menu?.querySelector<HTMLElement>('button:not([disabled])');
       target?.focus({ preventScroll: true });
       if (menu) menu.scrollTop = 0;
     });
@@ -77,7 +79,7 @@
     <div class="menu-head">
       <span class="eyebrow-accent">{player.paused ? 'DURAKLATILDI' : 'MENÜ'}</span>
       <h2>{player.title}</h2>
-      <p class="play-menu-status" id="play-menu-status">{player.status}</p>
+      <p class="play-menu-status" id="play-menu-status">{player.status.replace(/^Duraklatıldı\s*·\s*/, '')}</p>
     </div>
     <div class="items">
       <button type="button" class="item primary" id="play-menu-close" data-nav-default onclick={() => player.closeMenu()}><Icon name="play" size={18} /><span class="grow">Oyuna dön</span></button>
