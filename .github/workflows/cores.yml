@@ -39,7 +39,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        opt: [O2, O3]
+        # O2: the core's release flags; O3: compared against it; prof: O2 with function names kept
+        # (--profiling-funcs) for profiling in a browser, not for release.
+        opt: [O2, prof]
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full >/dev/null
@@ -72,6 +74,7 @@ jobs:
         run: |
           source ../../emsdk/emsdk_env.sh >/dev/null
           set -o pipefail
+          if [ "${{ matrix.opt }}" = prof ]; then sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -q -- '--profiling-funcs' ../Makefile.emulatorjs; fi
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
           emmake ./build-emulatorjs.sh --clean 2>&1 | tail -n 15
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
@@ -109,14 +112,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="core-mame2003_plus_next-${MAME2003_PLUS_COMMIT::8}"
+          # One release per run: files a build pins (by sha512) are never replaced.
+          TAG="core-mame2003_plus_next-${MAME2003_PLUS_COMMIT::8}-r${GITHUB_RUN_NUMBER}"
           mkdir assets
           for dir in built/*; do
             opt="${dir##*-}"
             for f in "$dir"/*; do cp "$f" "assets/${opt}-$(basename "$f")"; done
           done
           ls -la assets
-          NOTES="MAME 2003-Plus ${MAME2003_PLUS_COMMIT::8} (libretro/mame2003-plus-libretro) · EmulatorJS/RetroArch ${RETROARCH_COMMIT::9} · emsdk $EMSDK_VERSION · built ${GITHUB_SHA::7}. O2 = the core's release flags, O3 = measured alternative. GPL-2.0-or-later; source: $MAME2003_PLUS_REPO at the commit above."
-          if gh release view "$TAG" >/dev/null 2>&1; then gh release edit "$TAG" --notes "$NOTES"; else gh release create "$TAG" --prerelease --title "MAME 2003-Plus (2026) for RetroPlay" --notes "$NOTES" --target "$GITHUB_SHA"; fi
-          gh release upload "$TAG" assets/* --clobber
+          NOTES="MAME 2003-Plus ${MAME2003_PLUS_COMMIT::8} (libretro/mame2003-plus-libretro) · EmulatorJS/RetroArch ${RETROARCH_COMMIT::9} · emsdk $EMSDK_VERSION · built ${GITHUB_SHA::7}. O2 = the core's release flags; other prefixes are measurement builds (prof = function names kept). GPL-2.0-or-later; source: $MAME2003_PLUS_REPO at the commit above."
+          gh release create "$TAG" --prerelease --title "MAME 2003-Plus (2026) for RetroPlay · run ${GITHUB_RUN_NUMBER}" --notes "$NOTES" --target "$GITHUB_SHA" assets/*
           echo "::notice title=core release::$TAG"
