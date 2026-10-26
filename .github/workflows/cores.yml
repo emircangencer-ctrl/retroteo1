@@ -43,12 +43,14 @@ jobs:
         # to WebAssembly SIMD (emscripten -mfpu=neon translates the NEON intrinsics); simdall: also
         # -msimd128 for the whole core; verify: simd with the GPU's own check that every SIMD span
         # equals the table path (PSX_TEXSPAN_VERIFY, measurement only); *prof: function names kept.
-        opt: [simd, simdall, verify, simdprof]
+        # inl: the CPU interpreter's INLINE helpers forced inline (psx_cpu.c); cpuo3: psx_cpu.c and
+        # psx_vidhrdw.c at -O3; inlo3: both.
+        opt: [inl, cpuo3, inlo3]
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full >/dev/null
       - name: Cache emsdk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: emsdk
           key: emsdk-${{ env.EMSDK_VERSION }}
@@ -72,6 +74,8 @@ jobs:
           # NEON only where the core has NEON code written for it: libretro-common's NEON paths
           # call ARM assembly that a WebAssembly build does not have.
           case "$OPT" in simd*|verify*) printf '\nsrc/vidhrdw/psx_vidhrdw.o: CFLAGS += -msimd128 -mfpu=neon\n' >> Makefile;; esac
+          case "$OPT" in inl*) printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += "-DINLINE=inline __attribute__((always_inline))"\n' >> Makefile;; esac
+          case "$OPT" in cpuo3|inlo3) printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += -O3\nsrc/vidhrdw/psx_vidhrdw.o: CFLAGS += -O3\n' >> Makefile;; esac
           case "$OPT" in verify*)
             printf 'src/vidhrdw/psx_vidhrdw.o: CFLAGS += -DPSX_TEXSPAN_VERIFY\n' >> Makefile
             # report progress in the browser console (the check itself exits on the first mismatch)
