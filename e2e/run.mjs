@@ -1011,6 +1011,14 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
   await waitStatus(page, /^Duraklatıldı/);
   assert.equal(await page.evaluate(() => document.querySelector('#fullscreen-game')), null, 'no fullscreen item: the TV app is always full screen');
+  // A notice shown while the menu is open sits beside the menu, over the picture.
+  assert.ok(await page.evaluate(() => {
+    const el = document.querySelector('#player-notice'); const wasHidden = el.hidden; const text = el.textContent;
+    el.hidden = false; if (wasHidden) el.firstElementChild.textContent = 'Hız payı 0,6× (35 kare/sn) · Yetersiz · oyun yavaşlar';
+    const notice = el.getBoundingClientRect(), menu = document.querySelector('#player-menu, .player-menu').getBoundingClientRect();
+    el.hidden = wasHidden; if (wasHidden) el.firstElementChild.textContent = text;
+    return notice.left >= menu.right && notice.right <= innerWidth;
+  }), 'the notice does not cover the menu');
   await page.keyboard.press('ArrowDown');
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'quick-save', 'the remote moves in the menu');
   assert.ok(await page.evaluate(() => window.__tv.keepOn.at(-1) === false), 'the screen may sleep while paused');

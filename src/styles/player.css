@@ -224,3 +224,6 @@ html.player-open, html.player-open body { overflow: hidden; }
 .player.tv #bar-fullscreen, .player.tv .arcade-chip, .player.tv #player-close { display: none; }
 .player.tv .player-menu { padding-left: max(16px, var(--tv-x, 48px)); padding-top: max(18px, var(--tv-y, 27px)); padding-bottom: var(--tv-y, 27px); width: min(400px, 46vw); }
 .player.tv .player-notice { top: calc(var(--tv-y, 27px) + 56px); }
+/* With the side menu open, a notice sits over the picture beside it, not over the menu. */
+.player:not(.touch-play).menu-open .player-notice { left: calc(50% + min(340px, 86vw) / 2); max-width: calc(100% - min(340px, 86vw) - 24px); }
+.player.tv.menu-open .player-notice { left: calc(50% + min(400px, 46vw) / 2); max-width: calc(100% - min(400px, 46vw) - 24px); }
