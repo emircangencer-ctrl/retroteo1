@@ -97,7 +97,7 @@ test('installing stores the self-hosted runtime and default cores from the build
 test('a runtime file that fails to download does not block installing the app shell', async () => {
   const worker = createServiceWorkerHarness({ failing: new Set(['/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data']) });
   await worker.install();
-  assert.ok(worker.stores.get('retroplay-shell-v13').has(`${ORIGIN}/index.html`));
+  assert.ok(worker.stores.get('retroplay-shell-v14').has(`${ORIGIN}/index.html`));
   assert.ok(!worker.stores.get('retroplay-emulatorjs-4.2.3-v1').has(`${ORIGIN}/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data`));
 });
 

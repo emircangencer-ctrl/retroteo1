@@ -32,3 +32,39 @@ test('the sharp shader is a complete RetroArch GLSL shader for WebGL1 and WebGL2
   assert.match(glsl, /__VERSION__ >= 130/);
   assert.match(glsl, /floor\(OutputSize \/ InputSize\)/);
 });
+
+import { DISPLAY_SCALES, DISPLAY_FILTERS, normalizeDisplay, displayLabel, displayShader, displayStart, loadDisplay, storeDisplay, DISPLAY_SETTINGS_KEY, DISPLAY_MODE_STORAGE_KEY } from '../src/display-modes.js';
+import { buildEmulatorDocument } from '../src/emulatorjs-nes-player.js';
+
+const memoryStorage = (initial = {}) => { const map = new Map(Object.entries(initial)); return { getItem: k => (map.has(k) ? map.get(k) : null), setItem: (k, v) => map.set(k, String(v)), map }; };
+
+test('Faz 2: scaling and screen filter are chosen separately; the earlier single mode still reads', () => {
+  assert.deepEqual(Object.keys(DISPLAY_SCALES), ['sharp', 'pixel', 'integer']);
+  assert.deepEqual(Object.keys(DISPLAY_FILTERS), ['none', 'crt', 'lcd']);
+  assert.deepEqual(normalizeDisplay('crt'), { scale: 'sharp', filter: 'crt' });
+  assert.deepEqual(normalizeDisplay('integer'), { scale: 'integer', filter: 'none' });
+  assert.deepEqual(normalizeDisplay(null), { scale: 'sharp', filter: 'none' });
+  assert.deepEqual(normalizeDisplay({ scale: 'pixel', filter: 'bogus' }), { scale: 'pixel', filter: 'none' });
+  assert.equal(displayLabel({ scale: 'sharp', filter: 'lcd' }), 'Keskin · LCD');
+  assert.equal(displayShader({ scale: 'pixel', filter: 'none' }), 'disabled');
+  assert.equal(displayShader({ scale: 'integer', filter: 'crt' }), 'crt-easymode.glslp', 'a filter brings its own sampling');
+  assert.deepEqual(displayStart({ scale: 'integer', filter: 'lcd' }), { shader: 'retroplay-lcd', retroarchConfig: { video_scale_integer: 'true', video_scale_integer_axis: '1' } });
+  assert.deepEqual(displayStart({ scale: 'sharp', filter: 'none' }).retroarchConfig, { video_scale_integer: 'false' });
+});
+
+test('the display choice is stored under its own key and falls back to the earlier one', () => {
+  assert.deepEqual(loadDisplay(memoryStorage({ [DISPLAY_MODE_STORAGE_KEY]: 'integer' })), { scale: 'integer', filter: 'none' });
+  const storage = memoryStorage({ [DISPLAY_MODE_STORAGE_KEY]: 'integer' });
+  storeDisplay({ scale: 'pixel', filter: 'crt' }, storage);
+  assert.equal(storage.map.get(DISPLAY_SETTINGS_KEY), '{"scale":"pixel","filter":"crt"}');
+  assert.deepEqual(loadDisplay(storage), { scale: 'pixel', filter: 'crt' });
+  assert.deepEqual(loadDisplay({ getItem: () => { throw new Error('denied'); } }), { scale: 'sharp', filter: 'none' });
+});
+
+test('the LCD shader is registered with the emulator and may be chosen', () => {
+  assert.ok(RETROPLAY_SHADERS['retroplay-lcd'].resources[0].value.includes('mix(0.62, 1.0, line)'));
+  assert.ok(!RETROPLAY_SHADERS['retroplay-lcd'].resources[0].value.includes('FragColor = vec4(COMPAT_TEXTURE(Texture, (texelFloored + f) / TextureSize).rgb, 1.0);'), 'the grid replaced the plain output');
+  const doc = buildEmulatorDocument('blob:x', 'Game', 'nes', 1, 'nestopia', { shader: 'retroplay-lcd', baseUrl: 'https://example.test/' });
+  assert.match(doc, /enableShader\("retroplay-lcd"\)/);
+  assert.match(buildEmulatorDocument('blob:x', 'Game', 'nes', 1, 'nestopia', { shader: 'evil.glslp', baseUrl: 'https://example.test/' }), /enableShader\("disabled"\)/);
+});

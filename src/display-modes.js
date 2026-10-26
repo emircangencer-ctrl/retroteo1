@@ -89,10 +89,98 @@ void main() {
 #endif
 `;
 
+// LCD: the sharp sampling above plus a thin dark grid between source pixels, like the screen of a
+// handheld. The grid fades out when a source pixel is under 3 screen pixels (it would only darken).
+const LCD_GRID_GLSL = SHARP_BILINEAR_GLSL
+  .replace('// RetroPlay sharp bilinear: integer prescale + bilinear for the remaining fraction.', '// RetroPlay LCD: sharp bilinear sampling and a thin grid between source pixels.')
+  .replace(
+    '  FragColor = vec4(COMPAT_TEXTURE(Texture, (texelFloored + f) / TextureSize).rgb, 1.0);',
+    [
+      '  vec3 color = COMPAT_TEXTURE(Texture, (texelFloored + f) / TextureSize).rgb;',
+      '  vec2 screenScale = OutputSize / InputSize;',
+      '  vec2 edge = min(s, 1.0 - s) * screenScale;',
+      '  float line = min(smoothstep(0.0, 0.9, edge.x), smoothstep(0.0, 0.9, edge.y));',
+      '  float strength = clamp((min(screenScale.x, screenScale.y) - 2.0) / 2.0, 0.0, 1.0);',
+      '  FragColor = vec4(color * mix(1.0, mix(0.62, 1.0, line), strength), 1.0);'
+    ].join('\n')
+  );
+
 /** Extra shaders registered with EmulatorJS (EJS_shaders); its built-in CRT shaders stay available. */
 export const RETROPLAY_SHADERS = Object.freeze({
   'retroplay-sharp': {
     shader: { type: 'text', value: 'shaders = 1\nshader0 = "retroplay-sharp.glsl"\nfilter_linear0 = true\nscale_type_0 = viewport\n' },
     resources: [{ name: 'retroplay-sharp.glsl', type: 'text', value: SHARP_BILINEAR_GLSL }]
+  },
+  'retroplay-lcd': {
+    shader: { type: 'text', value: 'shaders = 1\nshader0 = "retroplay-lcd.glsl"\nfilter_linear0 = true\nscale_type_0 = viewport\n' },
+    resources: [{ name: 'retroplay-lcd.glsl', type: 'text', value: LCD_GRID_GLSL }]
   }
 });
+
+// ---- Faz 2: scaling and screen filter are chosen separately ---------------------------------------
+// Settings → Görüntü offers "Ölçekleme" (sharp / pixel / integer) and "Ekran filtresi" (none / CRT /
+// LCD). A filter brings its own sampling, so it replaces the scaling shader; integer scaling still
+// applies (it is a RetroArch setting, not a shader).
+
+export const DISPLAY_SETTINGS_KEY = 'retroplay-display';
+
+export const DISPLAY_SCALES = Object.freeze({
+  sharp: Object.freeze({ label: 'Keskin', hint: 'Her oyun pikseli eşit büyüklükte çizilir; kenarlar çok hafif yumuşatılır. Önerilen.', shader: 'retroplay-sharp', integer: false }),
+  pixel: Object.freeze({ label: 'Piksel', hint: 'En sert kenarlar; ekrana tam oturmayan ölçekte bazı pikseller bir ekran pikseli geniş olabilir.', shader: 'disabled', integer: false }),
+  integer: Object.freeze({ label: 'Tam sayı', hint: 'Kusursuz eşit pikseller; kenarlarda siyah boşluk kalır. Oyun açılırken uygulanır.', shader: 'disabled', integer: true })
+});
+
+export const DISPLAY_FILTERS = Object.freeze({
+  none: Object.freeze({ label: 'Yok', hint: 'Oyunun kendi görüntüsü.', shader: null }),
+  crt: Object.freeze({ label: 'CRT', hint: 'Tüplü televizyon: tarama çizgileri ve hafif maske.', shader: 'crt-easymode.glslp' }),
+  lcd: Object.freeze({ label: 'LCD', hint: 'El konsolu ekranı: pikseller arasında ince ızgara (büyük ekranda belirginleşir).', shader: 'retroplay-lcd' })
+});
+
+const own = (object, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(object, key);
+const LEGACY = Object.freeze({ sharp: ['sharp', 'none'], pixel: ['pixel', 'none'], crt: ['sharp', 'crt'], integer: ['integer', 'none'] });
+
+/** { scale, filter } from a stored object or from the single mode stored by earlier versions. */
+export function normalizeDisplay(value) {
+  if (typeof value === 'string' || value === null || value === undefined) {
+    const [scale, filter] = LEGACY[normalizeDisplayMode(value)];
+    return { scale, filter };
+  }
+  const raw = typeof value === 'object' ? value : {};
+  return { scale: own(DISPLAY_SCALES, raw.scale) ? raw.scale : 'sharp', filter: own(DISPLAY_FILTERS, raw.filter) ? raw.filter : 'none' };
+}
+
+export function displayLabel(value) {
+  const { scale, filter } = normalizeDisplay(value);
+  return filter === 'none' ? DISPLAY_SCALES[scale].label : `${DISPLAY_SCALES[scale].label} · ${DISPLAY_FILTERS[filter].label}`;
+}
+
+export function displayShader(value) {
+  const { scale, filter } = normalizeDisplay(value);
+  return DISPLAY_FILTERS[filter].shader || DISPLAY_SCALES[scale].shader;
+}
+
+/** Settings handed to the emulator when a game starts. */
+export function displayStart(value) {
+  const { scale } = normalizeDisplay(value);
+  return {
+    shader: displayShader(value),
+    retroarchConfig: DISPLAY_SCALES[scale].integer ? { video_scale_integer: 'true', video_scale_integer_axis: '1' } : { video_scale_integer: 'false' }
+  };
+}
+
+/** Reads the display choice: the Faz 2 key first, then the single mode of earlier versions. */
+export function loadDisplay(storage = globalThis.localStorage) {
+  try {
+    const stored = storage?.getItem(DISPLAY_SETTINGS_KEY);
+    if (stored) return normalizeDisplay(JSON.parse(stored));
+    return normalizeDisplay(storage?.getItem(DISPLAY_MODE_STORAGE_KEY));
+  } catch {
+    return normalizeDisplay(null);
+  }
+}
+
+export function storeDisplay(value, storage = globalThis.localStorage) {
+  const display = normalizeDisplay(value);
+  try { storage?.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify(display)); } catch {}
+  return display;
+}

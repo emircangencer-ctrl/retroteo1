@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { buildRuntime, defaultCacheDir } from './scripts/emulatorjs-runtime.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -65,7 +66,7 @@ export default defineConfig({
     // Used for backup metadata so exported files name the real app version.
     __APP_VERSION__: JSON.stringify(pkg.version)
   },
-  plugins: [emulatorJsSelfHost()],
+  plugins: [svelte(), emulatorJsSelfHost()],
   build: {
     outDir: 'dist',
     emptyOutDir: true

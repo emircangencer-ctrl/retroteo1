@@ -1,4 +1,4 @@
-import { RETROPLAY_SHADERS, DISPLAY_MODES } from './display-modes.js';
+import { RETROPLAY_SHADERS, DISPLAY_MODES, DISPLAY_SCALES, DISPLAY_FILTERS } from './display-modes.js';
 // The runtime is served from RetroPlay's own origin (see scripts/emulatorjs-runtime.mjs). The build
 // injects the hashed bundle names; tests and unbundled use fall back to the fixed data path.
 /* global __EJS_RUNTIME__ */
@@ -22,7 +22,7 @@ const CORES_BY_SYSTEM = Object.freeze({
   mame: new Set(['mame2003_plus'])
 });
 const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
-const ALLOWED_SHADERS = new Set(Object.values(DISPLAY_MODES).map(mode => mode.shader));
+const ALLOWED_SHADERS = new Set([...Object.values(DISPLAY_MODES), ...Object.values(DISPLAY_SCALES), ...Object.values(DISPLAY_FILTERS)].map(mode => mode.shader).filter(Boolean));
 const safeShader = name => (ALLOWED_SHADERS.has(name) ? name : 'disabled');
 const SAFE_CFG_KEY = /^[a-z0-9_]{1,64}$/;
 const SAFE_OPTION_KEY = /^[A-Za-z0-9_-]{1,64}$/;
@@ -105,11 +105,11 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay EmulatorJS runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsPlayer {
-  constructor(container, { onError = () => {}, onWarning = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled' } = {}) {
+  constructor(container, { onError = () => {}, onWarning = () => {}, onHotkey = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled' } = {}) {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
-    this.container=container; this.onError=onError; this.onWarning=onWarning; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
+    this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>this.releaseAllButtons(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
@@ -284,6 +284,38 @@ export class EmulatorJsPlayer {
     try { emu.enableShader(safeShader(name)); return true; }
     catch (error) { try { this.onWarning(`Görüntü modu uygulanamadı: ${error?.message || error}`); } catch {} return false; }
   }
+  /** Sound volume 0–1 of the running game. */
+  setVolume(value) {
+    const emu = this.frame?.contentWindow?.EJS_emulator;
+    const volume = Math.min(1, Math.max(0, Number(value)));
+    if (!this.started || this.destroyed || typeof emu?.setVolume !== 'function' || !Number.isFinite(volume)) return false;
+    // EmulatorJS re-applies emu.volume when the game resumes, so both are set.
+    try { emu.volume = volume; emu.setVolume(volume); return true; } catch { return false; }
+  }
+  /**
+   * A PNG of the current frame as the core drew it (RetroArch screenshot, game resolution), or
+   * null. The core writes it from its main loop, so a paused game produces none.
+   */
+  async screenshot({ timeout = 1500 } = {}) {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (!this.started || this.destroyed || typeof gm?.functions?.screenshot !== 'function' || !gm.FS) return null;
+    const path = '/screenshot.png';
+    try { gm.FS.unlink(path); } catch {}
+    try { gm.functions.screenshot(); } catch { return null; }
+    const end = performance.now() + timeout;
+    while (performance.now() < end) {
+      await new Promise(resolve => window.setTimeout(resolve, 40));
+      if (this.destroyed || this.frame?.contentWindow?.EJS_emulator?.gameManager !== gm) return null;
+      try {
+        if (gm.FS.stat(path)?.size > 0) {
+          const data = gm.FS.readFile(path);
+          try { gm.FS.unlink(path); } catch {}
+          return data?.length ? new Blob([new Uint8Array(data)], { type: 'image/png' }) : null;
+        }
+      } catch {}
+    }
+    return null;
+  }
   /** Soft-resets the running game; battery-backed RAM is preserved by the core. */
   restartGame() {
     const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
@@ -296,6 +328,12 @@ export class EmulatorJsPlayer {
     if (event.altKey || event.metaKey || (event.ctrlKey && event.code !== 'ControlRight')) return;
     const targetTag = event.target?.tagName?.toLowerCase();
     if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || event.target?.isContentEditable) return;
+    if (event.code === 'Escape' && pressed && !event.repeat && this.frameWindow && event.currentTarget === this.frameWindow) {
+      // Inside the emulator frame the page never sees Escape; hand it to the app (menu).
+      event.preventDefault();
+      try { this.onHotkey('Escape'); } catch {}
+      return;
+    }
     const name = this.keyToButton[event.code] || (event.key === 'Control' && event.location === 2 ? 'BUTTON_SELECT' : null);
     if (!name) return;
     event.preventDefault();

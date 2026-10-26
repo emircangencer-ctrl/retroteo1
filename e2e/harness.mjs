@@ -43,23 +43,82 @@ export async function newPage(browser, base, { mobile = false, serviceWorkers = 
   return { context, page, logs };
 }
 
-export async function importFile(page, file) {
-  await page.evaluate(() => document.querySelector('[data-action="add"]').click());
-  await page.setInputFiles('#modal-file-input', file);
+/** Opens Oyun ekle, chooses the file(s), confirms the review and returns the result lines. */
+export async function importFile(page, file, { folder = false } = {}) {
+  await page.evaluate(() => { location.hash = '#/import'; });
+  const input = folder ? '#import-folder-input' : '#import-file-input';
+  await page.waitForSelector(input, { state: 'attached' });
+  await page.setInputFiles(input, file);
+  await page.waitForFunction(() => Boolean(document.querySelector('#import-commit')) || /Tamamlandı/.test(document.querySelector('#import-results')?.textContent || ''), null, { timeout: 30000 });
+  const review = await page.evaluate(() => document.querySelector('#import-review')?.textContent || '');
+  const canCommit = await page.evaluate(() => { const b = document.querySelector('#import-commit'); return Boolean(b && !b.disabled); });
+  if (!canCommit) return `REVIEW-ONLY ${review}`;
+  await page.evaluate(() => document.querySelector('#import-commit').click());
   await page.waitForFunction(() => /Tamamlandı/.test(document.querySelector('#import-results')?.textContent || ''), null, { timeout: 30000 });
-  const text = await page.evaluate(() => document.querySelector('#import-results').textContent);
-  await page.evaluate(() => document.querySelector('#modal-close').click());
-  return text;
+  return page.evaluate(() => document.querySelector('#import-results').textContent);
 }
 
-export async function play(page, titleIncludes) {
-  await page.evaluate(() => document.querySelector('[data-view="library"]').click());
+/** The review list items as { name, tone, headline, selectable, selected }. */
+export function reviewItems(page) {
+  return page.evaluate(() => [...document.querySelectorAll('#import-review .item')].map(item => ({
+    name: item.querySelector('.name')?.textContent || '',
+    tone: item.dataset.tone,
+    kind: item.dataset.kind,
+    headline: item.querySelector('.headline')?.textContent || '',
+    note: item.querySelector('.note')?.textContent || '',
+    selectable: !item.querySelector('input').disabled,
+    selected: item.querySelector('input').checked
+  })));
+}
+
+/** Answers the in-app confirmation dialog. */
+export async function answerDialog(page, ok = true) {
+  await page.waitForSelector(ok ? '#dialog-confirm' : '#dialog-cancel', { timeout: 5000 });
+  await page.evaluate(id => document.querySelector(id).click(), ok ? '#dialog-confirm' : '#dialog-cancel');
+}
+
+/** Id of the library game whose title contains `titleIncludes`. */
+export async function gameId(page, titleIncludes) {
+  await page.evaluate(() => { location.hash = '#/library'; });
+  await page.waitForSelector('#library-games .game-card', { timeout: 10000 });
   const id = await page.evaluate(title => [...document.querySelectorAll('#library-games .game-card')]
-    .find(card => card.querySelector('.game-title')?.textContent.includes(title))?.querySelector('[data-play]')?.dataset.play, titleIncludes);
-  if (!id) throw new Error(`no playable card for ${titleIncludes}`);
-  await page.evaluate(gameId => document.querySelector(`#library-games [data-play="${gameId}"]`).click(), id);
-  await page.waitForFunction(() => /Çalışıyor|Başlatılamadı|engellendi|durduruldu|açamadı/.test(document.querySelector('#player-status')?.textContent || ''), null, { timeout: 90000 });
-  return page.evaluate(() => ({ status: document.querySelector('#player-status').textContent, error: document.querySelector('#player-error').textContent }));
+    .find(card => card.querySelector('.game-title')?.textContent.includes(title))?.dataset.gameId, titleIncludes);
+  if (!id) throw new Error(`no library card for ${titleIncludes}`);
+  return id;
+}
+
+/** Opens a game's page. */
+export async function openGame(page, titleIncludes) {
+  const id = await gameId(page, titleIncludes);
+  await page.evaluate(gid => { location.hash = `#/game/${encodeURIComponent(gid)}`; }, id);
+  await page.waitForSelector(`.detail[data-game-id="${id}"]`, { timeout: 10000 });
+  return id;
+}
+
+/** The status line and error/explanation shown in the player. */
+export function playerState(page) {
+  return page.evaluate(() => ({
+    status: document.querySelector('#player-status')?.textContent || '',
+    error: document.querySelector('#player-error')?.textContent || document.querySelector('.player-blocked p')?.textContent || ''
+  }));
+}
+
+export async function waitForPlayer(page, timeout = 90000) {
+  await page.waitForFunction(() => /Çalışıyor|Başlatılamadı|Başlatılmadı|engellendi|durduruldu|açamadı|Onayın bekleniyor/.test(document.querySelector('#player-status')?.textContent || ''), null, { timeout });
+  return playerState(page);
+}
+
+/** Starts a game from its page ("Oyna" / "Devam et"). */
+export async function play(page, titleIncludes, { button = '[data-play]' } = {}) {
+  await openGame(page, titleIncludes);
+  await page.evaluate(selector => document.querySelector(`.detail ${selector}`).click(), button);
+  return waitForPlayer(page);
+}
+
+/** Leaves the game with the app's own button and waits until the player is gone. */
+export async function closeGame(page) {
+  await page.evaluate(() => document.querySelector('#player-close').click());
+  await page.waitForFunction(() => document.querySelector('#player-modal').classList.contains('hidden'), null, { timeout: 10000 });
 }
 
 export function appBatterySaves(page) {
@@ -111,7 +170,20 @@ export function appSaveStates(page) {
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const read = request.result.transaction('saveStates').objectStore('saveStates').getAll();
-      read.onsuccess = () => { resolve(read.result.map(state => ({ id: state.id, slot: state.slot, coreId: state.coreId, byteLength: state.byteLength }))); request.result.close(); };
+      read.onsuccess = () => { resolve(read.result.map(state => ({ id: state.id, slot: state.slot, coreId: state.coreId, byteLength: state.byteLength, createdAt: state.createdAt, thumb: state.thumb instanceof Blob ? state.thumb.size : 0, thumbType: state.thumb?.type || '' }))); request.result.close(); };
+      read.onerror = () => reject(read.error);
+    };
+  }));
+}
+
+/** Library records without their ROM bytes. */
+export function appGames(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('retroplay-local-v1');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const read = request.result.transaction('games').objectStore('games').getAll();
+      read.onsuccess = () => { resolve(read.result.map(({ blob, ...rest }) => ({ ...rest, hasBlob: blob instanceof Blob }))); request.result.close(); };
       read.onerror = () => reject(read.error);
     };
   }));

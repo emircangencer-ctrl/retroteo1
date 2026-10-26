@@ -1,6 +1,6 @@
 {
   "name": "retroplay-pwa-stage06",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,9 +8,18 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/app.js && node --check src/nes-rom.js && node --check src/zip-rom.js && node --check src/emulator-systems.js && node --check src/save-data.js && node --check src/emulatorjs-nes-player.js && node --check src/gamepad-status.js && node --check src/fullscreen.js && node --check src/google-drive.js && node --check src/platforms.js && node --check src/library-backup.js && node --check public/service-worker.js && node --check src/save-sync.js && node --check src/import-match.js && node --check src/rom-detect.js && node --check src/sw-update.js && node --check src/display-modes.js && node --check src/performance-meter.js && node --check src/arcade.js && node --check src/touch-layout.js && node --check src/touch-controller.js && node --check src/gamepad-input.js && node --check scripts/emulatorjs-runtime.mjs"
+    "check": "node --check src/nes-rom.js && node --check src/zip-rom.js && node --check src/emulator-systems.js && node --check src/save-data.js && node --check src/emulatorjs-nes-player.js && node --check src/gamepad-status.js && node --check src/fullscreen.js && node --check src/google-drive.js && node --check src/platforms.js && node --check src/library-backup.js && node --check public/service-worker.js && node --check src/save-sync.js && node --check src/import-match.js && node --check src/rom-detect.js && node --check src/sw-update.js && node --check src/display-modes.js && node --check src/performance-meter.js && node --check src/arcade.js && node --check src/touch-layout.js && node --check src/touch-controller.js && node --check src/gamepad-input.js && node --check scripts/emulatorjs-runtime.mjs && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings"
   },
   "devDependencies": {
+    "@fontsource-variable/archivo": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "typescript": "^5.9.3",
     "vite": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

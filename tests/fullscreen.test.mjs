@@ -47,74 +47,37 @@ test('supports WebKit-prefixed fullscreen APIs and reports failures', async () =
 });
 
 
-test('player UI exposes fullscreen and updates after browser fullscreen changes', async () => {
-  const [html, app, styles] = await Promise.all([
-    readFile(new URL('../index.html', import.meta.url), 'utf8'),
-    readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
-  ]);
-  assert.match(html, /id="fullscreen-game"[^>]*aria-label="Oyunu tam ekran yap"/);
-  assert.match(html, /id="immersive-exit"[^>]*aria-label="Tam ekrandan çık"/);
-  assert.match(html, /id="fullscreen-game"[^>]*>⛶ Tam ekran<\/button>/);
-  assert.match(app, /document\.addEventListener\('fullscreenchange', onChange\)/);
-  assert.match(app, /activeEmulator\?\.fitInParent\?\.\(\)/);
-  assert.match(app, /setFullscreenFallback\(true\)/);
-  assert.match(app, /\$\('#immersive-exit'\)\?\.addEventListener\('click', toggleGameFullscreen\)/);
-  assert.match(styles, /#player-modal:not\(\.touch-play\):fullscreen \.player-header[\s\S]*?display:none!important/);
-  // Touch devices use the handheld layout (picture + pad positioned from touch-layout.js) in and out of fullscreen.
-  assert.match(styles, /#player-modal\.touch-play \.player-screen-frame\{position:absolute;left:var\(--scr-x\);top:var\(--scr-y\)/);
-  assert.match(styles, /#player-modal\.touch-play #touch-controls\{display:block;position:absolute;inset:0/);
-  assert.match(styles, /\.immersive-exit/);
-  assert.match(styles, /#player-modal:not\(\.touch-play\):fullscreen/);
-  assert.match(styles, /\.player-backdrop\.is-immersive-fallback/);
+const read = path => readFile(new URL(path, import.meta.url), 'utf8');
+
+test('the player offers fullscreen in its menu and bar, follows browser fullscreen changes and re-lays out', async () => {
+  const [menu, bar, session] = await Promise.all([read('../src/player/PauseMenu.svelte'), read('../src/player/Player.svelte'), read('../src/player/session.svelte.ts')]);
+  assert.match(menu, /id="fullscreen-game"[^>]*aria-pressed=\{player\.fullscreen \|\| player\.fullscreenFallback\}/);
+  assert.match(menu, /Tam ekrandan çık/);
+  assert.match(bar, /id="bar-fullscreen"/);
+  assert.match(session, /document\.addEventListener\('fullscreenchange', onFullscreen\)/);
+  assert.match(session, /document\.addEventListener\('webkitfullscreenchange', onFullscreen\)/);
+  assert.match(session, /this\.fitInParent|fitInParent\?\.\(\)/);
 });
 
-
-test('fullscreen requests hide browser navigation UI when supported and rejected API uses visual fallback', async () => {
-  const documentLike = { fullscreenElement: null };
-  let options;
-  const element = {
-    async requestFullscreen(value) {
-      options = value;
-      documentLike.fullscreenElement = element;
-    }
-  };
-  const entered = await enterFullscreen(element, documentLike);
-  assert.equal(entered.entered, true);
-  assert.deepEqual(options, { navigationUI: 'hide' });
-  const [app, styles] = await Promise.all([
-    readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
-  ]);
-  assert.match(app, /setFullscreenFallback\(true\);[\s\S]*?oyun alanı genişletilmiş görünümde açıldı/);
-  assert.match(styles, /#player-modal:not\(\.touch-play\):fullscreen #player-screen iframe[\s\S]*?height:\s*100%\s*!important/);
-  assert.match(styles, /#player-modal\.touch-play #touch-controls\{[^}]*touch-action:none/);
-  assert.match(app, /!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)/);
-  assert.match(app, /Başlatılmadı · doğrulanmamış döküm/);
-  assert.doesNotMatch(app, /compatibility-fallback|useSmb3FceummFallback/);
-  assert.match(app, /if \(!isSuperMarioBros3LaunchAllowed\(smb3Diagnostic\)\)/);
-  assert.match(app, /coreId: candidate\.coreId/);
-  assert.match(app, /\$\('#touch-controls'\)\.style\.display = 'none'/);
-  assert.match(app, /\$\('#touch-controls'\)\.style\.display = ''/);
-  assert.match(app, /\$\('#player-screen'\)\.style\.display = 'none'/);
-  assert.match(app, /\$\('#player-screen'\)\.style\.display = ''/, 'the emulator screen is restored for the next game after a blocked ROM');
-  assert.doesNotMatch(app, /const proceed = confirm\(/);
+test('touch devices keep the handheld layout in fullscreen; desktop fills the window with the picture', async () => {
+  const styles = await read('../src/styles/player.css');
+  assert.match(styles, /\.player\.touch-play \.player-screen-frame \{ position: absolute; left: var\(--scr-x\); top: var\(--scr-y\)/);
+  assert.match(styles, /\.player\.touch-play #touch-controls \{ display: block; position: absolute; inset: 0; z-index: 20; touch-action: none/);
+  assert.match(styles, /\.player:not\(\.touch-play\) \.player-screen-frame \{ position: relative; width: min\(100cqw, 100cqh \* 4 \/ 3\); aspect-ratio: 4 \/ 3/);
+  assert.match(styles, /\.player:not\(\.touch-play\):fullscreen, \.player\.is-fallback:not\(\.touch-play\)/);
+  assert.match(styles, /\.player\.hidden \{ display: none !important; \}/, 'a hidden player never covers the app, whatever layout it had');
 });
 
+test('a browser that rejects or ignores fullscreen gets the wide fallback on desktop and a short notice on phones', async () => {
+  const session = await read('../src/player/session.svelte.ts');
+  assert.match(session, /if \(!result\.supported\) \{[\s\S]*?if \(this\.touchPlay\) \{ this\.showNotice\('Bu tarayıcı tam ekranı desteklemiyor'\); return; \}[\s\S]*?this\.#setFallback\(true\)/);
+  assert.match(session, /if \(result\.error \|\| !result\.entered\) \{[\s\S]*?Tarayıcı tam ekrana izin vermedi[\s\S]*?this\.#setFallback\(true\)/);
+});
 
-test('fullscreen change tells the emulator iframe to hide its own menus and restore them on exit', async () => {
-  const [app, player] = await Promise.all([
-    readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/emulatorjs-nes-player.js', import.meta.url), 'utf8')
-  ]);
-  assert.match(app, /setImmersive\?\.\(isFullscreen\(document, \$\('#player-modal'\)\) \|\| fullscreenFallback\)/);
+test('RetroPlay draws its own bar and menu: the emulator\'s menus stay hidden for every game', async () => {
+  const [session, player] = await Promise.all([read('../src/player/session.svelte.ts'), read('../src/emulatorjs-nes-player.js')]);
+  assert.match(session, /player\.setImmersive\?\.\(true\)/);
   assert.match(player, /setImmersive\(active\)/);
   assert.match(player, /postMessage\(\{source:'retroplay-app',type:'immersive',active:Boolean\(active\)\}/);
-});
-
-
-test('fullscreen handler falls back if the API promise resolves without entering fullscreen', async () => {
-  const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
-  assert.match(app, /if \(result\.error \|\| !result\.entered\)/);
-  assert.match(app, /result\.error[\s\S]*?Tarayıcı tam ekran geçişini doğrulamadı/);
+  assert.match(player, /html\.retroplay-immersive \.ejs_menu/);
 });

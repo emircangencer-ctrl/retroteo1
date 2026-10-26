@@ -61,3 +61,66 @@ test('the poller reports presses and releases once, unions controllers, and open
   pads = [null, undefined];
   assert.deepEqual(poller.poll(), { pressed: [], released: [] });
 });
+
+import { MENU_COMBO_MS } from '../src/gamepad-input.js';
+
+function clockPoller(getPads) {
+  let now = 0;
+  const changes = [];
+  let menus = 0;
+  const poller = new GamepadPoller({ getGamepads: getPads, onChange: (p, r) => changes.push(`+${p.join(',')} -${r.join(',')}`), onMenu: () => menus++, requestFrame: () => 1, cancelFrame: () => {}, now: () => now });
+  return { poller, changes, menus: () => menus, at: t => { now = t; return poller.poll(); } };
+}
+
+test('Select + Start together open the menu and never reach the game; alone they arrive a moment later', () => {
+  let pads = [pad()];
+  const p = clockPoller(() => pads);
+  pads = [pad({ pressed: [9] })];
+  p.at(0);
+  p.at(MENU_COMBO_MS / 2);
+  assert.deepEqual(p.changes, [], 'Start waits for a possible Select');
+  p.at(MENU_COMBO_MS + 1);
+  assert.deepEqual(p.changes, ['+BUTTON_START -'], 'then reaches the game');
+  pads = [pad()];
+  p.at(200);
+  assert.deepEqual(p.changes.at(-1), '+ -BUTTON_START');
+  // Combination: Select first, Start 40 ms later.
+  pads = [pad({ pressed: [8] })];
+  p.at(300);
+  pads = [pad({ pressed: [8, 9] })];
+  p.at(340);
+  p.at(500);
+  assert.equal(p.menus(), 1);
+  assert.equal(p.changes.length, 2, 'neither button was pressed in the game');
+  pads = [pad()];
+  p.at(600);
+  pads = [pad({ pressed: [9] })];
+  p.at(700);
+  p.at(700 + MENU_COMBO_MS + 1);
+  assert.deepEqual(p.changes.at(-1), '+BUTTON_START -', 'Start works again after the combination');
+});
+
+test('a quick tap of Start (released before it was delivered) still reaches the game for a frame', () => {
+  let pads = [pad({ pressed: [9] })];
+  const p = clockPoller(() => pads);
+  p.at(0);
+  pads = [pad()];
+  p.at(40);
+  p.at(56);
+  assert.deepEqual(p.changes, ['+BUTTON_START -', '+ -BUTTON_START']);
+});
+
+test('buttons already held when polling starts (the one that closed the menu) wait for a release', () => {
+  let pads = [pad({ pressed: [1] })];
+  const p = clockPoller(() => pads);
+  p.poller.start();
+  p.at(0);
+  p.at(16);
+  assert.deepEqual(p.changes, [], 'held B is not pressed in the game');
+  pads = [pad()];
+  p.at(32);
+  pads = [pad({ pressed: [1] })];
+  p.at(48);
+  assert.deepEqual(p.changes, ['+BUTTON_A -'], 'a new press works');
+  p.poller.stop();
+});

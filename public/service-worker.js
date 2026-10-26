@@ -1,8 +1,8 @@
 // RetroPlay service worker.
 // The production build replaces the build ID below, so every release produces a new worker and
-// installed copies can offer "new version ready" (see registerSW in src/app.js).
+// installed copies can offer "new version ready" (see src/lib/app-state.svelte.ts).
 const BUILD_ID = '__RETROPLAY_BUILD_ID__';
-const CACHE_NAME = 'retroplay-shell-v13';
+const CACHE_NAME = 'retroplay-shell-v14';
 const RUNTIME_CACHE_NAME = 'retroplay-emulatorjs-4.2.3-v1';
 const CACHE_PREFIX = 'retroplay-shell-';
 const RUNTIME_CACHE_PREFIX = 'retroplay-emulatorjs-';
