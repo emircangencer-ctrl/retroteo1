@@ -86,8 +86,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The app's own code decides when a new APK is published: a site change reaches the TV
-          # without one, and an APK signed with another key would not install over the old one.
+          # The app's own code (and the address it opens: preview or main) decides when a new APK is
+          # published: a site change reaches the TV without one, and an APK signed with another key
+          # would not install over the old one.
           # Exception: once the TV_KEYSTORE_* secrets exist, an APK signed for one run is replaced
           # by the permanently signed one (a single reinstall); a permanent one is never replaced
           # by a per-run one.
@@ -100,7 +101,7 @@ jobs:
               echo "::warning title=TV release::tv-latest is signed with the permanent key and this build is not (TV_KEYSTORE_* secrets missing); not replaced."
               exit 0
             fi
-            if echo "$BODY" | grep -q "kaynak $SOURCE" && [ "$HAS_APK" = 1 ] && ! { [ "$TV_SIGNING" = stable ] && echo "$BODY" | grep -q "imza run"; }; then
+            if echo "$BODY" | grep -q "kaynak $SOURCE" && echo "$BODY" | grep -qF "açtığı site: $RETROPLAY_URL." && [ "$HAS_APK" = 1 ] && ! { [ "$TV_SIGNING" = stable ] && echo "$BODY" | grep -q "imza run"; }; then
               echo "::notice title=TV release::The app's code did not change; tv-latest keeps its APK."
               exit 0
             fi
