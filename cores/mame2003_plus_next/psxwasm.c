@@ -32,8 +32,16 @@
       C helpers), which the browser keeps in machine registers.
     - Jumps back to an earlier instruction of the same block (loops) go
       through a small dispatch loop (br_table over the jump targets).
-    - No chaining between blocks: a block returns the next pc to
-      jit_run, which looks up the next block.
+    - Blocks chain: a block that ends at a jump looks the next block up
+      in the cache itself and, when it is translated and fits in the
+      timeslice, continues there with a tail call (return_call_indirect);
+      otherwise it returns the next pc to jit_run. Browsers without tail
+      calls get plain returns.
+    - Blocks start where the interpreter arrives by a jump (or after a
+      block, or after an instruction a block cannot run), never in the
+      middle of straight code: a timeslice that ends inside a block makes
+      the interpreter run on to the next jump, instead of making the
+      middle of the block a block of its own.
 
     PSXJIT_VERIFY works as in psxjit.c: every block also runs through
     the interpreter from the same state and the results are compared.
@@ -41,6 +49,7 @@
 ***************************************************************************/
 
 #include <emscripten.h>
+#include <stddef.h>
 
 #define JIT_TABLE_BITS		18
 #define JIT_TABLE_SIZE		(1 << JIT_TABLE_BITS)
@@ -91,6 +100,18 @@ static int jit_code_present;
 static UINT32 jit_flushes;
 static UINT32 jit_live;				/* blocks with code since the last flush */
 static int jit_failed_logged;
+static int jit_tailcalls;			/* the browser has return_call_indirect: blocks chain */
+static UINT32 jit_prev_pc = 0xfffffff0;	/* the last pc jit_run left to the interpreter */
+static UINT32 jit_retry_pc = 0xffffffff;	/* where jit_run tries a block in straight code */
+
+#ifdef PSXWASM_STATS
+/* counts for measurement builds (Module.psxwasmCounters in the browser) */
+enum { JS_CALLS, JS_BOUNDARY, JS_COLD, JS_UNTRANS, JS_NOFIT, JS_EXIT0, JS_RAN, JS_JITINSTR, JS_INTERP, JS_CHAINED, JS_COUNT };
+static UINT32 jit_stat[ JS_COUNT ];
+#define JIT_STAT( n, v )	( jit_stat[ ( n ) ] += ( v ) )
+#else
+#define JIT_STAT( n, v )	do { } while( 0 )
+#endif
 
 static INLINE void mips_step( void );
 
@@ -122,6 +143,26 @@ EM_JS( void, psxwasm_note, ( int what ), {
 	var s = Module[ 'psxwasmStats' ] || ( Module[ 'psxwasmStats' ] = { compiled: 0, flushes: 0, invalidated: 0, failed: 0 } );
 	if( what == 0 ) s.compiled++; else if( what == 1 ) s.flushes++; else if( what == 2 ) s.invalidated++; else s.failed++;
 } );
+
+/* does the browser take tail calls (return_call_indirect)? */
+EM_JS( int, psxwasm_tailcalls, ( void ), {
+	try {
+		/* (module (type (func (result i32))) (table 1 funcref) (func (type 0) i32.const 0 return_call_indirect (type 0))) */
+		return WebAssembly.validate( new Uint8Array( [ 0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 127, 3, 2, 1, 0,
+			4, 4, 1, 112, 0, 1, 10, 9, 1, 7, 0, 65, 0, 19, 0, 0, 11 ] ) ) ? 1 : 0;
+	} catch( e ) {
+		return 0;
+	}
+} );
+
+#ifdef PSXWASM_STATS
+EM_JS( void, psxwasm_counters, ( const UINT32 *c, int n ), {
+	var names = [ 'calls', 'boundary', 'cold', 'untranslatable', 'nofit', 'exit0', 'ran', 'jitInstr', 'interpInstr', 'chained' ];
+	var o = {};
+	for( var i = 0; i < n; i++ ) o[ names[ i ] ] = HEAPU32[ ( c >> 2 ) + i ];
+	Module[ 'psxwasmCounters' ] = o;
+} );
+#endif
 
 /* frees a function table index from psxwasm_install */
 EM_JS( void, psxwasm_release, ( int index ), {
@@ -267,6 +308,9 @@ static void jit_init( void )
 	jit_code_present = 0;
 	jit_flushes = 0;
 	jit_live = 0;
+	jit_tailcalls = psxwasm_tailcalls();
+	jit_prev_pc = 0xfffffff0;
+	jit_retry_pc = 0xffffffff;
 }
 
 
@@ -531,6 +575,7 @@ static void jit_verify_log_store( UINT32 host, UINT32 size )
 #define W_BR_TABLE		0x0e
 #define W_RETURN		0x0f
 #define W_CALL_INDIRECT	0x11
+#define W_RETURN_CALL_INDIRECT	0x13
 #define W_DROP			0x1a
 #define W_LOCAL_GET		0x20
 #define W_LOCAL_SET		0x21
@@ -555,6 +600,7 @@ static void jit_verify_log_store( UINT32 host, UINT32 size )
 #define W_I32_GE_S		0x4e
 #define W_I32_ADD		0x6a
 #define W_I32_SUB		0x6b
+#define W_I32_MUL		0x6c
 #define W_I32_REM_U		0x70
 #define W_I32_AND		0x71
 #define W_I32_OR		0x72
@@ -577,7 +623,7 @@ static void jit_verify_log_store( UINT32 host, UINT32 size )
 /* locals: the general registers a block uses, then these */
 enum
 {
-	WL_HI = 32, WL_LO, WL_PC, WL_STATE, WL_ADDR, WL_HOST, WL_SHOST, WL_T, WL_COND, WL_DLOAD,
+	WL_HI = 32, WL_LO, WL_PC, WL_STATE, WL_ADDR, WL_HOST, WL_SHOST, WL_T, WL_COND, WL_DLOAD, WL_CHAIN,
 	WL_COUNT32,
 	WL_T64 = WL_COUNT32,	/* the one i64 local */
 	WL_COUNT
@@ -1243,6 +1289,12 @@ static void jit_emit_leave( UINT32 index, UINT32 target, int in_cond, int branch
 		w_const( target );
 	}
 	w_set( WL_PC );
+	if( branch != JIT_LEAVE_OUT && jit_tailcalls )
+	{
+		/* a jump (or straight on): the next block may follow at once */
+		w_const( 1 );
+		w_set( WL_CHAIN );
+	}
 	w_br( ctx.out_level );
 }
 
@@ -1574,6 +1626,52 @@ static int jit_assemble( int nlocals32 )
  *  Block translation
  *************************************/
 
+/*
+	After a jump: the next block, if it is translated (the cache entry
+	for WL_PC has its address and code) and the timeslice has room for
+	all of it, runs at once in place of this one (a tail call); jit_run
+	would have done the same. Its other checks hold here: no load is
+	pending (those ways out do not chain), and the status register is
+	not changed by translated code.
+*/
+static void jit_emit_chain( void )
+{
+	const UINT32 table = (UINT32)(size_t)jit_table;
+
+	w_get( WL_CHAIN );
+	w_open( W_IF );
+	/* T = byte offset of jit_table[ jit_table_index( pc ) ] */
+	w_get( WL_PC ); w_const( 2 ); w_byte( W_I32_SHR_U );
+	w_get( WL_PC ); w_const( 20 ); w_byte( W_I32_SHR_U );
+	w_byte( W_I32_XOR );
+	w_const( JIT_TABLE_SIZE - 1 ); w_byte( W_I32_AND );
+	w_const( sizeof( struct jit_block ) ); w_byte( W_I32_MUL );
+	w_tee( WL_T );
+	w_memop( W_I32_LOAD, 2, table + offsetof( struct jit_block, pc ) );
+	w_get( WL_PC ); w_byte( W_I32_EQ );
+	w_open( W_IF );
+	w_get( WL_T );
+	w_memop( W_I32_LOAD, 2, table + offsetof( struct jit_block, code ) );
+	w_tee( WL_ADDR );
+	w_open( W_IF );
+	w_load_abs( ICOUNT_ADDR );
+	w_get( WL_T );
+	w_memop( W_I32_LOAD16_U, 1, table + offsetof( struct jit_block, len ) );
+	w_byte( W_I32_GE_S );
+	w_open( W_IF );
+#ifdef PSXWASM_STATS
+	W_STORE_ABS( (UINT32)(size_t)&jit_stat[ JS_CHAINED ], w_load_abs( (UINT32)(size_t)&jit_stat[ JS_CHAINED ] ); w_const( 1 ); w_byte( W_I32_ADD ) );
+#endif
+	w_get( WL_ADDR );
+	w_byte( W_RETURN_CALL_INDIRECT );
+	w_u32( WT_BLOCK );
+	w_byte( 0 );	/* table 0 */
+	w_end();
+	w_end();
+	w_end();
+	w_end();
+}
+
 /* translates the block at pc with at most 'limit' instructions into the module; returns its length or 0 */
 static UINT32 jit_build( UINT32 pc, const UINT32 *ops, UINT32 maxcount, UINT32 limit, int *module_ok )
 {
@@ -1810,6 +1908,10 @@ static UINT32 jit_build( UINT32 pc, const UINT32 *ops, UINT32 maxcount, UINT32 l
 	w_end();	/* out */
 	/* the way out: registers back to mipscpu, the next pc */
 	w_flush( 0xffffffff, 1 );
+	if( jit_tailcalls )
+	{
+		jit_emit_chain();
+	}
 	w_get( WL_PC );
 	w_byte( W_END );	/* function */
 
@@ -1924,13 +2026,13 @@ static INLINE int jit_untranslatable_changed( const struct jit_block *block )
 	return region && *(const UINT32 *)(const void *)( region->base + ( block->pc - region->start ) ) != block->op0;
 }
 
+/* the cache entry for pc, reset for counting when it held another address or the code changed */
 static INLINE struct jit_block *jit_lookup( UINT32 pc )
 {
 	struct jit_block *block = &jit_table[ jit_table_index( pc ) ];
 
 	if( !block->valid || block->pc != pc || jit_untranslatable_changed( block ) )
 	{
-		/* a new address (or changed code): count visits from here */
 		jit_drop_code( block );
 		block->valid = 1;
 		block->pc = pc;
@@ -1939,15 +2041,7 @@ static INLINE struct jit_block *jit_lookup( UINT32 pc )
 		block->tried = 0;
 		block->heat = 0;
 	}
-	if( !block->tried )
-	{
-		if( ++block->heat < JIT_HEAT_MIN || mips_ICount < JIT_MAX_BLOCK )
-		{
-			return NULL;
-		}
-		jit_compile( block, pc );
-	}
-	return block->len ? block : NULL;
+	return block;
 }
 
 #ifdef PSXJIT_VERIFY
@@ -2049,20 +2143,65 @@ static void jit_verify_block( struct jit_block *block, int before )
 /*
 	Runs the block at pc if there is one and it fits in the timeslice:
 	returns 1 when it ran at least one instruction (mipscpu.pc and
-	mips_ICount updated).
+	mips_ICount updated). Called before every instruction the
+	interpreter would run; blocks are only looked for where code is
+	arrived at by a jump, after a block, or after an instruction a
+	block could not run (jit_retry_pc), so a timeslice that ends in the
+	middle of a block does not make that point a block of its own.
 */
 static INLINE int jit_run( void )
 {
 	struct jit_block *block;
+	UINT32 pc = mipscpu.pc;
 	int before;
 
-	if( mipscpu.delayr != 0 || ( mipscpu.cp0r[ CP0_SR ] & ( SR_ISC | SR_KUC ) ) != 0 )
+	JIT_STAT( JS_CALLS, 1 );
+	if( pc == jit_prev_pc + 4 && pc != jit_retry_pc )
 	{
+		/* straight on from the instruction the interpreter just ran */
+		jit_prev_pc = pc;
+		JIT_STAT( JS_INTERP, 1 );
 		return 0;
 	}
-	block = jit_lookup( mipscpu.pc );
-	if( !block || (int)block->len > mips_ICount )
+	JIT_STAT( JS_BOUNDARY, 1 );
+	jit_prev_pc = pc;
+	jit_retry_pc = 0xffffffff;
+	if( ( mipscpu.cp0r[ CP0_SR ] & ( SR_ISC | SR_KUC ) ) != 0 )
 	{
+		JIT_STAT( JS_INTERP, 1 );
+		return 0;
+	}
+	if( mipscpu.delayr != 0 )
+	{
+		/* a load or jump is pending: the interpreter finishes it, a block may start after */
+		jit_retry_pc = pc + 4;
+		JIT_STAT( JS_INTERP, 1 );
+		return 0;
+	}
+	block = jit_lookup( pc );
+	if( !block->tried )
+	{
+		if( ++block->heat < JIT_HEAT_MIN || mips_ICount < JIT_MAX_BLOCK )
+		{
+			JIT_STAT( JS_COLD, 1 );
+			JIT_STAT( JS_INTERP, 1 );
+			return 0;
+		}
+		jit_compile( block, pc );
+	}
+	if( block->len == 0 )
+	{
+		/* the instruction here cannot be translated: a block may start after it */
+		jit_retry_pc = pc + 4;
+		JIT_STAT( JS_UNTRANS, 1 );
+		JIT_STAT( JS_INTERP, 1 );
+		return 0;
+	}
+	if( (int)block->len > mips_ICount )
+	{
+		/* the end of the timeslice: the interpreter runs on to it */
+		JIT_STAT( JS_NOFIT, 1 );
+		JIT_STAT( JS_INTERP, 1 );
 		return 0;
 	}
 	before = mips_ICount;
@@ -2073,11 +2212,23 @@ static INLINE int jit_run( void )
 #endif
 	if( mips_ICount == before )
 	{
-		/* left before its first instruction: the interpreter runs it */
+		/* left before its first instruction: the interpreter runs it, a block may start after */
+		jit_retry_pc = pc + 4;
+		JIT_STAT( JS_EXIT0, 1 );
+		JIT_STAT( JS_INTERP, 1 );
 		return 0;
 	}
+	JIT_STAT( JS_RAN, 1 );
+	JIT_STAT( JS_JITINSTR, before - mips_ICount );
+#ifdef PSXWASM_STATS
+	if( ( jit_stat[ JS_RAN ] & 0xffff ) == 0 )
+	{
+		psxwasm_counters( jit_stat, JS_COUNT );
+	}
+#endif
 	loop_pure_armed = 0;	/* the interpreter's loop tracking (psxloop.c) saw none of this */
 	change_pc32ledw( mipscpu.pc );
+	jit_retry_pc = mipscpu.pc;
 	return 1;
 }
 
