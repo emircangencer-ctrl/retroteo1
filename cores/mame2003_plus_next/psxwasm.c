@@ -145,7 +145,7 @@ EM_JS( void, psxwasm_note, ( int what ), {
 } );
 
 /* does the browser take tail calls (return_call_indirect)? */
-EM_JS( int, psxwasm_tailcalls, ( void ), {
+EM_JS( int, psxwasm_tailcalls, (), {
 	try {
 		/* (module (type (func (result i32))) (table 1 funcref) (func (type 0) i32.const 0 return_call_indirect (type 0))) */
 		return WebAssembly.validate( new Uint8Array( [ 0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 127, 3, 2, 1, 0,

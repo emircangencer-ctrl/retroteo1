@@ -92,7 +92,7 @@ jobs:
           case "${{ matrix.opt }}" in jitstats) printf 'src/cpu/mips/psx_cpu.o: CFLAGS += -DPSXWASM_STATS\n' >> Makefile;; esac
           tail -n 3 Makefile
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
-          emmake make -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 40; tail -n 40 build.log; exit 1; }
+          emmake make -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 10 | sed 's/^/::error::/'; tail -n 40 build.log; exit 1; }
           grep -E "warning: .*psxwasm|Archiving" build.log | tail -n 20 || true
           ccache -s | tail -n 6 || true
           ls -la *.bc
@@ -104,10 +104,11 @@ jobs:
           case "${{ matrix.opt }}" in jit*) sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 -s ALLOW_TABLE_GROWTH=1/' ../Makefile.emulatorjs; grep -q ALLOW_TABLE_GROWTH ../Makefile.emulatorjs;; esac
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
           set -o pipefail
+          link() { emmake ./build-emulatorjs.sh "$@" > link.log 2>&1 || { grep -iE "error" link.log | head -n 10 | sed 's/^/::error::/'; tail -n 30 link.log; return 1; }; tail -n 5 link.log; }
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
-          emmake ./build-emulatorjs.sh --clean 2>&1 | tail -n 15
+          link --clean
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
-          emmake ./build-emulatorjs.sh --clean --legacy 2>&1 | tail -n 15
+          link --clean --legacy
           ls -la ../../EmulatorJS/data/cores/
       - name: Pack
         run: |
