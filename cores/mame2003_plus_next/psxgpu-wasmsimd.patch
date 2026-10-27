@@ -1,8 +1,8 @@
 diff --git a/src/vidhrdw/psx_vidhrdw.c b/src/vidhrdw/psx_vidhrdw.c
-index 4a3cda1..22f8ecb 100644
+index 4a3cda1..42dfd66 100644
 --- a/src/vidhrdw/psx_vidhrdw.c
 +++ b/src/vidhrdw/psx_vidhrdw.c
-@@ -719,6 +719,24 @@ VIDEO_STOP( psx )
+@@ -719,6 +719,44 @@ VIDEO_STOP( psx )
  #else
  #define PSX_NEON	0
  #endif
@@ -14,6 +14,26 @@ index 4a3cda1..22f8ecb 100644
 +#else
 +#define PSX_WASM_SIMD	0
 +#endif
++
++/*
++	Interlaced field drawing (RetroPlay). In interlaced 480-line mode with
++	drawing to the displayed field off (GP0(E1h) bit 10 clear) the PSX GPU
++	draws only the lines of the field that is not on screen. This driver
++	drew every line (a progressive picture, twice the drawing); with
++	psx_fieldmode on it draws as the hardware does, half the lines, and
++	the display shows the field drawn last on both of its lines (bob).
++	GPUSTAT bit 31 is the field being drawn (odd lines when set).
++*/
++#ifndef PSX_FIELDMODE_DEFAULT
++#define PSX_FIELDMODE_DEFAULT	0
++#endif
++int psx_fieldmode = PSX_FIELDMODE_DEFAULT;
++static int m_b_fieldskip;			/* drawing skips the displayed field's lines */
++static UINT32 m_n_fieldparity;		/* lines drawn: ( y & 1 ) == parity */
++static int m_b_fieldshown;			/* the last frame was drawn by fields */
++static UINT32 m_n_fieldshownparity;
++
++#define PSX_DRAW_LINE( y )	( !m_b_fieldskip || ( (UINT32)( y ) & 1 ) == m_n_fieldparity )
 +
 +#ifdef PSX_GPU_STATS
 +/* measurement builds: what the span code draws, reported every 300 frames */
@@ -27,7 +47,7 @@ index 4a3cda1..22f8ecb 100644
  
  static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
  {
-@@ -733,6 +751,17 @@ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
+@@ -733,6 +771,17 @@ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
  		uint16x8_t b = vandq_u16( vshrq_n_u16( v, 10 ), m5 );
  		vst1q_u16( dst, vorrq_u16( vorrq_u16( r, g ), b ) );
  	}
@@ -45,7 +65,7 @@ index 4a3cda1..22f8ecb 100644
  #endif
  	while( n-- > 0 )
  	{
-@@ -808,6 +837,22 @@ VIDEO_UPDATE( psx )
+@@ -808,6 +857,22 @@ VIDEO_UPDATE( psx )
  #endif
  
  	set_visible_area( 0, m_n_screenwidth - 1, 0, m_n_screenheight - 1 );
@@ -68,7 +88,31 @@ index 4a3cda1..22f8ecb 100644
  
  	if( ( m_n_gpustatus & ( 1 << 0x17 ) ) != 0 )
  	{
-@@ -1204,7 +1249,7 @@ f  e  d  c| b| a  9| 8  7| 6  5| 4| 3  2  1  0
+@@ -889,9 +954,14 @@ VIDEO_UPDATE( psx )
+ 			}
+ 		}
+ 		else
++		{
++		/* drawn by fields: each line shows the line of the field drawn last (bob) */
++		const int bob = psx_fieldmode && m_b_fieldshown &&
++			( m_n_gpustatus & ( ( 1 << 19 ) | ( 1 << 22 ) | ( 1 << 10 ) ) ) == ( ( 1 << 19 ) | ( 1 << 22 ) );
+ 		for( n_y = 0; n_y < (UINT32)n_lines; n_y++ )
+       {
+-         const uint16_t *src = (m_p_p_vram[ n_y + m_n_displaystarty ] + n_x);
++         const UINT32 n_row = ( bob && ( ( n_y + m_n_displaystarty ) & 1 ) != m_n_fieldshownparity ) ? ( ( n_y + m_n_displaystarty ) ^ 1 ) : n_y + m_n_displaystarty;
++         const uint16_t *src = (m_p_p_vram[ n_row ] + n_x);
+          int dy = bitmap->rowpixels;
+          UINT16 *dst = (UINT16 *)bitmap->base + ( n_y + n_top ) * dy;
+          int length = m_n_screenwidth;
+@@ -902,6 +972,7 @@ VIDEO_UPDATE( psx )
+             while (length--)
+                *dst++ = *src++;
+       }
++		}
+ 	}
+ }
+ 
+@@ -1204,7 +1275,7 @@ f  e  d  c| b| a  9| 8  7| 6  5| 4| 3  2  1  0
  	high 16 bits masked with umask/vmask (0xff when the caller's
  	coordinates are bytes). Returns 1 when the span was drawn.
  */
@@ -77,7 +121,7 @@ index 4a3cda1..22f8ecb 100644
  #define PSX_TEXSPAN			1
  #else
  #define PSX_TEXSPAN			0
-@@ -1284,7 +1329,9 @@ static INLINE void psx_texspan_pixel( const struct psx_texspan *s, UINT16 *p_vra
+@@ -1284,7 +1355,9 @@ static INLINE void psx_texspan_pixel( const struct psx_texspan *s, UINT16 *p_vra
  /* does the span read the row it draws to (texture rows, CLUT)? */
  static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT16 *p_vram, int n )
  {
@@ -88,7 +132,7 @@ index 4a3cda1..22f8ecb 100644
  	const UINT32 n_height = m_n_vram_height;
  	const UINT16 *row = m_p_vram + n_row * m_n_vram_width;
  	INT64 v0 = (INT64)s->v, v1 = (INT64)s->v + (INT64)s->dv * ( n - 1 );
-@@ -1331,6 +1378,10 @@ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT
+@@ -1331,6 +1404,10 @@ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT
  	{
  		return 1;
  	}
@@ -99,7 +143,7 @@ index 4a3cda1..22f8ecb 100644
  	return ( n_row + n_height - ( s->ty + vmin ) % n_height ) % n_height <= vmax - vmin;
  }
  
-@@ -1352,6 +1403,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
+@@ -1352,6 +1429,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
  	return x - d * (UINT32)( ( (UINT64)x * m ) >> 32 );
  }
  
@@ -107,7 +151,7 @@ index 4a3cda1..22f8ecb 100644
  /* psx_ts_mod on 8 lanes */
  PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
  {
-@@ -1361,6 +1413,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
+@@ -1361,6 +1439,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
  	const uint32x4_t qhi = vcombine_u32( vshrn_n_u64( vmull_u32( vget_low_u32( hi ), mv ), 32 ), vshrn_n_u64( vmull_u32( vget_high_u32( hi ), mv ), 32 ) );
  	return vmlsq_n_u16( x, vcombine_u16( vmovn_u32( qlo ), vmovn_u32( qhi ) ), (UINT16)d );
  }
@@ -115,7 +159,7 @@ index 4a3cda1..22f8ecb 100644
  
  /* texel n_u of a texture row (tx already added) */
  PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const int tp, UINT32 n_u )
-@@ -1376,6 +1429,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
+@@ -1376,6 +1455,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
  	}
  }
  
@@ -123,7 +167,7 @@ index 4a3cda1..22f8ecb 100644
  /* largest lane */
  PSX_TS_ALWAYS UINT16 psx_texspan_max( uint16x8_t x )
  {
-@@ -1669,6 +1723,261 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
+@@ -1669,6 +1749,261 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
  	}
  }
  
@@ -385,7 +429,7 @@ index 4a3cda1..22f8ecb 100644
  /*
  	SOLIDFILL through the same code: an untextured pixel is what the tables
  	give for a texel of level 16 on each channel (0x4210), with bit 15 set
-@@ -1683,10 +1992,19 @@ static int psx_texspan_draw( const struct psx_texspan *s, UINT16 *p_vram, int n
+@@ -1683,10 +2018,19 @@ static int psx_texspan_draw( const struct psx_texspan *s, UINT16 *p_vram, int n
  {
  	const int win = ( m_n_twh != 256 || m_n_tww != 256 || m_n_twx != 0 || m_n_twy != 0 );
  
@@ -406,7 +450,7 @@ index 4a3cda1..22f8ecb 100644
  
  	if( win )
  	{
-@@ -1822,6 +2140,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
+@@ -1822,6 +2166,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
  	p_vram = m_p_p_vram[ n_y ] + n_x;
  	if( n_distance > 0 )
  	{
@@ -414,7 +458,7 @@ index 4a3cda1..22f8ecb 100644
  		memset( &s, 0, sizeof( s ) );
  		s.r = r; s.dr = dr; s.g = g; s.dg = dg; s.b = b; s.db = db;
  		s.tp = 3; s.abr = abr & 3; s.semi = semi;
-@@ -1870,6 +2189,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
+@@ -1870,6 +2215,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
  		n_distance = ( m_n_drawarea_x2 - n_x ) + 1; \
  	} \
  	p_vram = m_p_p_vram[ n_y ] + n_x; \
@@ -422,3 +466,125 @@ index 4a3cda1..22f8ecb 100644
   \
  	if( n_ti != 0 ) \
  	{ \
+@@ -2209,7 +2555,7 @@ static void FlatPolygon( int n_points )
+ 			}
+ 			n_dx2 = (INT32)( ( COORD_X( m_packet.FlatPolygon.vertex[ n_rightpoint ].n_coord ) << 16 ) - n_cx2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -2409,7 +2755,7 @@ static void FlatTexturedPolygon( int n_points )
+ 			n_du2 = (INT32)( ( TEXTURE_U( m_packet.FlatTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cu2.d ) / n_distance;
+ 			n_dv2 = (INT32)( ( TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cv2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -2611,7 +2957,7 @@ static void GouraudPolygon( int n_points )
+ 			n_dg2 = (INT32)( ( BGR_G( m_packet.GouraudPolygon.vertex[ n_rightpoint ].n_bgr ) << 16 ) - n_cg2.d ) / n_distance;
+ 			n_db2 = (INT32)( ( BGR_B( m_packet.GouraudPolygon.vertex[ n_rightpoint ].n_bgr ) << 16 ) - n_cb2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -2893,7 +3239,7 @@ static void GouraudTexturedPolygon( int n_points )
+ 			n_du2 = (INT32)( ( TEXTURE_U( m_packet.GouraudTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cu2.d ) / n_distance;
+ 			n_dv2 = (INT32)( ( TEXTURE_V( m_packet.GouraudTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cv2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -3057,7 +3403,7 @@ static void MonochromeLine( void )
+ 		if( (INT16)n_x.w.h >= (INT32)m_n_drawarea_x1 &&
+ 			(INT16)n_y.w.h >= (INT32)m_n_drawarea_y1 &&
+ 			(INT16)n_x.w.h <= (INT32)m_n_drawarea_x2 &&
+-			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 )
++			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( (INT16)n_y.w.h ) )
+ 		{
+ 			p_vram = m_p_p_vram[ n_y.w.h ] + n_x.w.h;
+ 			if( n_cmd & 0x02 )
+@@ -3190,7 +3536,7 @@ static void GouraudLine( void )
+ 		if( (INT16)n_x.w.h >= (INT32)m_n_drawarea_x1 &&
+ 			(INT16)n_y.w.h >= (INT32)m_n_drawarea_y1 &&
+ 			(INT16)n_x.w.h <= (INT32)m_n_drawarea_x2 &&
+-			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 )
++			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( (INT16)n_y.w.h ) )
+ 		{
+ 			p_vram = m_p_p_vram[ n_y.w.h ] + n_x.w.h;
+ 			if( n_cmd & 0x02 )
+@@ -3249,7 +3595,7 @@ static void FrameBufferRectangleDraw( void )
+ 	{
+ 		n_x = COORD_X( m_packet.FlatRectangle.n_coord );
+ 
+-		n_distance = SIZE_W( m_packet.FlatRectangle.n_size );
++		n_distance = PSX_DRAW_LINE( n_y & 1023 ) ? SIZE_W( m_packet.FlatRectangle.n_size ) : 0;
+ 		while( n_distance > 0 )
+ 		{
+ 			*( m_p_p_vram[ n_y & 1023 ] + ( n_x & 1023 ) ) =
+@@ -3316,7 +3662,7 @@ static void FlatRectangle( void )
+ 		n_x = S11_COORD_X( m_packet.FlatRectangle.n_coord ) + m_n_drawoffset_x;
+ 
+ 		n_distance = SIZE_W( m_packet.FlatRectangle.n_size );
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3413,7 +3759,7 @@ static void FlatTexturedRectangle( void )
+ 		n_u = TEXTURE_U( m_packet.FlatTexturedRectangle.n_texture );
+ 
+ 		n_distance = SIZE_W( m_packet.FlatTexturedRectangle.n_size );
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3520,7 +3866,7 @@ static void Sprite8x8( void )
+ 		n_u = TEXTURE_U( m_packet.Sprite8x8.n_texture );
+ 
+ 		n_distance = 8;
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3627,7 +3973,7 @@ static void Sprite16x16( void )
+ 		n_u = TEXTURE_U( m_packet.Sprite16x16.n_texture );
+ 
+ 		n_distance = 16;
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3691,7 +4037,7 @@ static void Dot( void )
+ 	if( (INT16)n_x >= (INT32)m_n_drawarea_x1 &&
+ 		(INT16)n_y >= (INT32)m_n_drawarea_y1 &&
+ 		(INT16)n_x <= (INT32)m_n_drawarea_x2 &&
+-		(INT16)n_y <= (INT32)m_n_drawarea_y2 )
++		(INT16)n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 	{
+ 		p_vram = m_p_p_vram[ n_y ] + n_x;
+ 		if( n_cmd & 0x02 )
+@@ -3768,6 +4114,13 @@ enum
+ 
+ static void psx_draw_run( int n_op )
+ {
++	m_b_fieldskip = psx_fieldmode && ( m_n_gpustatus & ( ( 1 << 19 ) | ( 1 << 22 ) | ( 1 << 10 ) ) ) == ( ( 1 << 19 ) | ( 1 << 22 ) );
++	if( m_b_fieldskip )
++	{
++		m_n_fieldparity = ( ( m_n_gpustatus >> 31 ) ^ m_n_displaystarty ) & 1;
++		m_b_fieldshown = 1;
++		m_n_fieldshownparity = m_n_fieldparity;
++	}
+ 	switch( n_op )
+ 	{
+ 	case PSX_DRAW_FLATPOLYGON3: FlatPolygon( 3 ); break;
