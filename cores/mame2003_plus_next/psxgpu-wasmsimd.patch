@@ -1,5 +1,5 @@
 diff --git a/src/vidhrdw/psx_vidhrdw.c b/src/vidhrdw/psx_vidhrdw.c
-index 4a3cda1..1f5c6dc 100644
+index 4a3cda1..9e3862c 100644
 --- a/src/vidhrdw/psx_vidhrdw.c
 +++ b/src/vidhrdw/psx_vidhrdw.c
 @@ -719,6 +719,14 @@ VIDEO_STOP( psx )
@@ -44,7 +44,29 @@ index 4a3cda1..1f5c6dc 100644
  #define PSX_TEXSPAN			1
  #else
  #define PSX_TEXSPAN			0
-@@ -1352,6 +1371,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
+@@ -1284,7 +1303,9 @@ static INLINE void psx_texspan_pixel( const struct psx_texspan *s, UINT16 *p_vra
+ /* does the span read the row it draws to (texture rows, CLUT)? */
+ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT16 *p_vram, int n )
+ {
+-	const UINT32 n_row = ( p_vram - m_p_vram ) / m_n_vram_width;
++	/* (shifts and masks when vram is a power of 2 wide and high: no divisions per span) */
++	const UINT32 n_width = m_n_vram_width;
++	const UINT32 n_row = ( n_width & ( n_width - 1 ) ) == 0 ? (UINT32)( p_vram - m_p_vram ) >> __builtin_ctz( n_width ) : (UINT32)( p_vram - m_p_vram ) / n_width;
+ 	const UINT32 n_height = m_n_vram_height;
+ 	const UINT16 *row = m_p_vram + n_row * m_n_vram_width;
+ 	INT64 v0 = (INT64)s->v, v1 = (INT64)s->v + (INT64)s->dv * ( n - 1 );
+@@ -1331,6 +1352,10 @@ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT
+ 	{
+ 		return 1;
+ 	}
++	if( ( n_height & ( n_height - 1 ) ) == 0 )
++	{
++		return ( ( n_row - ( s->ty + vmin ) ) & ( n_height - 1 ) ) <= vmax - vmin;
++	}
+ 	return ( n_row + n_height - ( s->ty + vmin ) % n_height ) % n_height <= vmax - vmin;
+ }
+ 
+@@ -1352,6 +1377,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
  	return x - d * (UINT32)( ( (UINT64)x * m ) >> 32 );
  }
  
@@ -52,7 +74,7 @@ index 4a3cda1..1f5c6dc 100644
  /* psx_ts_mod on 8 lanes */
  PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
  {
-@@ -1361,6 +1381,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
+@@ -1361,6 +1387,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
  	const uint32x4_t qhi = vcombine_u32( vshrn_n_u64( vmull_u32( vget_low_u32( hi ), mv ), 32 ), vshrn_n_u64( vmull_u32( vget_high_u32( hi ), mv ), 32 ) );
  	return vmlsq_n_u16( x, vcombine_u16( vmovn_u32( qlo ), vmovn_u32( qhi ) ), (UINT16)d );
  }
@@ -60,7 +82,7 @@ index 4a3cda1..1f5c6dc 100644
  
  /* texel n_u of a texture row (tx already added) */
  PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const int tp, UINT32 n_u )
-@@ -1376,6 +1397,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
+@@ -1376,6 +1403,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
  	}
  }
  
@@ -68,7 +90,7 @@ index 4a3cda1..1f5c6dc 100644
  /* largest lane */
  PSX_TS_ALWAYS UINT16 psx_texspan_max( uint16x8_t x )
  {
-@@ -1669,6 +1691,189 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
+@@ -1669,6 +1697,261 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
  	}
  }
  
@@ -107,11 +129,28 @@ index 4a3cda1..1f5c6dc 100644
 +	const v128_t b_step = wasm_i32x4_splat( (INT32)( (UINT32)s->db * 8 ) );
 +	const v128_t semi_bgr = wasm_i16x8_splat( (INT16)( s->semi ? 0xc210 : 0x4210 ) );
 +	const UINT16 *row = NULL;
++	/* texel addresses on 8 lanes when vram is a power of 2 high (no texture window) */
++	const UINT32 vram_h = m_n_vram_height;
++	const int vecrows = !win && ( vram_h & ( vram_h - 1 ) ) == 0 && m_n_vram_width <= 0xffff;
++	const v128_t du_lo = wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( du ) ), du_hi = wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( du ) );
++	const v128_t dv_lo = wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( dv ) ), dv_hi = wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( dv ) );
++	const v128_t umask_v = wasm_i16x8_splat( (INT16)umask ), vmask_v = wasm_i16x8_splat( (INT16)vmask );
++	const v128_t ty_v = wasm_i16x8_splat( (INT16)s->ty ), hmask_v = wasm_i16x8_splat( (INT16)( vram_h - 1 ) );
++	const v128_t tx_v = wasm_i32x4_splat( (INT32)s->tx ), vw_v = wasm_i32x4_splat( (INT32)m_n_vram_width );
++	const UINT16 *vr = m_p_vram;
++	v128_t clut_lo = zero, clut_hi = zero;
 +	int i;
 +
 +	if( fixrow )
 +	{
 +		row = m_p_p_vram[ s->ty + ( ( v >> 16 ) & vmask ) ] + s->tx;
++	}
++	if( tp == 0 && vecrows )
++	{
++		/* the 16 CLUT entries as two byte tables (low bytes, high bytes) for swizzle */
++		const v128_t c0 = wasm_v128_load( clut ), c1 = wasm_v128_load( clut + 8 );
++		clut_lo = wasm_i8x16_shuffle( c0, c1, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30 );
++		clut_hi = wasm_i8x16_shuffle( c0, c1, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31 );
 +	}
 +
 +	for( ; n > 0; n -= 8, p_vram += 8 )
@@ -164,6 +203,61 @@ index 4a3cda1..1f5c6dc 100644
 +			}
 +			u += 0x80000;
 +			v += dv * 8;
++		}
++		else if( vecrows )
++		{
++			/* texel addresses on all 8 lanes, then one load per lane (unused lanes read */
++			/* inside vram and are made transparent below) */
++			const v128_t uu_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)u ), du_lo ), uu_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)u ), du_hi );
++			const v128_t vv_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)v ), dv_lo ), vv_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)v ), dv_hi );
++			const v128_t n_u = wasm_v128_and( wasm_i8x16_shuffle( uu_lo, uu_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 ), umask_v );
++			const v128_t n_v = wasm_v128_and( wasm_i8x16_shuffle( vv_lo, vv_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 ), vmask_v );
++			const v128_t line = wasm_v128_and( wasm_i16x8_add( n_v, ty_v ), hmask_v );
++			const v128_t n_w = tp == 0 ? wasm_u16x8_shr( n_u, 2 ) : tp == 1 ? wasm_u16x8_shr( n_u, 1 ) : n_u;
++			const v128_t idx_lo = wasm_i32x4_add( wasm_i32x4_add( wasm_i32x4_mul( wasm_u32x4_extend_low_u16x8( line ), vw_v ), tx_v ), wasm_u32x4_extend_low_u16x8( n_w ) );
++			const v128_t idx_hi = wasm_i32x4_add( wasm_i32x4_add( wasm_i32x4_mul( wasm_u32x4_extend_high_u16x8( line ), vw_v ), tx_v ), wasm_u32x4_extend_high_u16x8( n_w ) );
++			const v128_t w = wasm_u16x8_make(
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 0 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 1 ) ],
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 2 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 3 ) ],
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 0 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 1 ) ],
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 2 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 3 ) ] );
++			if( tp == 0 )
++			{
++				/* 4-bit: the nibble (n_u & 3) of each word, then the CLUT as a byte table lookup */
++				const v128_t sel = wasm_v128_and( n_u, wasm_i16x8_splat( 3 ) );
++				const v128_t m4 = wasm_i16x8_splat( 0x0f );
++				v128_t nib = wasm_v128_and( w, m4 );
++				v128_t idx8;
++				nib = wasm_v128_bitselect( wasm_v128_and( wasm_u16x8_shr( w, 4 ), m4 ), nib, wasm_i16x8_eq( sel, wasm_i16x8_splat( 1 ) ) );
++				nib = wasm_v128_bitselect( wasm_v128_and( wasm_u16x8_shr( w, 8 ), m4 ), nib, wasm_i16x8_eq( sel, wasm_i16x8_splat( 2 ) ) );
++				nib = wasm_v128_bitselect( wasm_u16x8_shr( w, 12 ), nib, wasm_i16x8_eq( sel, wasm_i16x8_splat( 3 ) ) );
++				idx8 = wasm_u8x16_narrow_i16x8( nib, nib );
++				bgr = wasm_i8x16_shuffle( wasm_i8x16_swizzle( clut_lo, idx8 ), wasm_i8x16_swizzle( clut_hi, idx8 ),
++					0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23 );
++			}
++			else if( tp == 1 )
++			{
++				/* 8-bit: the byte (n_u & 1) of each word through the CLUT */
++				const v128_t m8 = wasm_i16x8_splat( 0xff );
++				const v128_t t = wasm_v128_bitselect( wasm_u16x8_shr( w, 8 ), wasm_v128_and( w, m8 ),
++					wasm_i16x8_eq( wasm_v128_and( n_u, wasm_i16x8_splat( 1 ) ), wasm_i16x8_splat( 1 ) ) );
++				bgr = wasm_u16x8_make(
++					clut[ wasm_u16x8_extract_lane( t, 0 ) ], clut[ wasm_u16x8_extract_lane( t, 1 ) ],
++					clut[ wasm_u16x8_extract_lane( t, 2 ) ], clut[ wasm_u16x8_extract_lane( t, 3 ) ],
++					clut[ wasm_u16x8_extract_lane( t, 4 ) ], clut[ wasm_u16x8_extract_lane( t, 5 ) ],
++					clut[ wasm_u16x8_extract_lane( t, 6 ) ], clut[ wasm_u16x8_extract_lane( t, 7 ) ] );
++			}
++			else
++			{
++				bgr = w;
++			}
++			if( m < 8 )
++			{
++				/* unused lanes: transparent */
++				bgr = wasm_v128_and( bgr, wasm_u16x8_lt( lane16, wasm_i16x8_splat( m ) ) );
++			}
++			u += (UINT32)du * 8;
++			v += (UINT32)dv * 8;
 +		}
 +		else
 +		{

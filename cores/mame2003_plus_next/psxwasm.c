@@ -984,6 +984,46 @@ static void jit_emit_simple_at( UINT32 op, UINT32 index, int checked )
  *************************************/
 
 /*
+	The usual PSX map has main RAM at 0x00000000 with mirrors at
+	0x80000000 and 0xa0000000 (one host buffer): one check covers the
+	three, address & 0x1fffffff with the top three bits 000, 100 or 101.
+	Returns the RAM size when the fast RAM regions have that layout, else 0.
+*/
+static UINT32 jit_ram_mirrors( void )
+{
+	static const UINT32 starts[ 3 ] = { 0x00000000, 0x80000000, 0xa0000000 };
+	const struct psx_fastram *first = NULL;
+	int i, k;
+
+	for( k = 0; k < 3; k++ )
+	{
+		const struct psx_fastram *r = NULL;
+		for( i = 0; i < fastram_count; i++ )
+		{
+			if( fastram[ i ].start == starts[ k ] )
+			{
+				r = &fastram[ i ];
+			}
+		}
+		if( !r || r->readonly || r->end - r->start >= 0x1fffffff )
+		{
+			return 0;
+		}
+		if( first && ( r->base != first->base || r->end - r->start != first->end - first->start ) )
+		{
+			return 0;
+		}
+		first = r;
+	}
+	return first->end - first->start + 1;
+}
+
+static int jit_is_ram_mirror( const struct psx_fastram *r, UINT32 ram_size )
+{
+	return ram_size && ( r->start == 0x00000000 || r->start == 0x80000000 || r->start == 0xa0000000 );
+}
+
+/*
 	Host address of the access of 'op' into 'host_local', or a side exit
 	before 'index': the whole access must be in one fast RAM region
 	(writable for a store), aligned as the interpreter requires, and a
@@ -991,6 +1031,7 @@ static void jit_emit_simple_at( UINT32 op, UINT32 index, int checked )
 */
 static void jit_emit_mem_address( UINT32 op, const struct jit_op *o, UINT32 index, int host_local )
 {
+	const UINT32 ram_size = jit_ram_mirrors();
 	int i, found_level;
 
 	w_getr( INS_RS( op ) );
@@ -1010,9 +1051,30 @@ static void jit_emit_mem_address( UINT32 op, const struct jit_op *o, UINT32 inde
 	/* host = base + ( addr - start ), from the first region that holds the whole access */
 	w_open( W_BLOCK );
 	found_level = w_level;
+	if( ram_size >= (UINT32)o->size )
+	{
+		/* main RAM and its mirrors */
+		const struct psx_fastram *ram = NULL;
+		for( i = 0; i < fastram_count; i++ )
+		{
+			if( fastram[ i ].start == 0x80000000 )
+			{
+				ram = &fastram[ i ];
+			}
+		}
+		w_get( WL_ADDR ); w_const( 0x1fffffff ); w_byte( W_I32_AND ); w_tee( WL_T );
+		w_const( ram_size - o->size ); w_byte( W_I32_LE_U );
+		w_const( 0x31 ); w_get( WL_ADDR ); w_const( 29 ); w_byte( W_I32_SHR_U ); w_byte( W_I32_SHR_U );
+		w_const( 1 ); w_byte( W_I32_AND );
+		w_byte( W_I32_AND );
+		w_open( W_IF );
+		w_get( WL_T ); w_const( (UINT32)(size_t)ram->base ); w_byte( W_I32_ADD ); w_set( host_local );
+		w_br( found_level );
+		w_end();
+	}
 	for( i = 0; i < fastram_count; i++ )
 	{
-		if( fastram[ i ].end - fastram[ i ].start + 1 < (UINT32)o->size )
+		if( fastram[ i ].end - fastram[ i ].start + 1 < (UINT32)o->size || jit_is_ram_mirror( &fastram[ i ], ram_size ) )
 		{
 			continue;
 		}
@@ -1569,7 +1631,7 @@ static void m_section( UINT8 id, const UINT8 *p, int n )
 	The module: types, imports (memory "e" "m", table "e" "t"), one
 	function exported as "f". 'nlocals32' i32 locals and one i64 local.
 */
-static int jit_assemble( int nlocals32 )
+static int jit_assemble( int nlocals32, UINT32 pc )
 {
 	static const UINT8 header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
 	static const UINT8 types[] = {
@@ -1617,6 +1679,23 @@ static int jit_assemble( int nlocals32 )
 		m_bytes( tmp, n );
 		m_bytes( locals, nl );
 		m_bytes( w_body, w_len );
+	}
+	/* name section: the function is called psx_<pc> in browser profiles */
+	{
+		static const char hex[] = "0123456789abcdef";
+		UINT8 name[ 12 ];
+		int k;
+		memcpy( name, "psx_", 4 );
+		for( k = 0; k < 8; k++ )
+		{
+			name[ 4 + k ] = hex[ ( pc >> ( 28 - k * 4 ) ) & 15 ];
+		}
+		/* custom section 0: "name", function names (1): 1 entry, function 0, 12 bytes */
+		m_byte( 0 );
+		m_u32( 1 + 4 + 1 + 1 + 1 + 1 + 1 + 12 );
+		m_byte( 4 ); m_bytes( (const UINT8 *)"name", 4 );
+		m_byte( 1 ); m_u32( 1 + 1 + 1 + 12 );
+		m_byte( 1 ); m_byte( 0 ); m_byte( 12 ); m_bytes( name, 12 );
 	}
 	return !w_overflow && w_mlen <= JIT_MAX_MODULE;
 }
@@ -1915,7 +1994,7 @@ static UINT32 jit_build( UINT32 pc, const UINT32 *ops, UINT32 maxcount, UINT32 l
 	w_get( WL_PC );
 	w_byte( W_END );	/* function */
 
-	*module_ok = jit_assemble( nlocals );
+	*module_ok = jit_assemble( nlocals, pc );
 	return count;
 }
 

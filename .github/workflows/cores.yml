@@ -49,7 +49,7 @@ jobs:
         # counters of what the recompiler runs (both measurement only). jitsimd: plus the PSX GPU's
         # span drawing in WebAssembly SIMD (psxgpu-wasmsimd.patch); simdverify: that with every
         # SIMD span checked against the table path (PSX_TEXSPAN_VERIFY, measurement only).
-        opt: [jit, jitsimd, simdverify]
+        opt: [jitsimd, simdverify, jitverify]
     steps:
       - uses: actions/checkout@v5
         with:
