@@ -16,6 +16,7 @@ on:
       - "fix/**"
     paths:
       - ".github/workflows/cores.yml"
+      - "cores/**"
   workflow_dispatch:
 
 permissions:
@@ -43,10 +44,22 @@ jobs:
         # release: the core's own release flags (-O2) with the PSX CPU interpreter's INLINE helpers
         # forced inline (psx_cpu.c), about 10 % faster in the browser. Measured and left out: -O3
         # (no gain), the GPU's NEON span code as WebAssembly SIMD (correct, but slower).
-        opt: [release]
+        # jit: plus RetroPlay's PSX CPU recompiler to WebAssembly (cores/mame2003_plus_next);
+        # jitverify: the same with every block checked against the interpreter (measurement only).
+        opt: [jit, jitverify]
     steps:
+      - uses: actions/checkout@v5
+        with:
+          path: retroplay
+          sparse-checkout: cores
       - name: Tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full >/dev/null
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
+      - name: Cache compiler output
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ matrix.opt }}-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.opt }}-
       - name: Cache emsdk
         uses: actions/cache@v5
         with:
@@ -69,14 +82,24 @@ jobs:
           # The interpreter's small helpers (mips_load, mips_advance_pc …) are "static inline", which
           # clang leaves as calls at -O2; the source is unchanged, the flag applies to psx_cpu.c only.
           printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += "-DINLINE=inline __attribute__((always_inline))"\n' >> Makefile
-          tail -n 2 Makefile
-          set -o pipefail
-          emmake make -j"$(nproc)" platform=emscripten 2>&1 | tail -n 25
+          case "${{ matrix.opt }}" in jit*)
+            cp ../retroplay/cores/mame2003_plus_next/psxwasm.c src/cpu/mips/
+            git apply ../retroplay/cores/mame2003_plus_next/psxwasm.patch;;
+          esac
+          case "${{ matrix.opt }}" in jitverify) printf 'src/cpu/mips/psx_cpu.o: CFLAGS += -DPSXJIT_VERIFY\n' >> Makefile;; esac
+          tail -n 3 Makefile
+          export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
+          emmake make -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 40; tail -n 40 build.log; exit 1; }
+          grep -E "warning: .*psxwasm|Archiving" build.log | tail -n 20 || true
+          ccache -s | tail -n 6 || true
           ls -la *.bc
       - name: Link with RetroArch (WebGL 2 and WebGL 1 builds)
         working-directory: RetroArch/emulatorjs
         run: |
           source ../../emsdk/emsdk_env.sh >/dev/null
+          # the recompiler adds its blocks to the function table
+          case "${{ matrix.opt }}" in jit*) sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 -s ALLOW_TABLE_GROWTH=1/' ../Makefile.emulatorjs; grep -q ALLOW_TABLE_GROWTH ../Makefile.emulatorjs;; esac
+          export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
           set -o pipefail
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
           emmake ./build-emulatorjs.sh --clean 2>&1 | tail -n 15
