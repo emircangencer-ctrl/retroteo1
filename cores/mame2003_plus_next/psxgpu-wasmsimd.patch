@@ -1,8 +1,8 @@
 diff --git a/src/vidhrdw/psx_vidhrdw.c b/src/vidhrdw/psx_vidhrdw.c
-index 4a3cda1..9e3862c 100644
+index 4a3cda1..22f8ecb 100644
 --- a/src/vidhrdw/psx_vidhrdw.c
 +++ b/src/vidhrdw/psx_vidhrdw.c
-@@ -719,6 +719,14 @@ VIDEO_STOP( psx )
+@@ -719,6 +719,24 @@ VIDEO_STOP( psx )
  #else
  #define PSX_NEON	0
  #endif
@@ -14,10 +14,20 @@ index 4a3cda1..9e3862c 100644
 +#else
 +#define PSX_WASM_SIMD	0
 +#endif
++
++#ifdef PSX_GPU_STATS
++/* measurement builds: what the span code draws, reported every 300 frames */
++enum { GS_SPANS, GS_PIXELS, GS_FALLBACK_SPANS, GS_FALLBACK_PIXELS, GS_TP0, GS_TP1, GS_TP2, GS_WIN, GS_FIXROW, GS_SOLID_SPANS, GS_SOLID_PIXELS, GS_REJECT_OVERLAP, GS_REJECT_OTHER, GS_COUNT };
++static unsigned long psx_gs[ GS_COUNT ];
++#define PSX_GS( n, v )	( psx_gs[ ( n ) ] += ( v ) )
++#else
++#define PSX_GS( n, v )	do { } while( 0 )
++#endif
++
  
  static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
  {
-@@ -733,6 +741,17 @@ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
+@@ -733,6 +751,17 @@ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
  		uint16x8_t b = vandq_u16( vshrq_n_u16( v, 10 ), m5 );
  		vst1q_u16( dst, vorrq_u16( vorrq_u16( r, g ), b ) );
  	}
@@ -35,7 +45,30 @@ index 4a3cda1..9e3862c 100644
  #endif
  	while( n-- > 0 )
  	{
-@@ -1204,7 +1223,7 @@ f  e  d  c| b| a  9| 8  7| 6  5| 4| 3  2  1  0
+@@ -808,6 +837,22 @@ VIDEO_UPDATE( psx )
+ #endif
+ 
+ 	set_visible_area( 0, m_n_screenwidth - 1, 0, m_n_screenheight - 1 );
++#ifdef PSX_GPU_STATS
++	{
++		static unsigned long frames;
++		if( ++frames % 300 == 0 )
++		{
++			const double f = 300.0;
++			fprintf( stderr, "GPUSTATS frame %lu screen %ux%u start %u,%u status %08x drawarea %u,%u-%u,%u offset %d,%d | per frame: spans %.0f px %.0f (tp0 %.0f tp1 %.0f tp2 %.0f win %.0f fixrow %.0f) fallback spans %.0f px %.0f solid spans %.0f px %.0f reject overlap %.0f other %.0f\n",
++				frames, m_n_screenwidth, m_n_screenheight, m_n_displaystartx, m_n_displaystarty, m_n_gpustatus,
++				m_n_drawarea_x1, m_n_drawarea_y1, m_n_drawarea_x2, m_n_drawarea_y2, (int)m_n_drawoffset_x, (int)m_n_drawoffset_y,
++				psx_gs[ GS_SPANS ] / f, psx_gs[ GS_PIXELS ] / f, psx_gs[ GS_TP0 ] / f, psx_gs[ GS_TP1 ] / f, psx_gs[ GS_TP2 ] / f, psx_gs[ GS_WIN ] / f, psx_gs[ GS_FIXROW ] / f,
++				psx_gs[ GS_FALLBACK_SPANS ] / f, psx_gs[ GS_FALLBACK_PIXELS ] / f, psx_gs[ GS_SOLID_SPANS ] / f, psx_gs[ GS_SOLID_PIXELS ] / f,
++				psx_gs[ GS_REJECT_OVERLAP ] / f, psx_gs[ GS_REJECT_OTHER ] / f );
++			memset( psx_gs, 0, sizeof( psx_gs ) );
++		}
++	}
++#endif
+ 
+ 	if( ( m_n_gpustatus & ( 1 << 0x17 ) ) != 0 )
+ 	{
+@@ -1204,7 +1249,7 @@ f  e  d  c| b| a  9| 8  7| 6  5| 4| 3  2  1  0
  	high 16 bits masked with umask/vmask (0xff when the caller's
  	coordinates are bytes). Returns 1 when the span was drawn.
  */
@@ -44,7 +77,7 @@ index 4a3cda1..9e3862c 100644
  #define PSX_TEXSPAN			1
  #else
  #define PSX_TEXSPAN			0
-@@ -1284,7 +1303,9 @@ static INLINE void psx_texspan_pixel( const struct psx_texspan *s, UINT16 *p_vra
+@@ -1284,7 +1329,9 @@ static INLINE void psx_texspan_pixel( const struct psx_texspan *s, UINT16 *p_vra
  /* does the span read the row it draws to (texture rows, CLUT)? */
  static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT16 *p_vram, int n )
  {
@@ -55,7 +88,7 @@ index 4a3cda1..9e3862c 100644
  	const UINT32 n_height = m_n_vram_height;
  	const UINT16 *row = m_p_vram + n_row * m_n_vram_width;
  	INT64 v0 = (INT64)s->v, v1 = (INT64)s->v + (INT64)s->dv * ( n - 1 );
-@@ -1331,6 +1352,10 @@ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT
+@@ -1331,6 +1378,10 @@ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT
  	{
  		return 1;
  	}
@@ -66,7 +99,7 @@ index 4a3cda1..9e3862c 100644
  	return ( n_row + n_height - ( s->ty + vmin ) % n_height ) % n_height <= vmax - vmin;
  }
  
-@@ -1352,6 +1377,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
+@@ -1352,6 +1403,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
  	return x - d * (UINT32)( ( (UINT64)x * m ) >> 32 );
  }
  
@@ -74,7 +107,7 @@ index 4a3cda1..9e3862c 100644
  /* psx_ts_mod on 8 lanes */
  PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
  {
-@@ -1361,6 +1387,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
+@@ -1361,6 +1413,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
  	const uint32x4_t qhi = vcombine_u32( vshrn_n_u64( vmull_u32( vget_low_u32( hi ), mv ), 32 ), vshrn_n_u64( vmull_u32( vget_high_u32( hi ), mv ), 32 ) );
  	return vmlsq_n_u16( x, vcombine_u16( vmovn_u32( qlo ), vmovn_u32( qhi ) ), (UINT16)d );
  }
@@ -82,7 +115,7 @@ index 4a3cda1..9e3862c 100644
  
  /* texel n_u of a texture row (tx already added) */
  PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const int tp, UINT32 n_u )
-@@ -1376,6 +1403,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
+@@ -1376,6 +1429,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
  	}
  }
  
@@ -90,7 +123,7 @@ index 4a3cda1..9e3862c 100644
  /* largest lane */
  PSX_TS_ALWAYS UINT16 psx_texspan_max( uint16x8_t x )
  {
-@@ -1669,6 +1697,261 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
+@@ -1669,6 +1723,261 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
  	}
  }
  
@@ -352,3 +385,40 @@ index 4a3cda1..9e3862c 100644
  /*
  	SOLIDFILL through the same code: an untextured pixel is what the tables
  	give for a texel of level 16 on each channel (0x4210), with bit 15 set
+@@ -1683,10 +1992,19 @@ static int psx_texspan_draw( const struct psx_texspan *s, UINT16 *p_vram, int n
+ {
+ 	const int win = ( m_n_twh != 256 || m_n_tww != 256 || m_n_twx != 0 || m_n_twy != 0 );
+ 
+-	if( n < 1 || s->tp > 2 || ( win && ( m_n_tww < 2 || m_n_twh < 2 ) ) || psx_texspan_overlap( s, win, p_vram, n ) )
++	if( n < 1 || s->tp > 2 || ( win && ( m_n_tww < 2 || m_n_twh < 2 ) ) )
++	{
++		PSX_GS( GS_REJECT_OTHER, 1 );
++		return 0;
++	}
++	if( psx_texspan_overlap( s, win, p_vram, n ) )
+ 	{
++		PSX_GS( GS_REJECT_OVERLAP, 1 );
+ 		return 0;
+ 	}
++	PSX_GS( GS_SPANS, 1 ); PSX_GS( GS_PIXELS, n );
++	PSX_GS( s->tp == 0 ? GS_TP0 : s->tp == 1 ? GS_TP1 : GS_TP2, n );
++	if( win ) PSX_GS( GS_WIN, n ); else if( s->dv == 0 ) PSX_GS( GS_FIXROW, n );
+ 
+ 	if( win )
+ 	{
+@@ -1822,6 +2140,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
+ 	p_vram = m_p_p_vram[ n_y ] + n_x;
+ 	if( n_distance > 0 )
+ 	{
++		PSX_GS( GS_SOLID_SPANS, 1 ); PSX_GS( GS_SOLID_PIXELS, n_distance );
+ 		memset( &s, 0, sizeof( s ) );
+ 		s.r = r; s.dr = dr; s.g = g; s.dg = dg; s.b = b; s.db = db;
+ 		s.tp = 3; s.abr = abr & 3; s.semi = semi;
+@@ -1870,6 +2189,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
+ 		n_distance = ( m_n_drawarea_x2 - n_x ) + 1; \
+ 	} \
+ 	p_vram = m_p_p_vram[ n_y ] + n_x; \
++	if( n_distance > 0 ) { PSX_GS( GS_FALLBACK_SPANS, 1 ); PSX_GS( GS_FALLBACK_PIXELS, n_distance ); } \
+  \
+ 	if( n_ti != 0 ) \
+ 	{ \
