@@ -59,7 +59,20 @@ struct jit_block
 	UINT8		valid;
 	UINT8		ramop;			/* len 0 in fast RAM: op0 is the word that was not translatable */
 	UINT32		op0;
+	UINT16		heat;			/* visits before the block is translated */
+	UINT8		tried;			/* translation was attempted (len 0: not translatable) */
 };
+
+/*
+	A block is translated on its JIT_HEAT_MIN-th visit, not the first: a
+	timeslice often ends in the middle of a block (the interpreter steps
+	through the last instructions), and the next one starts there, so
+	most addresses are visited a few times as a block start. Compiling a
+	WebAssembly module costs as much as interpreting the block a few
+	hundred times; the block heads that matter are visited thousands of
+	times a second.
+*/
+#define JIT_HEAT_MIN		32
 
 typedef UINT32 (*jit_func)(void);
 
@@ -102,6 +115,12 @@ EM_JS( int, psxwasm_install, ( const UINT8 *bytes, int len ), {
 		}
 		return 0;
 	}
+} );
+
+/* counts for diagnosis (Module.psxwasmStats in the browser console) */
+EM_JS( void, psxwasm_note, ( int what ), {
+	var s = Module[ 'psxwasmStats' ] || ( Module[ 'psxwasmStats' ] = { compiled: 0, flushes: 0, invalidated: 0, failed: 0 } );
+	if( what == 0 ) s.compiled++; else if( what == 1 ) s.flushes++; else if( what == 2 ) s.invalidated++; else s.failed++;
 } );
 
 /* frees a function table index from psxwasm_install */
@@ -150,6 +169,7 @@ static void jit_flush( void )
 	jit_code_present = 0;
 	jit_live = 0;
 	jit_flushes++;
+	psxwasm_note( 1 );
 }
 
 static INLINE UINT32 jit_table_index( UINT32 pc )
@@ -175,6 +195,10 @@ static void jit_invalidate_host( const void *host )
 				struct jit_block *block = &jit_table[ jit_table_index( pc ) ];
 				if( block->valid && block->pc == pc )
 				{
+					if( block->code )
+					{
+						psxwasm_note( 2 );
+					}
 					jit_drop_code( block );
 					block->valid = 0;
 				}
@@ -1806,6 +1830,7 @@ static void jit_compile( struct jit_block *block, UINT32 pc )
 	block->valid = 1;
 	block->code = NULL;
 	block->ramop = 0;
+	block->tried = 1;
 
 	/* code must sit in one fast RAM region */
 	region = find_fastram( pc, 4 );
@@ -1858,8 +1883,10 @@ static void jit_compile( struct jit_block *block, UINT32 pc )
 		block->pc = pc;
 		block->valid = 1;
 		block->ramop = 1;
+		block->tried = 1;
 	}
 	index = psxwasm_install( w_module, w_mlen );
+	psxwasm_note( index > 0 ? 0 : 3 );
 	if( index <= 0 )
 	{
 		if( !jit_failed_logged )
@@ -1903,11 +1930,21 @@ static INLINE struct jit_block *jit_lookup( UINT32 pc )
 
 	if( !block->valid || block->pc != pc || jit_untranslatable_changed( block ) )
 	{
-		if( mips_ICount < JIT_MAX_BLOCK )
+		/* a new address (or changed code): count visits from here */
+		jit_drop_code( block );
+		block->valid = 1;
+		block->pc = pc;
+		block->len = 0;
+		block->ramop = 0;
+		block->tried = 0;
+		block->heat = 0;
+	}
+	if( !block->tried )
+	{
+		if( ++block->heat < JIT_HEAT_MIN || mips_ICount < JIT_MAX_BLOCK )
 		{
 			return NULL;
 		}
-		jit_drop_code( block );
 		jit_compile( block, pc );
 	}
 	return block->len ? block : NULL;
