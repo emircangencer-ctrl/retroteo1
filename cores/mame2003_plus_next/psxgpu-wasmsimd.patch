@@ -1,0 +1,260 @@
+diff --git a/src/vidhrdw/psx_vidhrdw.c b/src/vidhrdw/psx_vidhrdw.c
+index 4a3cda1..1f5c6dc 100644
+--- a/src/vidhrdw/psx_vidhrdw.c
++++ b/src/vidhrdw/psx_vidhrdw.c
+@@ -719,6 +719,14 @@ VIDEO_STOP( psx )
+ #else
+ #define PSX_NEON	0
+ #endif
++/* WebAssembly SIMD (browser builds compiled with -msimd128): the same 8
++   pixels at a time, written for it (RetroPlay) */
++#if !PSX_NEON && defined( __wasm_simd128__ )
++#define PSX_WASM_SIMD	1
++#include <wasm_simd128.h>
++#else
++#define PSX_WASM_SIMD	0
++#endif
+ 
+ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
+ {
+@@ -733,6 +741,17 @@ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
+ 		uint16x8_t b = vandq_u16( vshrq_n_u16( v, 10 ), m5 );
+ 		vst1q_u16( dst, vorrq_u16( vorrq_u16( r, g ), b ) );
+ 	}
++#elif PSX_WASM_SIMD
++	const v128_t m5 = wasm_i16x8_splat( 0x001f );
++	const v128_t m_g = wasm_i16x8_splat( 0x03e0 );
++	for( ; n >= 8; n -= 8, src += 8, dst += 8 )
++	{
++		v128_t v = wasm_v128_load( src );
++		v128_t r = wasm_i16x8_shl( wasm_v128_and( v, m5 ), 10 );
++		v128_t g = wasm_v128_and( v, m_g );
++		v128_t b = wasm_v128_and( wasm_u16x8_shr( v, 10 ), m5 );
++		wasm_v128_store( dst, wasm_v128_or( wasm_v128_or( r, g ), b ) );
++	}
+ #endif
+ 	while( n-- > 0 )
+ 	{
+@@ -1204,7 +1223,7 @@ f  e  d  c| b| a  9| 8  7| 6  5| 4| 3  2  1  0
+ 	high 16 bits masked with umask/vmask (0xff when the caller's
+ 	coordinates are bytes). Returns 1 when the span was drawn.
+ */
+-#if PSX_NEON
++#if PSX_NEON || PSX_WASM_SIMD
+ #define PSX_TEXSPAN			1
+ #else
+ #define PSX_TEXSPAN			0
+@@ -1352,6 +1371,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
+ 	return x - d * (UINT32)( ( (UINT64)x * m ) >> 32 );
+ }
+ 
++#if PSX_NEON
+ /* psx_ts_mod on 8 lanes */
+ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
+ {
+@@ -1361,6 +1381,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
+ 	const uint32x4_t qhi = vcombine_u32( vshrn_n_u64( vmull_u32( vget_low_u32( hi ), mv ), 32 ), vshrn_n_u64( vmull_u32( vget_high_u32( hi ), mv ), 32 ) );
+ 	return vmlsq_n_u16( x, vcombine_u16( vmovn_u32( qlo ), vmovn_u32( qhi ) ), (UINT16)d );
+ }
++#endif
+ 
+ /* texel n_u of a texture row (tx already added) */
+ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const int tp, UINT32 n_u )
+@@ -1376,6 +1397,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
+ 	}
+ }
+ 
++#if PSX_NEON
+ /* largest lane */
+ PSX_TS_ALWAYS UINT16 psx_texspan_max( uint16x8_t x )
+ {
+@@ -1669,6 +1691,189 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
+ 	}
+ }
+ 
++#else	/* PSX_WASM_SIMD */
++
++/*
++	The span as with NEON above, in WebAssembly SIMD. Texels are fetched
++	one lane at a time with the plain C texel lookup (WebAssembly has no
++	gather and no per-lane shifts); the shading, semi-transparency, the
++	transparent colour 0 and the store are done on 8 pixels together,
++	with the same arithmetic as the NEON code.
++*/
++PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int n, const int tp, const int win, const int fixrow )
++{
++	const v128_t lane_lo = wasm_i32x4_make( 0, 1, 2, 3 ), lane_hi = wasm_i32x4_make( 4, 5, 6, 7 );
++	const v128_t lane16 = wasm_i16x8_make( 0, 1, 2, 3, 4, 5, 6, 7 );
++	const v128_t m5 = wasm_i16x8_splat( 0x1f );
++	const v128_t c31 = wasm_i16x8_splat( 31 );
++	const v128_t zero = wasm_i16x8_splat( 0 );
++	const v128_t over = wasm_i16x8_splat( (INT16)0xff00 );
++	const UINT16 *vram_end = m_p_vram + m_n_vram_size;
++	const UINT16 *clut = s->clut;
++	const UINT32 umask = s->umask, vmask = s->vmask;
++	const INT32 du = s->du, dv = s->dv;
++	const UINT32 tww = m_n_tww, twh = m_n_twh;
++	const UINT32 mw = win ? psx_ts_recip( 0, tww ) : 0, mh = win ? psx_ts_recip( 1, twh ) : 0;
++	UINT32 u = s->u, v = s->v, r = s->r, g = s->g, b = s->b;
++	v128_t r_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)r ), wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( s->dr ) ) );
++	v128_t r_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)r ), wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( s->dr ) ) );
++	v128_t g_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)g ), wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( s->dg ) ) );
++	v128_t g_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)g ), wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( s->dg ) ) );
++	v128_t b_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)b ), wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( s->db ) ) );
++	v128_t b_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)b ), wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( s->db ) ) );
++	const v128_t r_step = wasm_i32x4_splat( (INT32)( (UINT32)s->dr * 8 ) );
++	const v128_t g_step = wasm_i32x4_splat( (INT32)( (UINT32)s->dg * 8 ) );
++	const v128_t b_step = wasm_i32x4_splat( (INT32)( (UINT32)s->db * 8 ) );
++	const v128_t semi_bgr = wasm_i16x8_splat( (INT16)( s->semi ? 0xc210 : 0x4210 ) );
++	const UINT16 *row = NULL;
++	int i;
++
++	if( fixrow )
++	{
++		row = m_p_p_vram[ s->ty + ( ( v >> 16 ) & vmask ) ] + s->tx;
++	}
++
++	for( ; n > 0; n -= 8, p_vram += 8 )
++	{
++		UINT16 a_bgr[ 8 ];
++		const int m = n < 8 ? n : 8;
++		UINT32 r0 = r, g0 = g, b0 = b;
++		v128_t bgr, sr, sg, sb, cr, cg, cb, rr, rg, rb, out, dst;
++
++		if( m < 8 && p_vram + 8 > vram_end )
++		{
++			/* the last pixels of vram */
++			for( i = 0; i < m; i++ )
++			{
++				UINT32 n_u = ( u >> 16 ) & umask, n_v = ( v >> 16 ) & vmask;
++				if( win )
++				{
++					n_u = psx_ts_mod( n_u, tww, mw );
++					n_v = psx_ts_mod( n_v, twh, mh );
++				}
++				psx_texspan_pixel( s, p_vram + i, tp == 3 ? ( s->semi ? 0xc210 : 0x4210 ) : psx_ts_texel( clut, fixrow ? row : m_p_p_vram[ s->ty + n_v ] + s->tx, tp, n_u ), r, g, b );
++				u += du; v += dv; r += s->dr; g += s->dg; b += s->db;
++			}
++			return;
++		}
++
++		/* the texels */
++		if( tp == 3 )
++		{
++			/* untextured: level 16 on each channel, the semi-transparency bit when it is on */
++			bgr = semi_bgr;
++			if( m < 8 )
++			{
++				bgr = wasm_v128_and( bgr, wasm_u16x8_lt( lane16, wasm_i16x8_splat( m ) ) );
++			}
++		}
++		else if( fixrow && du == 0x10000 && m == 8 && tp != 0 && ( ( u >> 16 ) & umask ) + 7 <= umask )
++		{
++			/* one row, consecutive texels */
++			const UINT32 n_u = ( u >> 16 ) & umask;
++			if( tp == 2 )
++			{
++				bgr = wasm_v128_load( row + n_u );
++			}
++			else
++			{
++				const UINT8 *p8 = (const UINT8 *)row + n_u;
++				bgr = wasm_u16x8_make( clut[ p8[ 0 ] ], clut[ p8[ 1 ] ], clut[ p8[ 2 ] ], clut[ p8[ 3 ] ],
++					clut[ p8[ 4 ] ], clut[ p8[ 5 ] ], clut[ p8[ 6 ] ], clut[ p8[ 7 ] ] );
++			}
++			u += 0x80000;
++			v += dv * 8;
++		}
++		else
++		{
++			for( i = 0; i < m; i++ )
++			{
++				UINT32 n_u = ( u >> 16 ) & umask, n_v = ( v >> 16 ) & vmask;
++				if( win )
++				{
++					n_u = psx_ts_mod( n_u, tww, mw );
++					n_v = psx_ts_mod( n_v, twh, mh );
++				}
++				a_bgr[ i ] = psx_ts_texel( clut, fixrow ? row : m_p_p_vram[ s->ty + n_v ] + s->tx, tp, n_u );
++				u += du; v += dv;
++			}
++			for( ; i < 8; i++ )
++			{
++				a_bgr[ i ] = 0;
++			}
++			bgr = wasm_v128_load( a_bgr );
++		}
++
++		/* 8 lanes of the high 16 bits of r, g, b */
++		sr = wasm_i8x16_shuffle( r_lo, r_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 );
++		sg = wasm_i8x16_shuffle( g_lo, g_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 );
++		sb = wasm_i8x16_shuffle( b_lo, b_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 );
++		r_lo = wasm_i32x4_add( r_lo, r_step ); r_hi = wasm_i32x4_add( r_hi, r_step );
++		g_lo = wasm_i32x4_add( g_lo, g_step ); g_hi = wasm_i32x4_add( g_hi, g_step );
++		b_lo = wasm_i32x4_add( b_lo, b_step ); b_hi = wasm_i32x4_add( b_hi, b_step );
++		r += (UINT32)s->dr * 8; g += (UINT32)s->dg * 8; b += (UINT32)s->db * 8;
++
++		/* a shade above 255 would mix into the table index: use the tables */
++		if( wasm_v128_any_true( wasm_v128_and( wasm_v128_or( wasm_v128_or( sr, sg ), sb ), over ) ) )
++		{
++			wasm_v128_store( a_bgr, bgr );
++			for( i = 0; i < m; i++ )
++			{
++				psx_texspan_pixel( s, p_vram + i, a_bgr[ i ], r0, g0, b0 );
++				r0 += s->dr; g0 += s->dg; b0 += s->db;
++			}
++			continue;
++		}
++
++		/* level x shade / 128, before the clamp to 31 */
++		cr = wasm_v128_and( bgr, m5 );
++		cg = wasm_v128_and( wasm_u16x8_shr( bgr, 5 ), m5 );
++		cb = wasm_v128_and( wasm_u16x8_shr( bgr, 10 ), m5 );
++		rr = wasm_u16x8_shr( wasm_i16x8_mul( cr, sr ), 7 );
++		rg = wasm_u16x8_shr( wasm_i16x8_mul( cg, sg ), 7 );
++		rb = wasm_u16x8_shr( wasm_i16x8_mul( cb, sb ), 7 );
++
++		out = wasm_v128_or( wasm_u16x8_min( rr, c31 ),
++			wasm_v128_or( wasm_i16x8_shl( wasm_u16x8_min( rg, c31 ), 5 ), wasm_i16x8_shl( wasm_u16x8_min( rb, c31 ), 10 ) ) );
++
++		dst = wasm_v128_load( p_vram );
++		if( s->semi )
++		{
++			v128_t fr, fg, fb, br, bgc, bb, tr, tg, tb, blend;
++			br = wasm_v128_and( dst, m5 );
++			bgc = wasm_v128_and( wasm_u16x8_shr( dst, 5 ), m5 );
++			bb = wasm_v128_and( wasm_u16x8_shr( dst, 10 ), m5 );
++			switch( s->abr )
++			{
++			case 0x00:	/* 0.5 x B + 0.5 x F */
++				fr = wasm_u16x8_min( wasm_u16x8_shr( rr, 1 ), c31 ); fg = wasm_u16x8_min( wasm_u16x8_shr( rg, 1 ), c31 ); fb = wasm_u16x8_min( wasm_u16x8_shr( rb, 1 ), c31 );
++				br = wasm_u16x8_shr( br, 1 ); bgc = wasm_u16x8_shr( bgc, 1 ); bb = wasm_u16x8_shr( bb, 1 );
++				tr = wasm_u16x8_min( wasm_i16x8_add( br, fr ), c31 ); tg = wasm_u16x8_min( wasm_i16x8_add( bgc, fg ), c31 ); tb = wasm_u16x8_min( wasm_i16x8_add( bb, fb ), c31 );
++				break;
++			case 0x02:	/* 1.0 x B - 1.0 x F */
++				fr = wasm_u16x8_min( rr, c31 ); fg = wasm_u16x8_min( rg, c31 ); fb = wasm_u16x8_min( rb, c31 );
++				tr = wasm_u16x8_sub_sat( br, fr ); tg = wasm_u16x8_sub_sat( bgc, fg ); tb = wasm_u16x8_sub_sat( bb, fb );
++				break;
++			case 0x03:	/* 1.0 x B + 0.25 x F */
++				fr = wasm_u16x8_min( wasm_u16x8_shr( rr, 2 ), c31 ); fg = wasm_u16x8_min( wasm_u16x8_shr( rg, 2 ), c31 ); fb = wasm_u16x8_min( wasm_u16x8_shr( rb, 2 ), c31 );
++				tr = wasm_u16x8_min( wasm_i16x8_add( br, fr ), c31 ); tg = wasm_u16x8_min( wasm_i16x8_add( bgc, fg ), c31 ); tb = wasm_u16x8_min( wasm_i16x8_add( bb, fb ), c31 );
++				break;
++			default:	/* 1.0 x B + 1.0 x F */
++				fr = wasm_u16x8_min( rr, c31 ); fg = wasm_u16x8_min( rg, c31 ); fb = wasm_u16x8_min( rb, c31 );
++				tr = wasm_u16x8_min( wasm_i16x8_add( br, fr ), c31 ); tg = wasm_u16x8_min( wasm_i16x8_add( bgc, fg ), c31 ); tb = wasm_u16x8_min( wasm_i16x8_add( bb, fb ), c31 );
++				break;
++			}
++			blend = wasm_v128_or( tr, wasm_v128_or( wasm_i16x8_shl( tg, 5 ), wasm_i16x8_shl( tb, 10 ) ) );
++			/* the pixels with bit 15 (semi-transparent texels) blend */
++			out = wasm_v128_bitselect( blend, out, wasm_i16x8_shr( bgr, 15 ) );
++		}
++		/* colour 0 is transparent (and so are the unused lanes) */
++		wasm_v128_store( p_vram, wasm_v128_bitselect( dst, out, wasm_i16x8_eq( bgr, zero ) ) );
++	}
++}
++
++#endif	/* PSX_WASM_SIMD */
++
+ /*
+ 	SOLIDFILL through the same code: an untextured pixel is what the tables
+ 	give for a texel of level 16 on each channel (0x4210), with bit 15 set

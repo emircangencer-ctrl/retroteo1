@@ -46,8 +46,10 @@ jobs:
         # (no gain), the GPU's NEON span code as WebAssembly SIMD (correct, but slower).
         # jit: plus RetroPlay's PSX CPU recompiler to WebAssembly (cores/mame2003_plus_next);
         # jitverify: the same with every block checked against the interpreter; jitstats: with
-        # counters of what the recompiler runs (both measurement only).
-        opt: [jit, jitstats, jitverify]
+        # counters of what the recompiler runs (both measurement only). jitsimd: plus the PSX GPU's
+        # span drawing in WebAssembly SIMD (psxgpu-wasmsimd.patch); simdverify: that with every
+        # SIMD span checked against the table path (PSX_TEXSPAN_VERIFY, measurement only).
+        opt: [jit, jitsimd, simdverify]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -83,13 +85,23 @@ jobs:
           # The interpreter's small helpers (mips_load, mips_advance_pc …) are "static inline", which
           # clang leaves as calls at -O2; the source is unchanged, the flag applies to psx_cpu.c only.
           printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += "-DINLINE=inline __attribute__((always_inline))"\n' >> Makefile
-          case "${{ matrix.opt }}" in jit*)
+          case "${{ matrix.opt }}" in jit*|simd*)
             cp ../retroplay/cores/mame2003_plus_next/psxwasm.c src/cpu/mips/
             git apply ../retroplay/cores/mame2003_plus_next/psxwasm.patch;;
           esac
           # (the wait-loop skip writes memory the check does not log: off while checking)
           case "${{ matrix.opt }}" in jitverify) printf 'src/cpu/mips/psx_cpu.o: CFLAGS += -DPSXJIT_VERIFY -DPSX_LOOPSKIP=0\n' >> Makefile;; esac
           case "${{ matrix.opt }}" in jitstats) printf 'src/cpu/mips/psx_cpu.o: CFLAGS += -DPSXWASM_STATS\n' >> Makefile;; esac
+          case "${{ matrix.opt }}" in *simd*)
+            git apply ../retroplay/cores/mame2003_plus_next/psxgpu-wasmsimd.patch
+            printf 'src/vidhrdw/psx_vidhrdw.o: CFLAGS += -msimd128\n' >> Makefile;;
+          esac
+          case "${{ matrix.opt }}" in simdverify)
+            printf 'src/vidhrdw/psx_vidhrdw.o: CFLAGS += -DPSX_TEXSPAN_VERIFY\n' >> Makefile
+            # progress in the browser console (the check itself exits on the first mismatch)
+            sed -i 's/^\tpsx_texspan_checked++;$/\tif( ( ++psx_texspan_checked % 20000 ) == 0 ) fprintf( stderr, "TEXSPAN verified %lu spans\\n", psx_texspan_checked );/' src/vidhrdw/psx_vidhrdw.c
+            grep -n 'TEXSPAN verified' src/vidhrdw/psx_vidhrdw.c;;
+          esac
           tail -n 3 Makefile
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
           emmake make -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 10 | sed 's/^/::error::/'; tail -n 40 build.log; exit 1; }
@@ -101,7 +113,8 @@ jobs:
         run: |
           source ../../emsdk/emsdk_env.sh >/dev/null
           # the recompiler adds its blocks to the function table
-          case "${{ matrix.opt }}" in jit*) sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 -s ALLOW_TABLE_GROWTH=1/' ../Makefile.emulatorjs; grep -q ALLOW_TABLE_GROWTH ../Makefile.emulatorjs;; esac
+          # (function names kept for profiling while the recompiler is measured)
+          case "${{ matrix.opt }}" in jit*|simd*) sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 -s ALLOW_TABLE_GROWTH=1 --profiling-funcs/' ../Makefile.emulatorjs; grep -q ALLOW_TABLE_GROWTH ../Makefile.emulatorjs;; esac
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
           set -o pipefail
           link() { emmake ./build-emulatorjs.sh "$@" > link.log 2>&1 || { grep -iE "error" link.log | head -n 10 | sed 's/^/::error::/'; tail -n 30 link.log; return 1; }; tail -n 5 link.log; }
