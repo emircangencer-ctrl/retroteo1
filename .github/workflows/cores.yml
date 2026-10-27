@@ -86,7 +86,8 @@ jobs:
             cp ../retroplay/cores/mame2003_plus_next/psxwasm.c src/cpu/mips/
             git apply ../retroplay/cores/mame2003_plus_next/psxwasm.patch;;
           esac
-          case "${{ matrix.opt }}" in jitverify) printf 'src/cpu/mips/psx_cpu.o: CFLAGS += -DPSXJIT_VERIFY\n' >> Makefile;; esac
+          # (the wait-loop skip writes memory the check does not log: off while checking)
+          case "${{ matrix.opt }}" in jitverify) printf 'src/cpu/mips/psx_cpu.o: CFLAGS += -DPSXJIT_VERIFY -DPSX_LOOPSKIP=0\n' >> Makefile;; esac
           tail -n 3 Makefile
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
           emmake make -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 40; tail -n 40 build.log; exit 1; }
