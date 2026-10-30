@@ -113,12 +113,12 @@ static UINT32 jit_stat[ JS_COUNT ];
 /* then: interpreted accesses outside fast RAM, timeslices, timeslice cycles / 1024 */
 enum { JSO_OP = 0, JSO_SPECIAL = 64, JSO_COP0 = 128, JSO_GTE = 160, JSO_SLOW = 224, JSO_SLICES, JSO_SLICE_KCYCLES, JSO_COUNT };
 static UINT32 jit_stat_ops[ JSO_COUNT ];
-static UINT32 jit_stat_pcs[ 4096 * 2 ];	/* interpreted pcs: pc, count (direct mapped, the busier one stays) */
+static UINT32 jit_stat_pcs[ 4096 * 3 ];	/* interpreted pcs: pc, count, opcode (direct mapped, the busier one stays) */
 static void jit_stat_interp( UINT32 op, int slow, UINT32 pc )
 {
-	UINT32 *e = &jit_stat_pcs[ ( ( pc >> 2 ) & 4095 ) * 2 ];
+	UINT32 *e = &jit_stat_pcs[ ( ( pc >> 2 ) & 4095 ) * 3 ];
 	if( e[ 0 ] == pc ) e[ 1 ]++;
-	else if( e[ 1 ] <= 1 ) { e[ 0 ] = pc; e[ 1 ] = 1; }
+	else if( e[ 1 ] <= 1 ) { e[ 0 ] = pc; e[ 1 ] = 1; e[ 2 ] = op; }
 	else e[ 1 ]--;
 	jit_stat_ops[ JSO_OP + ( op >> 26 ) ]++;
 	if( ( op >> 26 ) == 0 ) jit_stat_ops[ JSO_SPECIAL + ( op & 63 ) ]++;
@@ -2322,7 +2322,7 @@ static INLINE int jit_run( void )
 #ifdef PSXWASM_STATS
 	if( ( jit_stat[ JS_RAN ] & 0xffff ) == 0 )
 	{
-		psxwasm_counters( jit_stat, JS_COUNT, jit_stat_ops, JSO_COUNT, jit_stat_pcs, 8192 );
+		psxwasm_counters( jit_stat, JS_COUNT, jit_stat_ops, JSO_COUNT, jit_stat_pcs, 4096 * 3 );
 	}
 #endif
 	loop_pure_armed = 0;	/* the interpreter's loop tracking (psxloop.c) saw none of this */
