@@ -49,8 +49,9 @@ jobs:
         # audio conversions in WebAssembly SIMD (its SSE2 code).
         # nextprof: the same with function names kept, for profiling in a browser.
         # Measurement only: jitverify (every recompiled block checked against the interpreter),
-        # spanverify (every SIMD span checked against the table path), jitstats / gpustats (counters).
-        opt: [next, nextprof, spanverify]
+        # spanverify (every SIMD span checked against the table path), jitstats / gpustats (counters),
+        # cpuprof (the PSX CPU core without inlining, for profiles).
+        opt: [cpuprof]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -85,7 +86,11 @@ jobs:
           source ../emsdk/emsdk_env.sh >/dev/null
           # The interpreter's small helpers (mips_load, mips_advance_pc …) are "static inline", which
           # clang leaves as calls at -O2; the source is unchanged, the flag applies to psx_cpu.c only.
-          printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += "-DINLINE=inline __attribute__((always_inline))"\n' >> Makefile
+          case "${{ matrix.opt }}" in
+            # cpuprof: nothing inlined in the PSX CPU core, so a browser profile shows each part
+            cpuprof) printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += -DINLINE=inline -fno-inline\n' >> Makefile;;
+            *) printf '\nsrc/cpu/mips/psx_cpu.o: CFLAGS += "-DINLINE=inline __attribute__((always_inline))"\n' >> Makefile;;
+          esac
           P=../retroplay/cores/mame2003_plus_next
           cp $P/psxwasm.c src/cpu/mips/
           git apply $P/psxwasm.patch
