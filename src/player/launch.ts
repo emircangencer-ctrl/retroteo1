@@ -14,7 +14,8 @@ export type Launch = { cores: CoreChoice[]; gameName: string; extraFiles: ExtraF
 export interface LaunchDeps {
   games: Game[];
   getBios: (id: string) => Promise<BiosRecord | null>;
-  loadCatalogs: () => Promise<Record<string, unknown>>;
+  /** One arcade set of one core with its romOf chain (src/arcade-catalog.js arcadeSetCatalog). */
+  arcadeSetCatalog: (coreId: string, set: string) => Promise<unknown>;
   readZipDirectory: (blob: Blob) => Promise<Array<{ name: string; crc?: string; size?: number }>>;
   makeUrl?: (blob: Blob) => string;
   revokeUrl?: (url: string) => void;
@@ -85,11 +86,11 @@ export async function resolveLaunch(game: Game, system: SystemInfo, { coreOverri
 }
 
 /** Why a set whose only missing files are decryption keys cannot start, and how to fix it. */
-export async function keyBlock(game: Game, deps: Pick<LaunchDeps, 'loadCatalogs' | 'readZipDirectory'>): Promise<Blocked> {
+export async function keyBlock(game: Game, deps: Pick<LaunchDeps, 'arcadeSetCatalog' | 'readZipDirectory'>): Promise<Blocked> {
   const arcade = game.arcade!;
   let cps2: boolean | null = typeof arcade.cps2Key === 'boolean' && Array.isArray(arcade.different) ? arcade.cps2Key : null;
   if (cps2 === null) {
-    try { cps2 = Boolean(isCps2KeyMissing((await deps.loadCatalogs())[arcade.core], arcade.set, arcade.missing)); } catch { cps2 = true; }
+    try { cps2 = Boolean(isCps2KeyMissing(await deps.arcadeSetCatalog(arcade.core, arcade.set), arcade.set, arcade.missing)); } catch { cps2 = true; }
   }
   const entries = game.blob ? await deps.readZipDirectory(game.blob).catch(() => null) : null;
   const found = (entries ? keyFindings(arcade.missing, entries) : { absent: arcade.missing, different: [] }) as { absent: string[]; different: string[] };

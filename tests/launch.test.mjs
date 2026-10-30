@@ -7,7 +7,7 @@ const ARC = { shortLabel: 'Arcade', emulatorJsCoreId: 'fbneo', emulatorJsSystemI
 const blob = () => new Blob([new Uint8Array(4)]);
 const deps = (extra = {}) => {
   const urls = [];
-  return { urls, games: [], getBios: async () => null, loadCatalogs: async () => ({}), readZipDirectory: async () => [], makeUrl: b => { urls.push(b); return `blob:${urls.length}`; }, revokeUrl: () => {}, ...extra };
+  return { urls, games: [], getBios: async () => null, arcadeSetCatalog: async () => null, readZipDirectory: async () => [], makeUrl: b => { urls.push(b); return `blob:${urls.length}`; }, revokeUrl: () => {}, ...extra };
 };
 
 test('NES: Nestopia first, FCEUmm offered next; a remembered FCEUmm or ?nescore=fceumm goes first', async () => {
@@ -55,7 +55,7 @@ test('a set missing only its CPS2 key is explained, not started', async () => {
   assert.match(launch.blocked.status, /CPS2 şifre anahtarı eksik/);
   assert.match(launch.blocked.message, /Bu zip'te spf2t\.key yok\. CPS2 oyunlarının programı şifreli/);
   assert.doesNotMatch(launch.blocked.message, /\.\./);
-  const different = await keyBlock({ ...game, arcade: { ...game.arcade, different: ['spf2t.key'] } }, { loadCatalogs: async () => ({}), readZipDirectory: async () => [{ name: 'spf2t.key', crc: '00000000', size: 20 }] });
+  const different = await keyBlock({ ...game, arcade: { ...game.arcade, different: ['spf2t.key'] } }, { arcadeSetCatalog: async () => null, readZipDirectory: async () => [{ name: 'spf2t.key', crc: '00000000', size: 20 }] });
   assert.match(different.status, /uyuşmuyor/);
 });
 

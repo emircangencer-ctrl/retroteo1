@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { identifyArcadeZip, validateSet, validateBios, biosOf, arcadeLayout, describeArcadeStatus, loadCatalog, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary, wasmSimdSupported, arcadeCoreSupported } from '../src/arcade.js';
+import { identifyArcadeZip, validateSet, validateBios, biosOf, arcadeLayout, describeArcadeStatus, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary, wasmSimdSupported, arcadeCoreSupported } from '../src/arcade.js';
 import { readZipDirectory } from '../src/zip-rom.js';
 import { placeholderWithCrc, writeZip, crc32, placeholderSet } from '../e2e/fixtures/zip-writer.mjs';
 
@@ -80,16 +80,6 @@ test('an unknown zip is not treated as an arcade game', () => {
   assert.equal(identifyArcadeZip('holiday-photos.zip', [{ name: 'a.jpg', size: 10, crc: '12345678' }], catalogs), null);
 });
 
-test('the catalog loader caches one request per core and retries after a failure', async () => {
-  let calls = 0;
-  const failing = async () => { calls++; return { ok: false, status: 503 }; };
-  await assert.rejects(loadCatalog('fbneo', failing), /503/);
-  const ok = async () => { calls++; return { ok: true, json: async () => ({ games: {} }) }; };
-  await loadCatalog('fbneo', ok);
-  await loadCatalog('fbneo', ok);
-  assert.equal(calls, 2);
-});
-
 test('placeholder files reproduce a listed size and CRC32 exactly, and the zip directory reads them back', async () => {
   const data = placeholderWithCrc(4096, '9036d879');
   assert.equal(data.length, 4096);
@@ -100,8 +90,8 @@ test('placeholder files reproduce a listed size and CRC32 exactly, and the zip d
 });
 
 test('the shipped catalogs match the cores RetroPlay serves', async () => {
-  const fb = JSON.parse(await readFile(new URL('../public/assets/arcade-fbneo.json', import.meta.url), 'utf8'));
-  const m2p = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
+  const fb = JSON.parse(await readFile(new URL('../data/arcade/arcade-fbneo.json', import.meta.url), 'utf8'));
+  const m2p = JSON.parse(await readFile(new URL('../data/arcade/arcade-mame2003plus.json', import.meta.url), 'utf8'));
   assert.match(fb.version, /v1\.0\.0\.03.*dedd04f2/);
   assert.match(m2p.version, /3a72dae/);
   assert.equal(Object.keys(fb.games).length, 7889);
@@ -224,8 +214,8 @@ struct BurnDriver BurnDrvCpsXmvsfr1 = {
 });
 
 test("the shipped FB Alpha 2012 CPS2 list runs the user's old X-Men Vs. Street Fighter set without a key", async () => {
-  const fba = JSON.parse(await readFile(new URL('../public/assets/arcade-fba2012-cps2.json', import.meta.url), 'utf8'));
-  const fb = JSON.parse(await readFile(new URL('../public/assets/arcade-fbneo.json', import.meta.url), 'utf8'));
+  const fba = JSON.parse(await readFile(new URL('../data/arcade/arcade-fba2012-cps2.json', import.meta.url), 'utf8'));
+  const fb = JSON.parse(await readFile(new URL('../data/arcade/arcade-fbneo.json', import.meta.url), 'utf8'));
   assert.equal(Object.keys(fba.games).length, 284);
   assert.ok(Object.values(fba.games).every(game => game[6].every(([name]) => !/\.key$/.test(name))), 'no key files in FB Alpha 2012 sets');
   const oldSet = fb.games.xmvsf[6].filter(([name]) => name !== 'xmvsf.key').map(([name, size, crc]) => ({ name, size, crc }));
@@ -252,7 +242,7 @@ test('cabinet controls and player count come from MAME 2003-Plus by set name, th
   // An older catalog entry without the player count reads as unknown (0).
   assert.deepEqual(arcadeInputInfo({ set: 'old' }, { mame2003_plus: { games: { old: ['Old', '', '', '', '', 0, [], [2, 8]] } } }), { buttons: 2, ways: 8, players: 0 });
   assert.equal(arcadeInputInfo({ set: 'unknown' }, catalogs), null);
-  const shipped = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
+  const shipped = JSON.parse(await readFile(new URL('../data/arcade/arcade-mame2003plus.json', import.meta.url), 'utf8'));
   assert.deepEqual(shipped.games.puckman[7], [0, 4, 2]);
   assert.deepEqual(shipped.games.dkong[7], [1, 4, 2]);
   assert.deepEqual(shipped.games['1942'][7], [2, 8, 2]);
@@ -322,9 +312,9 @@ GAMEX( 1997, tekken3je1, tekken3, coh700s, tekken3, namcos12_h8, ROT90, "Namco",
 });
 
 test("the shipped System 12 list runs the user's Tekken 3 set (TET1/VER.E, 2025 file names) as tekken3je1", async () => {
-  const next = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus-next.json', import.meta.url), 'utf8'));
-  const m2p = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
-  const fb = JSON.parse(await readFile(new URL('../public/assets/arcade-fbneo.json', import.meta.url), 'utf8'));
+  const next = JSON.parse(await readFile(new URL('../data/arcade/arcade-mame2003plus-next.json', import.meta.url), 'utf8'));
+  const m2p = JSON.parse(await readFile(new URL('../data/arcade/arcade-mame2003plus.json', import.meta.url), 'utf8'));
+  const fb = JSON.parse(await readFile(new URL('../data/arcade/arcade-fbneo.json', import.meta.url), 'utf8'));
   assert.equal(next.core, 'mame2003_plus_next');
   assert.match(next.version, /64b3c38a.*namcos12\.c/);
   assert.equal(Object.keys(next.games).length, 53);
@@ -351,7 +341,7 @@ test('the 2026 MAME 2003-Plus build needs WebAssembly SIMD; the other arcade cor
 test('starting an arcade game reads the small controls table, identical to the controls in the MAME catalog', async () => {
   const { arcadeInputInfo, loadArcadeInput, ARCADE_INPUT_URL } = await import('../src/arcade.js');
   const { inputTable } = await import('../scripts/build-arcade-catalogs.mjs');
-  const shipped = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
+  const shipped = JSON.parse(await readFile(new URL('../data/arcade/arcade-mame2003plus.json', import.meta.url), 'utf8'));
   const table = JSON.parse(await readFile(new URL('../public/assets/arcade-input.json', import.meta.url), 'utf8'));
   assert.deepEqual(table, inputTable(shipped.games), 'arcade-input.json is generated from the shipped catalog');
   assert.equal(Object.keys(table.games).length, Object.values(shipped.games).filter(game => Array.isArray(game[7])).length);

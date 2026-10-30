@@ -233,6 +233,16 @@ and ROM sizes/CRC32s (no game data): FinalBurn Neo v1.0.0.03 (EmulatorJS/FBNeo `
 sets), MAME 2003-Plus (`3a72dae`, 5257 sets) and FB Alpha 2012 CPS2 (EmulatorJS/fbalpha2012_cps2
 `3fb5b89`, 284 sets; it ships no DAT, so its ROM tables are read from `d_cps2.c`).
 
+The full lists live in `data/arcade/` (11 MB). The build cuts them into small pieces
+(`scripts/arcade-shards.mjs` → `/assets/arcade/`): sets by name (a ROM a set shares with its
+parent or BIOS is stored as a reference to it) and, per ROM checksum, the sets with that file and
+their file counts. Recognising a zip (`src/arcade-catalog.js`) reads only its set, the sets its
+parent/BIOS chain reaches and — where a core has no set of that name or the zip does not fill it —
+the checksum entries of the zip's files, which give the best-fitting set without reading any set.
+A named zip reads a few dozen KB instead of 1.9 MB compressed / 11 MB of JSON; the result is the
+same as with the full lists (checked for every set of every core, named and renamed). Each piece's
+address carries the lists' stamp, so a piece cached from other lists is never used.
+
 - On import a zip without console ROMs is read from its central directory only and matched by set
   name, or by checksums if it was renamed. FinalBurn Neo is preferred; FB Alpha 2012 CPS2 runs CPS2
   sets from before MAME 0.178 (2016), which lack the 20-byte `.key` file FinalBurn Neo and MAME

@@ -40,8 +40,10 @@ const noCoverRom = path.join(coverDir, 'nothing like it.nes');
 fs.writeFileSync(noCoverRom, checkerVariant(2));
 
 // Arcade sets made of CRC-matched placeholder files (zeros; no game data), built from the catalogs.
-const fbneoCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fbneo.json'), 'utf8'));
-const mameCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-mame2003plus.json'), 'utf8'));
+// (the full lists the build cuts into the pieces the app reads)
+const ARCADE_DATA = path.join(DIST, '..', 'data', 'arcade');
+const fbneoCatalog = JSON.parse(fs.readFileSync(path.join(ARCADE_DATA, 'arcade-fbneo.json'), 'utf8'));
+const mameCatalog = JSON.parse(fs.readFileSync(path.join(ARCADE_DATA, 'arcade-mame2003plus.json'), 'utf8'));
 const arcadeFile = (name, roms, options) => { const file = path.join(tmp, name); fs.writeFileSync(file, placeholderSet(roms, options)); return file; };
 const puckmanZip = arcadeFile('puckman.zip', fbneoCatalog.games.puckman[6]);
 const renamedZip = arcadeFile('Pac Man kopyam.zip', fbneoCatalog.games.puckman[6]);
@@ -59,7 +61,7 @@ fs.mkdirSync(path.dirname(noKeyZip));
 fs.writeFileSync(noKeyZip, placeholderSet(fbneoCatalog.games.spf2t[6], { omit: ['spf2t.key'] }));
 const keyedZip = arcadeFile('spf2t.zip', fbneoCatalog.games.spf2t[6]);
 // Old CPS2 sets FB Alpha 2012 CPS2 knows: a parent and a self-contained clone, both without .key.
-const fbaCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fba2012-cps2.json'), 'utf8'));
+const fbaCatalog = JSON.parse(fs.readFileSync(path.join(ARCADE_DATA, 'arcade-fba2012-cps2.json'), 'utf8'));
 const oldCps2Zip = arcadeFile('megaman2.zip', fbneoCatalog.games.megaman2[6].filter(([name]) => !name.endsWith('.key')));
 const oldCloneZip = arcadeFile('megaman2a.zip', fbaCatalog.games.megaman2a[6]);
 const snesRom = path.join(tmp, 'snes pad.sfc');
@@ -416,8 +418,14 @@ await scenario('the performance meter measures the speed factor and normal play 
 
 // ---- arcade ----------------------------------------------------------------------------------------
 await scenario('an arcade zip is recognised by its set name, checked against FinalBurn Neo and started with it', async page => {
+  const pieces = [];
+  page.on('response', response => { const url = new URL(response.url()); if (url.pathname.startsWith('/assets/arcade')) pieces.push([url.pathname, Number(response.headers()['content-length'] || 0)]); });
   const text = await importFile(page, puckmanZip);
   assert.match(text, /Eklendi: puckman\.zip — Puck Man \(Japan, set 1\) · FinalBurn Neo · tam set/);
+  // Only small pieces of the lists are read (the full lists are not even served).
+  assert.ok(pieces.length > 3 && pieces.length < 60, `${pieces.length} pieces`);
+  assert.ok(pieces.every(([url]) => /^\/assets\/arcade\/(index|[a-z0-9_]+\/[sc]\d+)\.json$/.test(url)), pieces.map(([url]) => url).join(' '));
+  assert.ok(!fs.existsSync(path.join(DIST, 'assets', 'arcade-fbneo.json')));
   const state = await play(page, 'Puck Man');
   assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · FinalBurn Neo/, state.error);
   const loaded = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return { zip: gm.FS.analyzePath('/puckman.zip').exists, info: gm.functions.saveStateInfo() }; });
@@ -1187,7 +1195,7 @@ const pressLength = (events, index) => {
 
 await scenario('desktop arcade: Jeton and Başla in the bar and on 5 / 1; a quick press lasts long enough; EmulatorJS\'s own keys are off', async page => {
   await importFile(page, puckmanZip);
-  // A fresh start (nothing loaded in memory): starting the game reads the small controls table, not the 3.4 MB MAME list.
+  // A fresh start (nothing loaded in memory): starting the game reads the small controls table and no game list.
   await page.evaluate(() => { location.hash = '#/'; });
   await page.reload();
   await page.waitForSelector('#library-games .game-card');
@@ -1195,7 +1203,7 @@ await scenario('desktop arcade: Jeton and Başla in the bar and on 5 / 1; a quic
   page.on('request', request => requests.push(new URL(request.url()).pathname));
   const state = await play(page, 'Puck Man');
   assert.ok(requests.includes('/assets/arcade-input.json'), 'controls table loaded');
-  assert.ok(!requests.some(url => /arcade-(mame2003plus|fbneo|fba2012-cps2)\.json$/.test(url)), `no full game list at start: ${requests.filter(url => url.includes('arcade-')).join(', ')}`);
+  assert.ok(!requests.some(url => url.startsWith('/assets/arcade/')), `no game list at start: ${requests.filter(url => url.includes('arcade')).join(', ')}`);
   assert.equal(await page.evaluate(() => document.querySelector('#play-rewind').hidden), true, 'no rewind on arcade boards');
   assert.equal(await page.evaluate(() => document.querySelector('#play-ff').hidden), false);
   assert.match(state.status, /^Çalışıyor/, state.error);

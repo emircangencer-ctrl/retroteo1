@@ -160,12 +160,14 @@ export function romChecksums(platform: string, bytes: Uint8Array): string[] {
   return [hex(crc32(bytes))];
 }
 
+/** The lists' stamp (vite.config.js) in their address: a list cached from another version is not used. */
+const LISTS = typeof __COVER_LISTS__ === 'string' ? `?v=${__COVER_LISTS__}` : '';
 const indexCache = new Map<string, Promise<CoverIndex>>();
 /** One list (loaded once; cached by the service worker like the other app files). */
 export function loadCoverIndex(key: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<CoverIndex> {
   let pending = indexCache.get(key);
   if (!pending) {
-    pending = fetchImpl(`/assets/covers/${key}.json`).then(response => {
+    pending = fetchImpl(`/assets/covers/${key}.json${LISTS}`).then(response => {
       if (!response.ok) throw new Error(`Kapak listesi yüklenemedi (${response.status}).`);
       return response.json() as Promise<CoverIndex>;
     });

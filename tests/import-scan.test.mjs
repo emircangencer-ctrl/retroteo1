@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { scanFiles, sha256 } from '../src/lib/import-scan.ts';
+import { identifyArcadeZip } from '../src/arcade.js';
 import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom } from '../e2e/fixtures/make-roms.mjs';
 import { placeholderSet, writeZip } from '../e2e/fixtures/zip-writer.mjs';
 
@@ -10,7 +11,7 @@ const fbneo = { games: {
   puckman: ['Puck Man (Japan, set 1)', '1980', 'Namco', '', '', 2, [['pm1.6e', 32, 'aaaaaaaa', ''], ['pm1.6f', 32, 'bbbbbbbb', '']]]
 } };
 const catalogs = { fbneo, mame2003_plus: { games: {} }, fbalpha2012_cps2: { games: {} } };
-const ctx = (extra = {}) => ({ games: [], biosIds: new Set(), loadCatalogs: async () => catalogs, ...extra });
+const ctx = (extra = {}) => ({ games: [], biosIds: new Set(), identifyArcade: async (name, entries) => identifyArcadeZip(name, entries, catalogs), ...extra });
 const file = (name, bytes) => new File([bytes], name);
 const nes = file('battery-test.nes', batteryTestRom());
 const byName = (items, name) => items.find(item => item.fileName === name);

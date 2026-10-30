@@ -429,3 +429,12 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - Real network (this container, Chromium): five NES test cartridges — one carrying Super Mario Bros.'s No-Intro checksum under the name "my game", three named like releases, one unknown — got four covers in ~2.3 s; the unknown one keeps the drawn cover.
 - Tests: unit 315/315 (matching against the shipped lists, checksums, list builder, addresses, article titles). E2E: new scenario with raw.githubusercontent.com answered locally — checksum and name matches, exactly one request per game at the pinned commit, 320 px pictures, nothing fetched after a reload, setting off/on, removal stays after a reload, deleting a game deletes its picture. All other scenarios run with covers on.
 - **Not verified here:** on the user's phone (look of the covers, first fetch over mobile data).
+
+## Stage 47 — arcade lists in small pieces (2026-10-31)
+
+- Before: recognising one arcade zip downloaded and parsed all four lists (10.9 MB JSON, 1.9 MB gzip; FinalBurn Neo alone 67 ms to parse in this container, several times that on a phone), again after every app update.
+- Now: the full lists moved to `data/arcade/`; the build cuts them into pieces (FinalBurn Neo 256 by name + 256 by checksum, MAME 2003-Plus 128 + 256, the small cores 1–8). A ROM shared with the parent/BIOS is a reference (set pieces are half the full lists). A renamed or incomplete zip is scored from the checksum index alone, then only the best-fitting set is read.
+- Measured per import (pieces · JSON read, against 10.9 MB before): sf2.zip 14 · 147 KB; kof98.zip 16 · 174 KB; puckman.zip 28 · 231 KB (MAME 2003-Plus has no "puckman": its Pac-Man sets are found for the alternatives and the 4-way joystick); tekken3.zip 36 · 305 KB; mslug.zip 58 · 468 KB (Neo Geo zips carry the BIOS files); a renamed sf2 76 · 660 KB. Pieces are fetched in parallel, once per session, and kept by the service worker.
+- Same results: an exhaustive comparison of every set of every core, named and renamed (19,864 cases), against identifyArcadeZip over the full lists: 0 differences. Unit test keeps a sample (named, renamed, split, one file missing, BIOS) plus a round trip of every stored set.
+- Service worker shell cache `retroplay-shell-v15`: drops the full lists earlier versions kept (up to 11 MB per device).
+- **Not verified here:** on the user's phone (import speed of a real arcade zip).

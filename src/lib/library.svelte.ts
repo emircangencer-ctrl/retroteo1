@@ -5,7 +5,7 @@ import * as db from './db.ts';
 import type { BiosRecord, Game, SlotId } from './types.ts';
 import { SLOT_IDS } from './types.ts';
 import { readZipDirectory } from '../zip-rom.js';
-import { loadCatalogs, identifyArcadeZip } from '../arcade.js';
+import { identifyArcade } from '../arcade-catalog.js';
 import { ARCADE_CATALOG_REV, arcadeRecord, needsArcadeRecheck } from './arcade-records.ts';
 import { showToast } from './toast.svelte.ts';
 import { coverArt } from './cover-art.svelte.ts';
@@ -144,8 +144,8 @@ class Library {
   async recheckArcadeGame(game: Game): Promise<Game> {
     if (!needsArcadeRecheck(game) || !game.arcade) return game;
     try {
-      const [entries, catalogs] = await Promise.all([readZipDirectory(game.blob!), loadCatalogs()]);
-      const found = identifyArcadeZip(game.fileName || `${game.arcade.set}.zip`, entries, catalogs);
+      const entries = await readZipDirectory(game.blob!);
+      const found = await identifyArcade(game.fileName || `${game.arcade.set}.zip`, entries);
       const moves = game.arcade.status === 'incomplete' || (found?.kind === 'game' && found.core === 'mame2003_plus_next' && found.status !== 'incomplete');
       const arcade = found?.kind === 'game' && moves ? arcadeRecord(found) : { ...game.arcade, checkedWith: ARCADE_CATALOG_REV };
       const current = this.get(game.id) || game;

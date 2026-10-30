@@ -1,6 +1,7 @@
 // Builds RetroPlay's compact arcade catalogs from the DAT files of the exact core builds shipped
 // with EmulatorJS 4.2.3. The output holds set names, titles and ROM sizes/CRC32s only — no game
-// data. Run when the cores change:
+// data. The full catalogs live in data/arcade/; the app reads them as small pieces that the build
+// makes from them (scripts/arcade-shards.mjs). Run when the cores change:
 //
 //   node scripts/build-arcade-catalogs.mjs <fbneo-arcade.dat> <mame2003-plus.xml> <fba2012-d_cps2.c>
 //   node scripts/build-arcade-catalogs.mjs --next <mame2003-plus src/drivers>   (RetroPlay's own MAME 2003-Plus build)
@@ -18,7 +19,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT_DIR = path.join(root, 'public', 'assets');
+const OUT_DIR = path.join(root, 'data', 'arcade');
+const PUBLIC_DIR = path.join(root, 'public', 'assets');
 
 const decode = text => text.replace(/&(amp|lt|gt|quot|apos|#(\d+));/g, (_, name, code) => code ? String.fromCharCode(Number(code)) : { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[name]);
 const attrs = tag => Object.fromEntries([...tag.matchAll(/([a-z_]+)="([^"]*)"/g)].map(([, key, value]) => [key, decode(value)]));
@@ -101,9 +103,9 @@ export function compactFbaDriverSource(source) {
   return games;
 }
 
-function write(file, catalog) {
+function write(file, catalog, dir = OUT_DIR) {
   const json = JSON.stringify(catalog);
-  fs.writeFileSync(path.join(OUT_DIR, file), json);
+  fs.writeFileSync(path.join(dir, file), json);
   return json.length;
 }
 
@@ -163,7 +165,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // node scripts/build-arcade-catalogs.mjs --input   (from the shipped MAME 2003-Plus catalog)
   const mame = JSON.parse(fs.readFileSync(path.join(OUT_DIR, 'arcade-mame2003plus.json'), 'utf8'));
   const table = inputTable(mame.games);
-  const size = write('arcade-input.json', table);
+  const size = write('arcade-input.json', table, PUBLIC_DIR);
   console.log(`arcade-input: ${Object.keys(table.games).length} sets, ${(size / 1e3).toFixed(1)} KB`);
 } else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--next') {
   // node scripts/build-arcade-catalogs.mjs --next <src/drivers directory of the pinned commit>
@@ -185,6 +187,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const a = write('arcade-fbneo.json', fbneo);
   const b = write('arcade-mame2003plus.json', mame);
   const c = write('arcade-fba2012-cps2.json', fba);
-  write('arcade-input.json', inputTable(mame.games));
+  write('arcade-input.json', inputTable(mame.games), PUBLIC_DIR);
   console.log(`fbneo: ${Object.keys(fbneo.games).length} sets, ${(a / 1e6).toFixed(2)} MB; mame2003_plus: ${Object.keys(mame.games).length} sets, ${(b / 1e6).toFixed(2)} MB; fbalpha2012_cps2: ${Object.keys(fba.games).length} sets, ${(c / 1e6).toFixed(2)} MB`);
 }

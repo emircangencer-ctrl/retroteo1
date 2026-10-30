@@ -1,5 +1,6 @@
 // Import, step 2: the review list the user confirms, then storing the chosen files.
-import { loadCatalogs, describeArcadeStatus } from '../arcade.js';
+import { describeArcadeStatus } from '../arcade.js';
+import { identifyArcade } from '../arcade-catalog.js';
 import { app } from './app-state.svelte.ts';
 import { classifyImport } from '../import-match.js';
 import { platformInfo } from '../platforms.js';
@@ -68,7 +69,7 @@ class Importer {
     this.scanTotal = list.length;
     void this.estimate();
     const games = [...library.games, ...previous.filter(item => item.selected && item.hash).map(item => ({ id: item.key, title: item.title, platform: item.platform, contentHash: item.hash, blob: item.file } as Game))];
-    const result = await scanFiles(list, { games, biosIds: library.biosIds, loadCatalogs }, {
+    const result = await scanFiles(list, { games, biosIds: library.biosIds, identifyArcade }, {
       folder,
       onProgress: (done, total) => { if (generation === this.#generation) { this.scanDone = done; this.scanTotal = total; } }
     });
@@ -119,7 +120,7 @@ class Importer {
 
   /** Scans and stores files without the review screen (BIOS chosen in Settings or in the player). */
   async importDirect(files: File[] | FileList): Promise<CommitSummary & { results: string }> {
-    const result = await scanFiles([...files], { games: library.games, biosIds: library.biosIds, loadCatalogs });
+    const result = await scanFiles([...files], { games: library.games, biosIds: library.biosIds, identifyArcade });
     const lines = [...result.log];
     const summary = await storeItems(result.items, lines, () => {});
     return { ...summary, results: lines.join('\n') };

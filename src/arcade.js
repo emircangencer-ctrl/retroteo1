@@ -4,22 +4,24 @@
 // ROM files inside by name/CRC32. A set only works if it matches the core's own ROM set version,
 // so RetroPlay ships the game lists (set name, title, ROM sizes and CRC32s) of the cores it serves:
 // FinalBurn Neo v1.0.0.03, FB Alpha 2012 CPS2, MAME 2003-Plus and RetroPlay's own build of the
-// current MAME 2003-Plus for Namco System 12 (scripts/build-arcade-catalogs.mjs).
+// current MAME 2003-Plus for Namco System 12 (scripts/build-arcade-catalogs.mjs; the app reads them
+// in small pieces, src/arcade-catalog.js).
 // FB Alpha 2012 CPS2 carries the CPS2 decryption keys itself, so it runs CPS2 sets from before
 // MAME 0.178 (2016) that have no .key file, which FinalBurn Neo and MAME 2003-Plus cannot start.
 
 export const ARCADE_CORES = Object.freeze({
-  fbneo: Object.freeze({ id: 'fbneo', label: 'FinalBurn Neo', systemId: 'arcade', catalog: '/assets/arcade-fbneo.json' }),
-  mame2003_plus: Object.freeze({ id: 'mame2003_plus', label: 'MAME 2003-Plus', systemId: 'mame', catalog: '/assets/arcade-mame2003plus.json' }),
+  fbneo: Object.freeze({ id: 'fbneo', label: 'FinalBurn Neo', systemId: 'arcade' }),
+  mame2003_plus: Object.freeze({ id: 'mame2003_plus', label: 'MAME 2003-Plus', systemId: 'mame' }),
   // RetroPlay's own build of the current MAME 2003-Plus (.github/workflows/cores.yml). Its list holds
   // only the drivers it runs better than the 2025 build (Namco System 12: full CPU clock, sound), and
   // a set it can run is started with it even when the older build also knows the zip.
   // It needs WebAssembly SIMD (requiresSimd): without it the game goes to the next core that knows it.
-  mame2003_plus_next: Object.freeze({ id: 'mame2003_plus_next', label: 'MAME 2003-Plus (2026)', systemId: 'mame', catalog: '/assets/arcade-mame2003plus-next.json', supersedes: 'mame2003_plus', requiresSimd: true }),
+  mame2003_plus_next: Object.freeze({ id: 'mame2003_plus_next', label: 'MAME 2003-Plus (2026)', systemId: 'mame', supersedes: 'mame2003_plus', requiresSimd: true }),
   // Its loader opens every zip a clone names (clone and parent) before looking at files.
-  fbalpha2012_cps2: Object.freeze({ id: 'fbalpha2012_cps2', label: 'FB Alpha 2012 CPS2', systemId: 'arcade', catalog: '/assets/arcade-fba2012-cps2.json', opensParentZip: true })
+  fbalpha2012_cps2: Object.freeze({ id: 'fbalpha2012_cps2', label: 'FB Alpha 2012 CPS2', systemId: 'arcade', opensParentZip: true })
 });
-const CORE_ORDER = Object.freeze(['fbneo', 'fbalpha2012_cps2', 'mame2003_plus_next', 'mame2003_plus']);
+export const ARCADE_CORE_ORDER = Object.freeze(['fbneo', 'fbalpha2012_cps2', 'mame2003_plus_next', 'mame2003_plus']);
+const CORE_ORDER = ARCADE_CORE_ORDER;
 
 // (module (func (result v128) v128.const i32x4 0 0 0 0)): valid only where WebAssembly SIMD is.
 const SIMD_PROBE = [0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 22, 1, 20, 0, 253, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11];
@@ -63,25 +65,6 @@ export const KNOWN_BIOS_LABELS = Object.freeze({
   isgsm: 'ISG Selection Master BIOS',
   bubsys: 'Bubble System BIOS'
 });
-
-const catalogCache = new Map();
-
-/** Loads a core's game list (once). `fetchImpl` is injectable for tests. */
-export function loadCatalog(coreId, fetchImpl = globalThis.fetch) {
-  const core = ARCADE_CORES[coreId];
-  if (!core) return Promise.reject(new Error(`Bilinmeyen arcade çekirdeği: ${coreId}`));
-  if (!catalogCache.has(coreId)) {
-    catalogCache.set(coreId, fetchImpl(core.catalog).then(response => {
-      if (!response.ok) throw new Error(`${core.label} oyun listesi yüklenemedi (${response.status}).`);
-      return response.json();
-    }).catch(error => { catalogCache.delete(coreId); throw error; }));
-  }
-  return catalogCache.get(coreId);
-}
-export async function loadCatalogs(fetchImpl) {
-  const entries = await Promise.all(CORE_ORDER.map(async id => [id, await loadCatalog(id, fetchImpl)]));
-  return Object.fromEntries(entries);
-}
 
 const setNameOf = fileName => String(fileName || '').replace(/\\/g, '/').split('/').pop().replace(/\.(zip|7z)$/i, '').toLowerCase();
 const isBiosGame = game => Boolean(game && (game[FLAGS] & (FLAG_BIOS | FLAG_NOT_RUNNABLE)));

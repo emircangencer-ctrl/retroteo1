@@ -8,7 +8,8 @@ import { getEmulatedSystem, supportsRomExtension } from '../emulator-systems.js'
 import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllowed } from '../nes-rom.js';
 import { emulatorGameId, createBatterySaveRecord } from '../save-data.js';
 import { createSaveCapture, decideSaveRestore } from '../save-sync.js';
-import { loadCatalogs, loadArcadeInput, arcadeLayout, arcadeInputInfo, ARCADE_CORES, missingSummary } from '../arcade.js';
+import { loadArcadeInput, arcadeLayout, arcadeInputInfo, ARCADE_CORES, missingSummary } from '../arcade.js';
+import { arcadeSetCatalog } from '../arcade-catalog.js';
 import { needsArcadeRecheck } from '../lib/arcade-records.ts';
 import { readZipDirectory } from '../zip-rom.js';
 import { TouchController } from '../touch-controller.js';
@@ -296,7 +297,7 @@ class PlayerSession {
       const launch = await resolveLaunch(game, system, options, {
         games: library.games,
         getBios: db.getBios,
-        loadCatalogs: loadCatalogs as () => Promise<Record<string, unknown>>,
+        arcadeSetCatalog,
         readZipDirectory,
         forcedNesCore: new URLSearchParams(location.search).get('nescore')
       });
