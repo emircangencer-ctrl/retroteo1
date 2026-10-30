@@ -159,32 +159,37 @@ pair) opens the menu. EmulatorJS's own gamepad loop is stopped when the game sta
 never delivered twice. While a controller is in use the touch pad steps aside (🎮 in the bar
 brings it back; setting "Kontrolcü kullanılınca … gizle").
 
-Keyboard (`KEYBOARD_MAP` in `src/emulatorjs-nes-player.js`, matched by key position): arrows move,
-Z/X/A/S/Q/W are the game buttons (RetroArch's defaults), Start is Enter or 1, Select is Right Shift,
-5, V or Right Ctrl. On arcade games Select is the coin: 5 inserts a coin and 1 starts, as on MAME;
-on a computer the bar also has **Jeton** and **Başla** buttons, the game opens with a hint naming the
-keys, and the line under the picture lists the keys of that game's own buttons (Neo Geo A–D, a
-2-button cabinet's 1–2, the Mega Drive's A B C / X Y Z), with the letters this keyboard prints on
-those keys when the browser reports its layout. Select and Start stay down at least 100 ms however
-short the press (a key tap, a one-frame controller press, a click), because many arcade games
-ignore a shorter coin pulse. RetroPlay is the only keyboard handler of the game: EmulatorJS's own
-bindings (where 1/2/3 save and load its own states) never see a key. While the pause menu is open
-the keyboard drives the menu.
+Keyboard (`KEYBOARD_PLAYERS` in `src/emulatorjs-nes-player.js`, matched by key position): one
+keyboard plays two players at once, from the start, split in two so two people do not get in each
+other's way. Player 1 is on the right: arrows (as on RetroArch and MAME), buttons on J K L (lower row)
+and U I O (upper row), Start Enter or 1, Select Right Shift, 5 or Right Ctrl. Player 2 is on the left:
+W A S D, buttons on F G H and R T Y, Start 2, Select 6 (MAME's player 2 keys). The two 2×3 blocks are
+laid out like the on-screen pads: the lower row holds the pad's main buttons (NES B A; arcade panels
+and the Super Nintendo B A R below, Y X L above; the Mega Drive A B C below, X Y Z above). Only letter
+keys, so places and printed labels hold on Q, F, AZERTY and QWERTZ keyboards. On arcade games Select is
+the coin: 5 / 6 insert a coin and 1 / 2 start, as on MAME; on a computer the bar also has **Jeton**
+and **Başla** buttons, the game opens with a hint naming the keys, and the lines under the picture list
+each player's keys for that game's own buttons, with the letters this keyboard prints on those keys
+when the browser reports its layout. Select and Start stay down at least 100 ms however short the
+press (a key tap, a one-frame controller press, a click), because many arcade games ignore a shorter
+coin pulse. RetroPlay is the only keyboard handler of the game: EmulatorJS's own bindings (where 1/2/3
+save and load its own states) never see a key. While the pause menu is open the keyboard drives the
+menu. Many laptop keyboards drop keys when several are held at once (key rollover), which two players
+can reach in a hectic game.
 
-Several players (`src/players.js`): every input plays as a player, and EmulatorJS passes each player's
-buttons to the core on that player's own port (RetroArch users 1–4). A controller gets a player the
-first time a button is pressed on it — the lowest one no other controller has — and keeps it until it
-is disconnected, so the first controller used is player 1 and the next player 2; a controller nobody
-pressed holds no player (Android phones can list sensors as controllers). Touch and keyboard are
-player 1. With one controller nothing changes from single-player. Games have two players on the
-consoles and the cabinet's count on arcade boards (MAME's `<input players>`, kept in the arcade
-catalog; up to four). The menu's **Kontroller ve oyuncular** chooses the player of the touch pad, the
-keyboard and every connected controller for the app session (a phone's touch pad with a friend's
-controller: make the controller player 2; the touch pad stays on screen while another player's
-controller plays). A second controller says who it plays as when it joins. On arcade boards each
-player's Select and Start are that player's coin and start, and the keyboard has MAME's keys for the
-others: 2 and 6 for player 2's start and coin, 3/7 and 4/8 for players 3 and 4. The TV app's bridge
-hands every controller over in its own slot, so two Bluetooth controllers on the TV are two players.
+Several players (`src/players.js`), with no setting: every input plays as a player, and EmulatorJS
+passes each player's buttons to the core on that player's own port (RetroArch users 1–4). Controllers
+are players in the order they are connected (the browser's controller slots) and keep their player
+until they are disconnected; one connected later takes the lowest free player. A device the browser
+does not map as a standard gamepad takes a player only once a button is pressed on it, so a phone
+sensor listed as a joystick (Pixel fingerprint sensors, "uinput-fpc") never takes player 1. The touch
+pad is player 1 and steps aside only for player 1's controller. Games have two players on the consoles
+and the cabinet's count on arcade boards (MAME's `<input players>`, kept in the arcade catalog; up to
+four); a game with fewer players gives extra controllers to player 1, so any controller plays a
+one-player game. A second controller says who it plays as when it joins, and the menu's **Kontroller
+ve oyuncular** lists the controllers with their players. On arcade boards each player's Select and
+Start are that player's coin and start. The TV app's bridge hands every controller over in its own
+slot, so two Bluetooth controllers on the TV are two players.
 
 The whole interface can be used with a controller: the d-pad or stick moves the focus to the
 nearest item in that direction, A opens or confirms, B goes back, X adds to favourites, Y opens

@@ -18,9 +18,6 @@
   const display = $derived(settings.display);
   const scales = Object.entries(DISPLAY_SCALES) as Array<[DisplayScale, { label: string; hint: string }]>;
   const filters = Object.entries(DISPLAY_FILTERS) as Array<[DisplayFilter, { label: string; hint: string }]>;
-  // Local multiplayer: player numbers this game has, and the note under the choices.
-  const playerNumbers = $derived(Array.from({ length: player.players.count }, (_, i) => i));
-  const otherKeys = $derived([['2', '6'], ['3', '7'], ['4', '8']].slice(0, Math.max(0, player.players.count - 1)).map(([start, coin], i) => `${i + 2}. oyuncu başla ${start}, jeton ${coin}`).join(' · '));
   const fullscreenLabel = $derived(player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran');
 
   // Focus the first control of each view (controller and keyboard users land on it).
@@ -169,34 +166,10 @@
       <div class="panel-body controls">
         <div class="field players" id="players" data-count={player.players.count}>
           <span class="label">Oyuncular</span>
-          {#if player.players.count < 2}
-            <p class="note">Bu oyun tek oyunculu: bütün kontroller 1. oyuncuyu oynatır.</p>
-          {:else}
-            {#if player.touchPlay}
-              <div class="player-row" data-input="touch">
-                <span class="who">Dokunmatik</span>
-                <div class="seg" role="group" aria-label="Dokunmatik kontroller hangi oyuncu">
-                  {#each playerNumbers as n (n)}<button type="button" aria-label="Oyuncu {n + 1}" aria-pressed={player.players.touch === n} data-player={n + 1} onclick={() => player.setTouchPlayer(n)}>{n + 1}</button>{/each}
-                </div>
-              </div>
-            {:else if !tv.active}
-              <div class="player-row" data-input="keyboard">
-                <span class="who">Klavye</span>
-                <div class="seg" role="group" aria-label="Klavye hangi oyuncu">
-                  {#each playerNumbers as n (n)}<button type="button" aria-label="Oyuncu {n + 1}" aria-pressed={player.players.keyboard === n} data-player={n + 1} onclick={() => player.setKeyboardPlayer(n)}>{n + 1}</button>{/each}
-                </div>
-              </div>
-            {/if}
-            {#each player.players.pads as pad (pad.key)}
-              <div class="player-row" data-input="pad" data-pad={pad.index}>
-                <span class="who"><span class="name">{pad.name}</span>{#if pad.player === null}<small>bir tuşa basınca katılır</small>{/if}</span>
-                <div class="seg" role="group" aria-label="{pad.name} hangi oyuncu">
-                  {#each playerNumbers as n (n)}<button type="button" aria-label="Oyuncu {n + 1}" aria-pressed={pad.player === n} data-player={n + 1} onclick={() => player.setPadPlayer(pad, n)}>{n + 1}</button>{/each}
-                </div>
-              </div>
-            {/each}
-            <p class="note" id="players-note">{player.players.pads.length ? 'Kumandalar ilk tuşa basıldıkları sırayla 1., 2. … oyuncu olur; buradan değiştirebilirsin.' : `En çok ${player.players.count} oyuncu: başka oyuncular için kumanda bağla (USB ya da Bluetooth) ve bir tuşa bas.`}{player.isArcade ? ' Her oyuncu kendi kumandasında Select ile jeton atar, Start ile başlar.' : ''}{player.isArcade && !player.touchPlay && !tv.active && otherKeys ? ` Klavyede ${otherKeys}.` : ''}</p>
-          {/if}
+          {#each player.players.pads.filter(pad => pad.player !== null) as pad (pad.key)}
+            <div class="player-row" data-pad={pad.index} data-player={pad.player! + 1}><b>{pad.player! + 1}P</b><span>{pad.name}</span></div>
+          {/each}
+          <p class="note" id="players-note">{player.players.count < 2 ? 'Bu oyun tek oyunculu: bütün kontroller 1. oyuncuyu oynatır.' : `Kumandalar takıldıkları sırayla 1., 2. … oyuncu olur.${player.touchPlay ? ' Dokunmatik tuşlar 1. oyuncudur.' : tv.active ? '' : ' Klavyede iki oyuncu birden oynar: 1. oyuncu sağda (ok tuşları), 2. oyuncu solda (WASD).'}${player.isArcade ? ' Her oyuncu kendi Select tuşuyla jeton atar, Start ile başlar.' : ''}`}</p>
         </div>
         {#if player.touchPlay}
           <div class="touch-settings" id="touch-settings">
@@ -210,8 +183,8 @@
         </div>
         <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.isArcade ? ' Select jeton atar, Start başlatır.' : ''} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
         {#if !player.touchPlay && !tv.active}
-          <p class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span><KeyHints hints={player.keyHints} /></p>
-          <p class="note">{player.isArcade ? 'Jeton için 5, Sağ Shift, V veya Sağ Ctrl; başlamak için 1 ya da Enter.' : 'Start için Enter ya da 1; Select için Sağ Shift, 5, V veya Sağ Ctrl.'}</p>
+          <div class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span>{#each player.keyHintRows as hints, i (i)}<span class="hint-row" data-player={i + 1}>{#if player.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>{/each}</div>
+          <p class="note">{player.isArcade ? '1. oyuncu: jeton 5 veya Sağ Shift, başla 1 veya Enter.' : '1. oyuncu: Start Enter ya da 1, Select Sağ Shift ya da 5.'}{player.keyHintRows.length > 1 ? (player.isArcade ? ' 2. oyuncu: jeton 6, başla 2.' : ' 2. oyuncu: Start 2, Select 6.') : ''}</p>
         {/if}
       </div>
     {/if}

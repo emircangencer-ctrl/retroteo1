@@ -444,7 +444,7 @@ test('SMB3 compatibility fallback accepts FCEUmm while keeping NES controls', ()
 });
 
 
-test('coin and start: 5, V, Right Shift and Right Ctrl insert a coin; 1 and Enter start', () => {
+test('coin and start: 5, Right Shift and Right Ctrl insert a coin; 1 and Enter start (player 1)', () => {
   const restore = installFakeBrowser();
   const calls = [];
   let player;
@@ -452,10 +452,10 @@ test('coin and start: 5, V, Right Shift and Right Ctrl insert a coin; 1 and Ente
     player = makePlayer(calls);
     player.started = true;
     player.boundFrameLoad();
-    for (const code of ['Digit5', 'KeyV', 'ShiftRight', 'ControlRight', 'Digit1', 'Enter', 'NumpadEnter']) {
+    for (const code of ['Digit5', 'ShiftRight', 'ControlRight', 'Digit1', 'Enter', 'NumpadEnter']) {
       calls.length = 0;
       player.frame.contentWindow.dispatchEvent(keyEvent('keydown', code, code, code === 'ControlRight' ? { ctrlKey: true } : {}));
-      const select = ['Digit5', 'KeyV', 'ShiftRight', 'ControlRight'].includes(code);
+      const select = ['Digit5', 'ShiftRight', 'ControlRight'].includes(code);
       assert.deepEqual(calls, [[0, select ? 2 : 3, 1]], code);
       player.releaseAllButtons();
     }
@@ -473,13 +473,14 @@ test('keys typed in the emulator frame never reach EmulatorJS\'s own key handlin
     player = makePlayer(calls);
     player.started = true;
     player.boundFrameLoad();
-    // EmulatorJS binds 2 to "load state" and E to R; RetroPlay leaves them unmapped and stops them.
-    for (const code of ['Digit2', 'KeyE', 'Tab', 'Digit5']) {
+    // EmulatorJS binds 2 to "load state", 3 to "change slot" and E to R; RetroPlay stops them (2 is
+    // player 2's Start, the others are unmapped).
+    for (const code of ['Digit3', 'KeyE', 'Tab', 'Digit5', 'Digit2']) {
       const event = keyEvent('keydown', code);
       player.frame.contentWindow.dispatchEvent(event);
       assert.equal(event.stopped, true, code);
     }
-    assert.deepEqual(calls, [[0, 2, 1]], 'only 5 (coin) presses a button');
+    assert.deepEqual(calls, [[0, 2, 1], [1, 3, 1]], '5 is player 1\'s coin, 2 player 2\'s start; nothing else presses a button');
   } finally {
     try { player?.destroy(); } catch {}
     restore();
@@ -549,8 +550,8 @@ test('a key always lets go of its button, even with Ctrl held by then; Right Ctr
   try {
     player = makePlayer(calls);
     player.started = true;
-    document.dispatchEvent(keyEvent('keydown', 'KeyX'));
-    document.dispatchEvent(keyEvent('keyup', 'KeyX', 'x', { ctrlKey: true }));
+    document.dispatchEvent(keyEvent('keydown', 'KeyK'));
+    document.dispatchEvent(keyEvent('keyup', 'KeyK', 'k', { ctrlKey: true }));
     assert.deepEqual(calls, [[0, 8, 1], [0, 8, 0]]);
     calls.length = 0;
     document.dispatchEvent(keyEvent('keydown', 'ControlRight', 'Control', { ctrlKey: true }));

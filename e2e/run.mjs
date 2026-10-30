@@ -673,12 +673,13 @@ await scenario('a USB/Bluetooth controller plays the game: buttons by position, 
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-touch-settings')).hideWithGamepad), false, 'the chip brings the touch pad back');
 }, { mobile: true, init: fakePad });
 
-await scenario('two players: the second controller really plays player 2 in the core, the menu changes who plays as whom, the keyboard can be player 2', async page => {
+await scenario('two players with no setting: the second controller is player 2 in the core; one keyboard plays both players at once', async page => {
+  await page.evaluate(() => { window.__padsOn = true; });
   await importFile(page, twoPlayersRom);
   const state = await play(page, 'two players');
   assert.match(state.status, /^Çalışıyor/, state.error);
   await recordInputs(page);
-  // The test cartridge shows red while player 1 holds A, green while player 2 does, black otherwise.
+  // The test cartridge shows red while player 1 holds A, green while player 2 does (green wins), black otherwise.
   const colour = async () => {
     const { image } = await gameScreenshot(page);
     const [r, g, b] = image.rgb(Math.floor(image.width / 2), Math.floor(image.height / 2));
@@ -686,43 +687,38 @@ await scenario('two players: the second controller really plays player 2 in the 
   };
   const waitColour = async want => { let got = ''; for (let i = 0; i < 30 && got !== want; i++) { got = await colour(); if (got !== want) await page.waitForTimeout(100); } return got; };
   const hold = (index, button, down) => page.evaluate(([i, b, d]) => { window.__pads[i].buttons[b].pressed = d; window.__pads[i].buttons[b].value = d ? 1 : 0; }, [index, button, down]);
-  const rows = () => page.evaluate(() => [...document.querySelectorAll('#players .player-row')].map(row => `${(row.querySelector('.who .name') || row.querySelector('.who')).textContent.trim()}=${row.querySelector('[aria-pressed="true"]')?.dataset.player || '-'}`));
-  await page.evaluate(() => { window.__padsOn = true; window.dispatchEvent(new Event('gamepadconnected')); });
   assert.equal(await waitColour('black'), 'black', 'nobody holds A');
-  await hold(0, 1, true);
-  assert.equal(await waitColour('red'), 'red', 'the first controller used is player 1');
-  await hold(0, 1, false);
-  assert.equal(await waitColour('black'), 'black');
+  // The second controller is pressed first: it is still player 2 (controllers go by the order they are connected).
   await hold(1, 1, true);
   assert.equal(await waitColour('green'), 'green', 'the second controller is player 2 in the game');
-  await notice(page, /^Oyuncu 2 · Second Pad$/);
-  assert.deepEqual(await page.evaluate(() => window.__inputs.filter(([index, value]) => index === 8 && value).map(([, , player]) => player)), [0, 1], 'A on the first port, then on the second');
   await hold(1, 1, false);
   assert.equal(await waitColour('black'), 'black');
-  // Menu → Kontroller ve oyuncular: the second controller becomes player 1, the keyboard player 2.
+  await hold(0, 1, true);
+  assert.equal(await waitColour('red'), 'red', 'the first controller is player 1');
+  await hold(0, 1, false);
+  assert.equal(await waitColour('black'), 'black');
+  assert.deepEqual(await page.evaluate(() => window.__inputs.filter(([index, value]) => index === 8 && value).map(([, , player]) => player)), [1, 0], 'A on the second port, then on the first');
+  // One keyboard, two players, from the start: K is player 1's A, G player 2's.
+  await page.keyboard.down('k');
+  assert.equal(await waitColour('red'), 'red', 'K: player 1');
+  await page.keyboard.down('g');
+  assert.equal(await waitColour('green'), 'green', 'G at the same time: player 2');
+  await page.keyboard.up('g');
+  assert.equal(await waitColour('red'), 'red', 'player 1 still holds A');
+  await page.keyboard.up('k');
+  assert.equal(await waitColour('black'), 'black');
+  // The menu only says who is who; there is nothing to set.
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.querySelector('#player-modal').classList.contains('menu-open'));
   await click(page, '#touch-settings-open');
-  assert.deepEqual(await rows(), ['Klavye=1', 'First Pad=1', 'Second Pad=2']);
-  assert.match(await page.evaluate(() => document.querySelector('#players-note').textContent), /ilk tuşa basıldıkları sırayla/);
-  await click(page, '#players [data-pad="1"] [data-player="1"]');
-  await click(page, '#players [data-input="keyboard"] [data-player="2"]');
-  assert.deepEqual(await rows(), ['Klavye=2', 'First Pad=1', 'Second Pad=1']);
-  await click(page, '#ts-done');
-  await waitStatus(page, /^Çalışıyor/);
-  // (a button already held when the game resumes waits for a release: the one that closed the menu)
-  await page.waitForTimeout(300);
-  await hold(1, 1, true);
-  assert.equal(await waitColour('red'), 'red', 'the second controller now plays player 1');
-  await hold(1, 1, false);
-  assert.equal(await waitColour('black'), 'black');
-  await page.keyboard.down('x');
-  assert.equal(await waitColour('green'), 'green', 'the keyboard plays player 2');
-  await page.keyboard.up('x');
-  assert.equal(await waitColour('black'), 'black');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#players .player-row')].map(row => row.textContent.trim())), ['1PFirst Pad', '2PSecond Pad']);
+  assert.match(await page.evaluate(() => document.querySelector('#players-note').textContent), /takıldıkları sırayla[\s\S]*Klavyede iki oyuncu birden/);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('#players button').length), 0, 'no choices to make');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#menu-key-hints .hint-row')].map(row => row.querySelector('.who').textContent)), ['1P', '2P']);
 }, { init: fakePads });
 
-await scenario('phone: the touch pad and a friend\'s controller play as two players; the touch pad stays on screen while player 2 plays', async (page, context) => {
+await scenario('phone: the touch pad is player 1 with the first controller; the second controller is player 2 and the touch pad stays on screen for it', async (page, context) => {
+  await page.evaluate(() => { window.__padsOn = true; });
   await importFile(page, twoPlayersRom);
   const state = await play(page, 'two players');
   assert.match(state.status, /^Çalışıyor/, state.error);
@@ -734,30 +730,12 @@ await scenario('phone: the touch pad and a friend\'s controller play as two play
   const waitColour = async want => { let got = ''; for (let i = 0; i < 30 && got !== want; i++) { got = await colour(); if (got !== want) await page.waitForTimeout(100); } return got; };
   const hold = (index, button, down) => page.evaluate(([i, b, d]) => { window.__pads[i].buttons[b].pressed = d; window.__pads[i].buttons[b].value = d ? 1 : 0; }, [index, button, down]);
   const padHidden = () => page.evaluate(() => document.querySelector('#player-modal').classList.contains('pad-hidden'));
-  await page.evaluate(() => { window.__padsOn = true; window.dispatchEvent(new Event('gamepadconnected')); });
-  // One controller alone is player 1 and takes over from the touch pad (single-player as before).
-  await hold(0, 1, true);
-  assert.equal(await waitColour('red'), 'red');
-  await hold(0, 1, false);
-  assert.equal(await padHidden(), true, 'the touch pad steps aside for player 1\'s controller');
-  await click(page, '#play-menu');
-  await click(page, '#touch-settings-open');
-  const rows = () => page.evaluate(() => [...document.querySelectorAll('#players .player-row')].map(row => `${(row.querySelector('.who .name') || row.querySelector('.who')).textContent.trim()}=${row.querySelector('[aria-pressed="true"]')?.dataset.player || '-'}`));
-  assert.deepEqual(await rows(), ['Dokunmatik=1', 'First Pad=1', 'Second Pad=-']);
-  assert.match(await page.evaluate(() => document.querySelector('#players [data-pad="1"] small')?.textContent || ''), /bir tuşa basınca katılır/);
-  await click(page, '#players [data-pad="0"] [data-player="2"]');
-  assert.deepEqual(await rows(), ['Dokunmatik=1', 'First Pad=2', 'Second Pad=-']);
-  await click(page, '#ts-done');
-  await waitStatus(page, /^Çalışıyor/);
-  // (the layout follows on an animation frame)
-  await page.waitForFunction(() => !document.querySelector('#player-modal').classList.contains('pad-hidden'), null, { timeout: 3000 }).catch(() => {});
-  assert.equal(await padHidden(), false, 'the touch pad is back: no controller plays as its player');
-  await page.waitForTimeout(300);
-  await hold(0, 1, true);
-  assert.equal(await waitColour('green'), 'green', 'the friend\'s controller plays player 2');
+  await hold(1, 1, true);
+  assert.equal(await waitColour('green'), 'green', 'the second controller plays player 2');
+  await notice(page, /^Oyuncu 2 · Second Pad$/);
   await page.waitForTimeout(200);
-  assert.equal(await padHidden(), false, 'and the touch pad stays');
-  await hold(0, 1, false);
+  assert.equal(await padHidden(), false, 'the touch pad stays for player 1');
+  await hold(1, 1, false);
   assert.equal(await waitColour('black'), 'black');
   const touch = await touchScreen(context, page);
   const { face } = await padGeometry(page);
@@ -766,6 +744,11 @@ await scenario('phone: the touch pad and a friend\'s controller play as two play
   assert.equal(await waitColour('red'), 'red', 'the touch pad plays player 1');
   await touch('touchEnd', []);
   assert.equal(await waitColour('black'), 'black');
+  // The first controller is player 1 too and takes over from the touch pad (single-player as before).
+  await hold(0, 1, true);
+  assert.equal(await waitColour('red'), 'red');
+  await hold(0, 1, false);
+  await page.waitForFunction(() => document.querySelector('#player-modal').classList.contains('pad-hidden'), null, { timeout: 3000 });
 }, { mobile: true, init: fakePads });
 
 await scenario('every console has its own pad: Super Nintendo diamond with L/R, Mega Drive A B C under X Y Z', async page => {
@@ -951,8 +934,11 @@ await scenario('desktop: sidebar instead of the bottom bar; the game fills the w
   const frame = await page.evaluate(() => { const r = document.querySelector('.player-screen-frame').getBoundingClientRect(); return { w: r.width, h: r.height, cx: r.left + r.width / 2 }; });
   assert.ok(Math.abs(frame.w / frame.h - 4 / 3) < 0.01, `4:3 picture (${frame.w}×${frame.h})`);
   assert.ok(frame.h > 600 && Math.abs(frame.cx - 640) < 2, 'large and centred');
-  // A console game: its own keys under the picture, no coin button, no coin hint.
-  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.desk-hints .key-hint')].map(el => el.textContent.trim())), ['↑↓←→ yön', 'Z B', 'X A', 'Sağ Shift Select', 'Enter Start', 'Esc menü']);
+  // A console game: both players' keys under the picture, no coin button, no coin hint.
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.desk-hints .hint-row')].map(row => [row.querySelector('.who')?.textContent, ...[...row.querySelectorAll('.key-hint')].map(el => el.textContent.trim())].join(' | '))), [
+    '1P | ↑↓←→ yön | J B | K A | Sağ Shift Select | Enter Start | Esc menü',
+    '2P | WASD yön | F B | G A | 6 Select | 2 Start'
+  ]);
   assert.equal(await page.evaluate(() => document.querySelector('#play-coin')), null);
   await page.keyboard.press('Escape');
   await waitStatus(page, /^Duraklatıldı/);
@@ -1017,15 +1003,15 @@ await scenario('desktop arcade: Jeton and Başla in the bar and on 5 / 1; a quic
   const bar = await page.evaluate(() => ['#play-coin', '#play-start'].map(sel => { const el = document.querySelector(sel); return el && getComputedStyle(el).display !== 'none' && !el.disabled ? el.textContent.trim() : null; }));
   assert.deepEqual(bar, ['Jeton5', 'Başla1']);
   // Pac-Man's cabinet has a joystick and no buttons: the hints say exactly that.
-  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.desk-hints .key-hint')].map(el => el.textContent.trim())), ['↑↓←→ joystick', '5 Jeton', '1 Başla', 'Esc menü']);
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.desk-hints .key-hint')].map(el => el.textContent.trim())), ['↑↓←→ joystick', '5 Jeton', '1 Başla', 'Esc menü', 'WASD joystick', '6 Jeton', '2 Başla']);
   await recordTimedInputs(page);
-  for (const [key, index] of [['Digit5', 2], ['Digit1', 3], ['ShiftRight', 2], ['KeyV', 2]]) {
+  for (const [key, index, player] of [['Digit5', 2, 0], ['Digit1', 3, 0], ['ShiftRight', 2, 0], ['Digit6', 2, 1], ['Digit2', 3, 1]]) {
     await page.keyboard.press(key);
     await page.waitForTimeout(220);
     const events = await takeTimed(page);
     const length = pressLength(events, index);
     assert.ok(length !== null && length >= 95, `${key}: held ${length} ms`);
-    assert.equal(events.filter(([i, v]) => v && i !== index).length, 0, `${key} presses only its button`);
+    assert.equal(events.filter(([i, v, , p]) => v && (i !== index || p !== player)).length, 0, `${key} presses only its button, for player ${player + 1}`);
   }
   // The bar button: a real mouse click; the focus leaves it so Space/Enter keep going to the game.
   await page.click('#play-coin');
@@ -1037,9 +1023,9 @@ await scenario('desktop arcade: Jeton and Başla in the bar and on 5 / 1; a quic
   await page.waitForTimeout(300);
   assert.ok(pressLength(await takeTimed(page), 3) >= 130, 'Başla button');
   // Keys typed while the emulator frame has focus: EmulatorJS's own bindings (2 = load its state,
-  // E = R, Tab = L2) stay silent; 2 is player 2's start (MAME's key) and V inserts one coin, not two.
+  // 3 = its slot, E = R, Tab = L2) stay silent; 2 is player 2's start (MAME's key) and 5 inserts one coin, not two.
   await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.focus());
-  for (const key of ['Digit2', 'KeyE', 'Tab', 'KeyV']) await page.keyboard.press(key);
+  for (const key of ['Digit2', 'Digit3', 'KeyE', 'Tab', 'Digit5']) await page.keyboard.press(key);
   await page.waitForTimeout(250);
   events = await takeTimed(page);
   assert.deepEqual(events.filter(([, v]) => v).map(([i, , , player]) => `${player + 1}P:${i}`), ['2P:3', '1P:2'], 'player 2\'s start, then one coin');

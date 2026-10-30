@@ -6,7 +6,8 @@
   interface Props { hints: KeyHint[] }
   let { hints }: Props = $props();
   $effect(() => { keyboardLabels.load(); });
-  const caps = (codes: string[]) => (codes.length === 4 && codes[0] === 'ArrowUp' ? ['↑↓←→'] : codes.map(code => keyboardLabels.cap(code)));
+  // Four direction keys are one cap: ↑↓←→ for the arrows, the letters as printed for WASD (ZQSD on AZERTY).
+  const caps = (codes: string[]) => (codes.length === 4 ? [codes[0] === 'ArrowUp' ? '↑↓←→' : codes.map(code => keyboardLabels.cap(code)).join('')] : codes.map(code => keyboardLabels.cap(code)));
 </script>
 
 {#each hints as hint, i (i)}

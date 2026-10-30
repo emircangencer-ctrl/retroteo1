@@ -65,6 +65,8 @@
 .player .desk-hints .key-hint[data-kind='system'] { color: var(--text-2); }
 .player .desk-hints kbd { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border: 1px solid #3A3F4A; border-radius: 6px; color: #C2C7D0; }
 .player .desk-hints .pad { color: var(--ok-fg); }
+.player .desk-hints .hint-row { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; }
+.player .desk-hints .hint-row .who { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text-2); }
 .player:fullscreen .desk-hints { display: none; }
 
 /* ---- touch play ---- */
@@ -205,13 +207,12 @@
 .player-menu .slot-text .when { font-size: 12px; color: var(--text-2); }
 .player-menu .slot-actions { display: flex; flex-direction: column; gap: 6px; }
 .player-menu .slot-actions .btn { min-height: 34px; padding: 0 12px; font-size: 13px; }
-.player-menu .players { display: flex; flex-direction: column; gap: 8px; }
-.player-menu .player-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.player-menu .player-row .who { min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 14px; font-weight: 600; }
-.player-menu .player-row .who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.player-menu .player-row .who small { font-size: 12px; font-weight: 400; color: var(--text-2); }
-.player-menu .player-row .seg { flex: none; grid-auto-columns: 40px; }
-.player-menu .player-row .seg button { min-height: 36px; padding: 0; font-family: var(--mono); }
+.player-menu .players { display: flex; flex-direction: column; gap: 6px; }
+.player-menu .player-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.player-menu .player-row b { flex: none; min-width: 30px; padding: 2px 6px; border-radius: 6px; background: var(--line); font-family: var(--mono); font-size: 12px; text-align: center; }
+.player-menu .player-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-menu .keys .hint-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.player-menu .keys .hint-row .who { font-family: var(--mono); font-size: 11px; }
 .player-menu .gamepad-status { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-text); font-size: 13px; }
 .player-menu .gamepad-status-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn-fg); }
 .player-menu .gamepad-status[data-state='connected'] { border-color: #1F4D41; background: #0E1F1C; color: #A7DCCC; }

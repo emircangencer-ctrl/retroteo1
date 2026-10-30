@@ -138,7 +138,9 @@
 
   {#if !player.touchPlay && !tv.active && player.open && player.running && !player.menuOpen}
     <p class="desk-hints" aria-hidden="true">
-      <KeyHints hints={player.keyHints} />
+      {#each player.keyHintRows as hints, i (i)}
+        <span class="hint-row" data-player={i + 1}>{#if player.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>
+      {/each}
       {#if gamepadUI.connected}<span class="pad"><Icon name="gamepad" size={16} /> kontrolcü hazır · {player.isArcade ? 'Select jeton · Start başla · ' : ''}Select+Start menü</span>{/if}
     </p>
   {/if}

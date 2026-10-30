@@ -13,27 +13,49 @@ export function emulatorJsDataPath(base = globalThis.location?.href) {
 export const EMULATORJS_INPUT_INDEX = Object.freeze({ BUTTON_B: 0, BUTTON_Y: 1, BUTTON_SELECT: 2, BUTTON_START: 3, BUTTON_UP: 4, BUTTON_DOWN: 5, BUTTON_LEFT: 6, BUTTON_RIGHT: 7, BUTTON_A: 8, BUTTON_X: 9, BUTTON_L: 10, BUTTON_R: 11, BUTTON_L2: 12, BUTTON_R2: 13, BUTTON_L3: 14, BUTTON_R3: 15 });
 const INPUT_INDEX = EMULATORJS_INPUT_INDEX;
 /**
- * Keyboard → RetroPad, by physical key (KeyboardEvent.code). Game buttons follow RetroArch's keyboard
- * defaults (Z/X/A/S/Q/W). Start: Enter, or 1 as on MAME. Select (an arcade coin): 5 as on MAME, Right
- * Shift as on RetroArch, V as EmulatorJS had it, or Right Ctrl as earlier RetroPlay builds; many
- * laptops have no Right Ctrl (new Windows laptops put the Copilot key there).
+ * Two players on one keyboard, by physical key (KeyboardEvent.code), the keyboard split in two:
+ * player 1 on the right (arrows, as on RetroArch and MAME), player 2 on the left (WASD). Each player
+ * has a 2×3 block of buttons beside its directions, laid out like the on-screen pad (lower row:
+ * the main buttons), plus Start and Select: MAME's 1 and 5 (coin) for player 1, with Enter and
+ * Right Shift beside the arrows (Right Ctrl as earlier RetroPlay builds); MAME's 2 and 6 for
+ * player 2. Letters only, so labels and places hold on Q, F, AZERTY and QWERTZ keyboards.
  */
-export const KEYBOARD_MAP = Object.freeze({
-  ArrowUp:'BUTTON_UP', ArrowDown:'BUTTON_DOWN', ArrowLeft:'BUTTON_LEFT', ArrowRight:'BUTTON_RIGHT',
-  KeyZ:'BUTTON_B', KeyX:'BUTTON_A', KeyA:'BUTTON_Y', KeyS:'BUTTON_X', KeyQ:'BUTTON_L', KeyW:'BUTTON_R',
-  Enter:'BUTTON_START', NumpadEnter:'BUTTON_START', Digit1:'BUTTON_START',
-  Digit5:'BUTTON_SELECT', ShiftRight:'BUTTON_SELECT', KeyV:'BUTTON_SELECT', ControlRight:'BUTTON_SELECT'
-});
-const KEY_TO_BUTTON = KEYBOARD_MAP;
+export const KEYBOARD_PLAYERS = Object.freeze([
+  Object.freeze({
+    move: Object.freeze(['ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight']),
+    bottom: Object.freeze(['KeyJ', 'KeyK', 'KeyL']), top: Object.freeze(['KeyU', 'KeyI', 'KeyO']),
+    start: Object.freeze(['Enter', 'NumpadEnter', 'Digit1']), select: Object.freeze(['ShiftRight', 'Digit5', 'ControlRight'])
+  }),
+  Object.freeze({
+    move: Object.freeze(['KeyW', 'KeyA', 'KeyS', 'KeyD']),
+    bottom: Object.freeze(['KeyF', 'KeyG', 'KeyH']), top: Object.freeze(['KeyR', 'KeyT', 'KeyY']),
+    start: Object.freeze(['Digit2']), select: Object.freeze(['Digit6'])
+  })
+]);
+const MOVE_INPUTS = Object.freeze(['BUTTON_UP', 'BUTTON_LEFT', 'BUTTON_DOWN', 'BUTTON_RIGHT']);
 /**
- * Arcade boards: MAME's keys for the other players' start and coin, whoever the keyboard plays as
- * (player 2: 2 and 6, player 3: 3 and 7, player 4: 4 and 8). Values: [player (0 = player 1), button].
+ * The RetroPad buttons of the 2×3 block, placed as on the on-screen pads: arcade panels and the
+ * Super Nintendo have B A R below and Y X L above (FinalBurn Neo / MAME 2003-Plus: kicks below,
+ * punches above), the NES its B A on the left of the lower row; the Mega Drive A B C below and
+ * X Y Z above (Genesis Plus GX: A=Y, B=B, C=A, X=L, Y=X, Z=R).
  */
-export const ARCADE_PLAYER_KEYS = Object.freeze({
-  Digit2: Object.freeze([1, 'BUTTON_START']), Digit6: Object.freeze([1, 'BUTTON_SELECT']),
-  Digit3: Object.freeze([2, 'BUTTON_START']), Digit7: Object.freeze([2, 'BUTTON_SELECT']),
-  Digit4: Object.freeze([3, 'BUTTON_START']), Digit8: Object.freeze([3, 'BUTTON_SELECT'])
+export const BUTTON_BLOCKS = Object.freeze({
+  default: Object.freeze({ bottom: Object.freeze(['BUTTON_B', 'BUTTON_A', 'BUTTON_R']), top: Object.freeze(['BUTTON_Y', 'BUTTON_X', 'BUTTON_L']) }),
+  segaMD: Object.freeze({ bottom: Object.freeze(['BUTTON_Y', 'BUTTON_B', 'BUTTON_A']), top: Object.freeze(['BUTTON_L', 'BUTTON_X', 'BUTTON_R']) })
 });
+/** Key code → [player (0 = player 1), RetroPad button] for an EmulatorJS system. */
+export function keyboardMap(systemId = 'nes') {
+  const block = BUTTON_BLOCKS[systemId] || BUTTON_BLOCKS.default;
+  const map = {};
+  KEYBOARD_PLAYERS.forEach((keys, player) => {
+    keys.move.forEach((code, i) => { map[code] = Object.freeze([player, MOVE_INPUTS[i]]); });
+    keys.bottom.forEach((code, i) => { map[code] = Object.freeze([player, block.bottom[i]]); });
+    keys.top.forEach((code, i) => { map[code] = Object.freeze([player, block.top[i]]); });
+    for (const code of keys.start) map[code] = Object.freeze([player, 'BUTTON_START']);
+    for (const code of keys.select) map[code] = Object.freeze([player, 'BUTTON_SELECT']);
+  });
+  return Object.freeze(map);
+}
 /** Players EmulatorJS passes to the core (RetroArch ports 1–4). */
 export const EMULATORJS_PLAYERS = 4;
 const validPlayer = player => (Number.isInteger(player) && player >= 0 && player < EMULATORJS_PLAYERS ? player : 0);
@@ -143,8 +165,8 @@ export class EmulatorJsPlayer {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
-    this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyToButton=KEY_TO_BUTTON; this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
-    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.keyboardPlayer=0; this.arcadeKeys=systemId==='arcade'||systemId==='mame'; this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
+    this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
+    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
   }
@@ -373,9 +395,9 @@ export class EmulatorJsPlayer {
       try { this.onHotkey('Escape'); } catch {}
       return;
     }
-    const other = this.arcadeKeys ? ARCADE_PLAYER_KEYS[event.code] : null;
-    const name = other ? other[1] : this.keyToButton[event.code] || (event.key === 'Control' && event.location === 2 ? 'BUTTON_SELECT' : null);
-    if (!name) return;
+    const mapped = this.keyMap[event.code] || (event.key === 'Control' && event.location === 2 ? [0, 'BUTTON_SELECT'] : null);
+    if (!mapped) return;
+    const [player, name] = mapped;
     const source = `key:${event.code || event.key}`;
     // A key that comes up always lets go of its button (for the player it pressed it for),
     // whatever modifiers are held by then.
@@ -388,20 +410,8 @@ export class EmulatorJsPlayer {
     event.preventDefault();
     // The iframe's own default keyboard handler must not process the same key a second time.
     event.stopPropagation?.();
-    const player = other ? other[0] : this.keyboardPlayer;
     this.keysDown.set(source, { name, player });
     this.pressButton(name, source, player);
-  }
-  /** The player the keyboard plays as (0 = player 1); keys held now are let go first. */
-  setKeyboardPlayer(player) {
-    const next = validPlayer(player);
-    if (next === this.keyboardPlayer) return;
-    for (const [source, down] of [...this.keysDown]) {
-      if (this.arcadeKeys && ARCADE_PLAYER_KEYS[source.slice(4)]) continue; // other players' start and coin keys stay
-      this.keysDown.delete(source);
-      this.releaseButton(down.name, source, down.player);
-    }
-    this.keyboardPlayer = next;
   }
   /** Holds a RetroPad button of a player (0 = player 1) for one input source. */
   pressButton(name, source = 'pointer', player = 0) {
