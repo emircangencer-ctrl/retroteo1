@@ -92,7 +92,7 @@
     </div>
     <div class="items">
       <button type="button" class="item primary" id="play-menu-close" data-nav-default onclick={() => player.closeMenu()}><Icon name="play" size={18} /><span class="grow">Oyuna dön</span></button>
-      {#if player.isArcade}
+      {#if player.controls.isArcade}
         <div class="item-pair">
           <button type="button" class="item" id="menu-coin" disabled={!player.running} onclick={() => player.tapFromMenu('BUTTON_SELECT')}><Icon name="plus" size={18} /><span class="grow">Jeton at</span></button>
           <button type="button" class="item" id="menu-start" disabled={!player.running} onclick={() => player.tapFromMenu('BUTTON_START')}><Icon name="play" size={18} /><span class="grow">Başla</span></button>
@@ -164,27 +164,27 @@
       </div>
     {:else}
       <div class="panel-body controls">
-        <div class="field players" id="players" data-count={player.players.count}>
+        <div class="field players" id="players" data-count={player.controls.players.count}>
           <span class="label">Oyuncular</span>
-          {#each player.players.pads.filter(pad => pad.player !== null) as pad (pad.key)}
+          {#each player.controls.players.pads.filter(pad => pad.player !== null) as pad (pad.key)}
             <div class="player-row" data-pad={pad.index} data-player={pad.player! + 1}><b>{pad.player! + 1}P</b><span>{pad.name}</span></div>
           {/each}
-          <p class="note" id="players-note">{player.players.count < 2 ? 'Bu oyun tek oyunculu: bütün kontroller 1. oyuncuyu oynatır.' : `Kumandalar takıldıkları sırayla 1., 2. … oyuncu olur.${player.touchPlay ? ' Dokunmatik tuşlar 1. oyuncudur.' : tv.active ? '' : ' Klavyede iki oyuncu birden oynar: 1. oyuncu sağda (ok tuşları), 2. oyuncu solda (WASD).'}${player.isArcade ? ' Her oyuncu kendi Select tuşuyla jeton atar, Start ile başlar.' : ''}`}</p>
+          <p class="note" id="players-note">{player.controls.players.count < 2 ? 'Bu oyun tek oyunculu: bütün kontroller 1. oyuncuyu oynatır.' : `Kumandalar takıldıkları sırayla 1., 2. … oyuncu olur.${player.controls.touchPlay ? ' Dokunmatik tuşlar 1. oyuncudur.' : tv.active ? '' : ' Klavyede iki oyuncu birden oynar: 1. oyuncu sağda (ok tuşları), 2. oyuncu solda (WASD).'}${player.controls.isArcade ? ' Her oyuncu kendi Select tuşuyla jeton atar, Start ile başlar.' : ''}`}</p>
         </div>
-        {#if player.touchPlay}
+        {#if player.controls.touchPlay}
           <div class="touch-settings" id="touch-settings">
-            <TouchSettings prefix="ts" compact arcade={player.platform === 'ARCADE'} fourWay={player.fourWay} />
+            <TouchSettings prefix="ts" compact arcade={player.platform === 'ARCADE'} fourWay={player.controls.fourWay} />
           </div>
         {/if}
-        <div class="gamepad-status" id="gamepad-status" data-state={player.gamepadState} role="status" aria-live="polite">
+        <div class="gamepad-status" id="gamepad-status" data-state={player.controls.gamepadState} role="status" aria-live="polite">
           <span class="gamepad-status-dot" aria-hidden="true"></span>
-          <span id="gamepad-status-text">{player.gamepadText}</span>
-          <button id="refresh-gamepads" class="text-btn" type="button" onclick={() => player.updateGamepadStatus()}>Yeniden tara</button>
+          <span id="gamepad-status-text">{player.controls.gamepadText}</span>
+          <button id="refresh-gamepads" class="text-btn" type="button" onclick={() => player.controls.updateGamepadStatus()}>Yeniden tara</button>
         </div>
-        <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.isArcade ? ' Select jeton atar, Start başlatır.' : ''} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
-        {#if !player.touchPlay && !tv.active}
-          <div class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span>{#each player.keyHintRows as hints, i (i)}<span class="hint-row" data-player={i + 1}>{#if player.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>{/each}</div>
-          <p class="note">{player.isArcade ? '1. oyuncu: jeton 5 veya Sağ Shift, başla 1 veya Enter.' : '1. oyuncu: Start Enter ya da 1, Select Sağ Shift ya da 5.'}{player.keyHintRows.length > 1 ? (player.isArcade ? ' 2. oyuncu: jeton 6, başla 2.' : ' 2. oyuncu: Start 2, Select 6.') : ''} Boşluk hızlı ileri sarar{player.canRewind ? ', Backspace basılı tutulunca geri sarar' : ''}.</p>
+        <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.controls.isArcade ? ' Select jeton atar, Start başlatır.' : ''} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
+        {#if !player.controls.touchPlay && !tv.active}
+          <div class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span>{#each player.controls.keyHintRows as hints, i (i)}<span class="hint-row" data-player={i + 1}>{#if player.controls.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>{/each}</div>
+          <p class="note">{player.controls.isArcade ? '1. oyuncu: jeton 5 veya Sağ Shift, başla 1 veya Enter.' : '1. oyuncu: Start Enter ya da 1, Select Sağ Shift ya da 5.'}{player.controls.keyHintRows.length > 1 ? (player.controls.isArcade ? ' 2. oyuncu: jeton 6, başla 2.' : ' 2. oyuncu: Start 2, Select 6.') : ''} Boşluk hızlı ileri sarar{player.canRewind ? ', Backspace basılı tutulunca geri sarar' : ''}.</p>
         {/if}
       </div>
     {/if}

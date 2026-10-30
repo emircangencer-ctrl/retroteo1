@@ -1,28 +1,23 @@
-// The player: starts a game in EmulatorJS, keeps its saves, the pause menu, the handheld layout
-// on phones, physical controllers and play time. Ported from the earlier app.js player with the
-// same rules (SRAM backup every 30 s, on pause, background and exit; resume point on exit; the
-// unverified-dump consent before any emulator is created; FCEUmm offered, never switched to
-// silently) plus Faz 2: save slots with pictures, play time, controller menu navigation.
+// The player: starts a game in EmulatorJS, the pause menu, save slots, play time, speed modes,
+// fullscreen and leaving. Same rules as the earlier app.js player (SRAM backup every 30 s, on pause,
+// background and exit; resume point on exit; the unverified-dump consent before any emulator is
+// created; FCEUmm offered, never switched to silently). Two parts live in their own files:
+//   controls.svelte.ts  touch pad and layout, physical controllers and players, keyboard hints;
+//   battery.ts          in-game saves (SRAM) kept by the app.
 import { EmulatorJsPlayer } from '../emulatorjs-nes-player.js';
 import { getEmulatedSystem, supportsRomExtension } from '../emulator-systems.js';
 import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllowed } from '../nes-rom.js';
-import { emulatorGameId, createBatterySaveRecord } from '../save-data.js';
-import { createSaveCapture, decideSaveRestore } from '../save-sync.js';
-import { loadArcadeInput, arcadeLayout, arcadeInputInfo, ARCADE_CORES, missingSummary } from '../arcade.js';
+import { emulatorGameId } from '../save-data.js';
+import { loadArcadeInput, arcadeInputInfo, ARCADE_CORES, missingSummary } from '../arcade.js';
 import { arcadeSetCatalog } from '../arcade-catalog.js';
 import { needsArcadeRecheck } from '../lib/arcade-records.ts';
 import { readZipDirectory } from '../zip-rom.js';
-import { TouchController } from '../touch-controller.js';
-import { computeTouchLayout, padSpecFor } from '../touch-layout.js';
-import { GamepadPoller } from '../gamepad-input.js';
-import { PadPlayers, playerCount, padName, type PadPlayer } from '../players.js';
-import { inspectGamepads, describeGamepads } from '../gamepad-status.js';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from '../fullscreen.js';
 import { displayStart, displayShader, displayLabel, DISPLAY_SCALES } from '../display-modes.js';
 import { describeResult, paceWarning, deviceSummary, addToHistory } from '../performance-meter.js';
 import * as db from '../lib/db.ts';
 import { library } from '../lib/library.svelte.ts';
-import { settings, type DisplayChoice, type TouchSettings } from '../lib/settings.svelte.ts';
+import { settings, type DisplayChoice } from '../lib/settings.svelte.ts';
 import { showToast } from '../lib/toast.svelte.ts';
 import { gamepadUI } from '../lib/gamepad-ui.svelte.ts';
 import { isPlayable } from '../lib/library-view.ts';
@@ -31,20 +26,18 @@ import { shortTitle } from '../lib/title.ts';
 import { PlayClock } from '../lib/playtime.ts';
 import { importer } from '../lib/importer.svelte.ts';
 import { resolveLaunch, rememberCore, type ExtraFile } from './launch.ts';
-import { keyHints, PRIMARY_SYSTEM_KEY, type KeyHint } from '../lib/key-hints.ts';
+import { PRIMARY_SYSTEM_KEY } from '../lib/key-hints.ts';
 import { keyboardLabels } from '../lib/keyboard-labels.svelte.ts';
 import { tv } from '../lib/tv.svelte.ts';
+import { PlayerControls } from './controls.svelte.ts';
+import { BatterySaves } from './battery.ts';
 import type { Game, SaveStateRecord, SlotId, SlotInfo } from '../lib/types.ts';
 
-export const SAVE_CAPTURE_INTERVAL_MS = 30_000;
 /** RetroArch rewind for the consoles: a state every 2nd frame (Super Nintendo: ~15 % more work per frame). */
 export const REWIND_CONFIG = Object.freeze({ rewind_enable: 'true', rewind_granularity: '2' });
 export type MenuPanel = 'main' | 'slots' | 'display' | 'controls';
 export interface PlayerAction { label: string; run: () => void }
 interface StartOptions { coreOverride?: string; fresh?: boolean; slot?: SlotId }
-
-/** An arcade game's pad: the core that runs it and the cabinet's controls (MAME's input data). */
-type ArcadePad = { core?: string; buttons?: number; ways?: number; players?: number };
 type Player = InstanceType<typeof EmulatorJsPlayer> & { romInfo?: { mapper?: number | null; mapperNumber?: number | null } | null; romDiagnostic?: unknown };
 
 const SLOT_NAMES: Record<SlotId, string> = { auto: 'Devam noktası', quick: 'Hızlı kayıt', '1': 'Yuva 1', '2': 'Yuva 2', '3': 'Yuva 3' };
@@ -68,54 +61,41 @@ class PlayerSession {
   canSave = $state(false);
   canLoad = $state(false);
   slots = $state.raw<SlotInfo[]>([]);
-  touchPlay = $state(false);
-  orientation = $state<'portrait' | 'landscape'>('portrait');
-  padInUse = $state(false);
-  padHidden = $state(false);
   fullscreen = $state(false);
   fullscreenFallback = $state(false);
   perfRunning = $state(false);
   coreId = $state<string | null>(null);
   coreName = $state('');
   vertical = $state(false);
-  padLayout = $state('nes');
-  fourWay = $state(false);
-  /** An arcade game: Select is the coin, Start the player-1 start. */
-  isArcade = $state(false);
-  /** Keyboard keys for the current game's pad (desktop hints). */
-  keyHints = $state.raw<KeyHint[]>([]);
-  /** Several players: how many the game has, and the connected controllers with their players (0 = player 1). */
-  players = $state.raw<{ count: number; pads: PadPlayer[] }>({ count: 2, pads: [] });
   /** Fast forward on; the game running backwards (rewind held); whether this game can rewind. */
   fastForward = $state(false);
   rewinding = $state(false);
   canRewind = $state(false);
-  /** Keyboard keys of each player for the current game (desktop hints): player 1, then player 2. */
-  keyHintRows = $state.raw<KeyHint[][]>([]);
-  gamepadState = $state('unknown');
-  gamepadText = $state('Gamepad durumu kontrol ediliyor…');
   /** Integer scaling chosen at start (changing it applies on the next start). */
   startedDisplay = $state<DisplayChoice | null>(null);
 
+  /** Touch pad, controllers, players and keyboard hints. */
+  readonly controls: PlayerControls = (() => {
+    const session = this;
+    return new PlayerControls({
+      get open() { return session.open; },
+      pressButton: (name, source, index) => session.#emulator?.pressButton?.(name, source, index),
+      releaseButton: (name, source, index) => session.#emulator?.releaseButton?.(name, source, index),
+      fitPicture: () => { try { session.#emulator?.fitInParent?.(); } catch {} },
+      toggleMenu: () => session.toggleMenu(),
+      showNotice: (text, options) => session.showNotice(text, options)
+    });
+  })();
+  #battery = new BatterySaves({ onFailure: message => { if (this.open) this.error = message; } });
+
   #modal: HTMLElement | null = null;
   #screen: HTMLElement | null = null;
-  #touchRoot: HTMLElement | null = null;
   #biosInput: HTMLInputElement | null = null;
   #emulator: Player | null = null;
   #session = 0;
   #autoPaused = false;
   #menuPausedGame = false;
-  #saveCapture: ReturnType<typeof createSaveCapture> | null = null;
-  #saveTimer: ReturnType<typeof setInterval> | 0 = 0;
   #extraFiles: ExtraFile[] = [];
-  #touch: TouchController | null = null;
-  #poller: GamepadPoller | null = null;
-  #pads = new PadPlayers();
-  #playerCount = 2;
-  #padSpec = padSpecFor('NES');
-  #padSource: { platform: string; game: Game | null; arcade: ArcadePad | null } = { platform: 'NES', game: null, arcade: null };
-  #padAspect = 4 / 3;
-  #layoutFrame = 0;
   #noticeTimer: ReturnType<typeof setTimeout> | 0 = 0;
   #noticeId = 0;
   #consentResolve: ((ok: boolean) => void) | null = null;
@@ -128,57 +108,28 @@ class PlayerSession {
   #panelPop: (() => void) | null = null;
   #menuTicket = 0;
   #arcadeNoticeId = 0;
-  #touchQuery: MediaQueryList | null = typeof matchMedia === 'function' ? matchMedia('(hover: none) and (pointer: coarse)') : null;
 
   // ---- set-up ------------------------------------------------------------------------------------
   mount({ modal, screen, touchRoot, biosInput }: { modal: HTMLElement; screen: HTMLElement; touchRoot: HTMLElement; biosInput: HTMLInputElement }) {
     this.#modal = modal;
     this.#screen = screen;
-    this.#touchRoot = touchRoot;
     this.#biosInput = biosInput;
-    this.#touch = new TouchController(touchRoot, {
-      press: (input: string) => this.#emulator?.pressButton?.(input, 'touch'),
-      release: (input: string) => this.#emulator?.releaseButton?.(input, 'touch'),
-      vibrate: typeof navigator.vibrate === 'function' ? (ms: number) => navigator.vibrate(ms) : null
-    });
-    this.#touch.setSettings(settings.touch);
-    this.#pads.onJoin = (pad, player) => this.#padJoined(pad, player);
-    this.touchPlay = this.isTouchPlay();
-    keyboardLabels.load();
-    const relayout = () => { if (this.open) { this.#touch?.releaseAll(); this.scheduleLayout(); } };
-    window.addEventListener('resize', relayout);
-    window.visualViewport?.addEventListener('resize', relayout);
-    screen.ownerDocument.defaultView?.screen?.orientation?.addEventListener?.('change', relayout);
-    this.#touchQuery?.addEventListener?.('change', relayout);
+    this.controls.mount(modal, touchRoot);
     const onFullscreen = () => {
       if (fullscreenElement(document) !== this.#modal && this.fullscreenFallback) this.#setFallback(false);
       this.fullscreen = isFullscreen(document, this.#modal);
-      this.#touch?.releaseAll();
-      this.scheduleLayout();
+      this.controls.releaseTouch();
+      this.controls.scheduleLayout();
     };
     document.addEventListener('fullscreenchange', onFullscreen);
     document.addEventListener('webkitfullscreenchange', onFullscreen);
     document.addEventListener('visibilitychange', () => { void this.#handleVisibility(); });
     window.addEventListener('pagehide', () => this.#pageHide());
-    window.addEventListener('gamepadconnected', () => { this.updateGamepadStatus(); this.#refreshPlayers(); });
-    window.addEventListener('gamepaddisconnected', () => {
-      this.updateGamepadStatus();
-      // A controller that left gives its player back; the touch pad returns when no controller plays player 1.
-      this.#pads.sync(connectedPads());
-      this.#refreshPlayers();
-      if (!this.#playerOneHasPad()) this.#setPadInUse(false);
-    });
-    window.addEventListener('focus', () => this.updateGamepadStatus());
     biosInput.addEventListener('change', () => {
       const files = biosInput.files ? [...biosInput.files] : [];
       biosInput.value = '';
       if (files.length) void this.#importBiosForGame(files);
     });
-    this.updateGamepadStatus();
-  }
-
-  isTouchPlay(): boolean {
-    return Boolean(this.#touchQuery?.matches) || /[?&]touch=1(&|$)/.test(location.search);
   }
 
   // ---- notices -----------------------------------------------------------------------------------
@@ -230,7 +181,7 @@ class PlayerSession {
     if (needsArcadeRecheck(game)) game = await library.recheckArcadeGame(game);
     const session = ++this.#session;
     this.#stopClock();
-    void this.#endSaveSession('switch');
+    void this.#battery.end('switch');
     this.#destroyEmulator();
     this.#releaseExtraFiles();
 
@@ -258,11 +209,11 @@ class PlayerSession {
     }
     this.#closeMenuNow();
     this.#releasePanel();
-    this.touchPlay = this.isTouchPlay();
+    this.controls.touchPlay = this.controls.isTouchPlay();
     gamepadUI.suspend(true);
-    this.updateGamepadStatus();
-    this.renderPad(game.platform, game);
-    this.#startGamepadInput();
+    this.controls.updateGamepadStatus();
+    this.controls.renderPad(game.platform, game);
+    this.controls.startGamepad();
     this.#screen?.replaceChildren();
     // Vertical arcade games (1944, Galaga…) get a portrait picture instead of a small 4:3 box.
     this.vertical = game.platform === 'ARCADE' && Boolean(game.arcade?.vertical);
@@ -328,7 +279,7 @@ class PlayerSession {
         let input: { buttons?: number; ways?: number; players?: number } | null = null;
         try { input = arcadeInputInfo(game.arcade, { input: await loadArcadeInput() }); } catch {}
         if (session !== this.#session) { this.#releaseExtraFiles(); return; }
-        this.renderPad(game.platform, game, { core: candidate.coreId, buttons: input?.buttons, ways: input?.ways, players: input?.players });
+        this.controls.renderPad(game.platform, game, { core: candidate.coreId, buttons: input?.buttons, ways: input?.ways, players: input?.players });
       }
       const display = settings.display;
       const start = displayStart(display);
@@ -378,9 +329,19 @@ class PlayerSession {
         try { await library.save(remembered); game = remembered; } catch (error) { console.warn('[RetroPlay] Çekirdek seçimi kaydedilemedi:', error); }
         this.showNotice(`${used.name} ile açıldı · bu oyun için hatırlandı`, { timeout: 4000 });
       }
-      const saveSync = await this.#syncSaveOnStart(game, player);
+      const saveSync = await this.#battery.syncOnStart(game, player);
       if (session !== this.#session) { player.destroy(); return; }
-      if (saveSync.ok) this.#beginSaveSession(game, player, saveSync.primed);
+      if (saveSync.ok) {
+        this.#battery.begin(game, player, saveSync.primed, {
+          isCurrent: () => this.#emulator === player,
+          onInterval: () => {
+            if (!this.paused && document.visibilityState === 'visible') {
+              void this.#battery.capture('interval');
+              void this.#flushPlaytime();
+            }
+          }
+        });
+      }
       else this.error = `${saveSync.reason}. Mevcut kaydın korunması için bu oturumda oyun içi kayıt yedeği alınmıyor.`;
       this.coreId = used.coreId;
       this.coreName = used.name;
@@ -396,7 +357,7 @@ class PlayerSession {
       if (unverifiedDump && !resumed) this.showNotice('Doğrulanmamış döküm · grafikler orijinalden farklı olabilir', { timeout: 4000 });
       if (session !== this.#session) { player.destroy(); return; }
       // Arcade games wait for a coin. Without a touch pad, say which keys insert it and start.
-      if (game.platform === 'ARCADE' && !this.isTouchPlay() && !resumed && !this.notice) this.#showArcadeKeys();
+      if (game.platform === 'ARCADE' && !this.controls.isTouchPlay() && !resumed && !this.notice) this.#showArcadeKeys();
       else if (tv.active && !this.notice) this.showNotice('Oyun menüsü: kumandanın Geri tuşu', { timeout: 3500 });
 
       this.running = true;
@@ -405,10 +366,10 @@ class PlayerSession {
       player.setImmersive?.(true);
       this.#clock.start(performance.now());
       try { await library.patch(game.id, { lastPlayed: Date.now() }); } catch (error) { console.warn('[RetroPlay] Son oynama kaydedilemedi:', error); }
-      this.scheduleLayout();
+      this.controls.scheduleLayout();
     } catch (error) {
       if (session !== this.#session) return;
-      void this.#endSaveSession('error');
+      void this.#battery.end('error');
       this.#destroyEmulator();
       this.running = false;
       this.status = 'Başlatılamadı';
@@ -429,7 +390,7 @@ class PlayerSession {
     }
     const coin = keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_SELECT);
     const start = keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_START);
-    const two = this.#playerCount > 1 ? ` · 2. oyuncu ${keyboardLabels.cap(PRIMARY_SYSTEM_KEY.player2.BUTTON_SELECT)} / ${keyboardLabels.cap(PRIMARY_SYSTEM_KEY.player2.BUTTON_START)}` : '';
+    const two = this.controls.playerCount > 1 ? ` · 2. oyuncu ${keyboardLabels.cap(PRIMARY_SYSTEM_KEY.player2.BUTTON_SELECT)} / ${keyboardLabels.cap(PRIMARY_SYSTEM_KEY.player2.BUTTON_START)}` : '';
     const pad = gamepadUI.connected ? ' · kumandada Select / Start' : '';
     this.showNotice(`Jeton: ${coin} · Başla: ${start}${two}${pad}`, { action: { label: 'Jeton at', run: () => this.tapInput('BUTTON_SELECT') }, timeout: 9000 });
     this.#arcadeNoticeId = this.notice?.id ?? 0;
@@ -487,70 +448,6 @@ class PlayerSession {
   }
 
   answerConsent(ok: boolean) { this.#consentResolve?.(ok); }
-
-  // ---- battery saves (SRAM) ----------------------------------------------------------------------
-  /**
-   * Loads the app-owned battery save into the core when it differs from what EmulatorJS loaded,
-   * or adopts the emulator's own copy when the app has none yet. ok=false means an existing app
-   * save could not be loaded; capturing is then disabled so that copy is never overwritten.
-   */
-  async #syncSaveOnStart(game: Game, player: Player): Promise<{ ok: boolean; primed: Uint8Array | null; reason?: string }> {
-    let record = null;
-    try { record = await db.getBatterySave(game.id); } catch (error) { console.warn('[RetroPlay] Kayıt okunamadı:', error); return { ok: false, primed: null, reason: 'Kayıt veritabanı okunamadı' }; }
-    const appBytes = record?.bytes ? (record.bytes instanceof Uint8Array ? record.bytes : new Uint8Array(record.bytes)) : null;
-    const coreBytes = player.readSaveData({ flush: false });
-    const decision = decideSaveRestore({ appBytes, coreBytes });
-    if (decision === 'restore-app') {
-      let restored = false;
-      try { restored = player.writeSaveData(appBytes) && player.restartGame(); } catch (error) { console.warn('[RetroPlay] Kayıt geri yüklenemedi:', error); }
-      return restored ? { ok: true, primed: appBytes } : { ok: false, primed: null, reason: 'Kayıt emülatöre yüklenemedi' };
-    }
-    if (decision === 'adopt-core') {
-      try { if (await this.#persistBattery(game, coreBytes)) library.noteSave(game.id); } catch (error) { console.warn('[RetroPlay] Emülatör kaydı uygulamaya alınamadı:', error); }
-      return { ok: true, primed: coreBytes };
-    }
-    if (decision === 'in-sync') return { ok: true, primed: appBytes };
-    // No save anywhere yet: remember the initial SRAM so only real in-game saves are stored.
-    return { ok: true, primed: player.readSaveData({ flush: true }) };
-  }
-
-  async #persistBattery(game: Game, bytes: Uint8Array | null): Promise<boolean> {
-    const record = createBatterySaveRecord(game, { bytes, updatedAt: Date.now() }, getEmulatedSystem(game.platform)?.emulatorJsSystemId);
-    if (!record) return false;
-    await db.putBatterySave(record);
-    return true;
-  }
-
-  #beginSaveSession(game: Game, player: Player, primed: Uint8Array | null) {
-    this.#saveCapture = createSaveCapture({
-      read: () => (this.#emulator === player ? player.readSaveData({ flush: true }) : null),
-      persist: (bytes: Uint8Array) => this.#persistBattery(game, bytes).then(saved => { if (saved) library.noteSave(game.id); return saved; })
-    });
-    this.#saveCapture.prime(primed);
-    if (this.#saveTimer) clearInterval(this.#saveTimer);
-    this.#saveTimer = setInterval(() => {
-      if (!this.paused && document.visibilityState === 'visible') {
-        void this.#captureSave('interval');
-        void this.#flushPlaytime();
-      }
-    }, SAVE_CAPTURE_INTERVAL_MS);
-  }
-
-  /** Copies the live SRAM out of the core synchronously, then persists it asynchronously. */
-  #captureSave(reason: string) {
-    if (!this.#saveCapture) return Promise.resolve(null);
-    return this.#saveCapture.capture(reason).then(result => {
-      if (result?.status === 'failed' && this.open) this.error = `Oyun içi kayıt yerel yedeğe yazılamadı: ${(result.error as Error)?.message || result.error}`;
-      return result;
-    });
-  }
-
-  #endSaveSession(reason: string) {
-    const pending = this.#captureSave(reason);
-    if (this.#saveTimer) { clearInterval(this.#saveTimer); this.#saveTimer = 0; }
-    this.#saveCapture = null;
-    return pending;
-  }
 
   // ---- play time ---------------------------------------------------------------------------------
   #stopClock() { this.#clock.stop(performance.now()); void this.#flushPlaytime(); }
@@ -706,7 +603,7 @@ class PlayerSession {
       this.paused = true;
       this.status = this.#statusLine('Duraklatıldı');
       this.#clock.stop(performance.now());
-      void this.#captureSave('pause');
+      void this.#battery.capture('pause');
       void this.#flushPlaytime();
     } catch (error) {
       this.error = `Duraklatma/devam hatası: ${(error as Error)?.message || error}`;
@@ -736,8 +633,8 @@ class PlayerSession {
     this.panel = 'main';
     // The coin hint's "Jeton at" cannot act on a paused game.
     if (this.notice && this.notice.id === this.#arcadeNoticeId) this.hideNotice();
-    this.#touch?.releaseAll();
-    this.#poller?.stop();
+    this.controls.releaseTouch();
+    this.controls.stopGamepad();
     gamepadUI.suspend(false);
     this.#navPop?.();
     this.#navPop = gamepadUI.push({ root: () => this.#modal?.querySelector<HTMLElement>('#player-menu') || null, modal: true, onAction: action => this.#menuAction(action.type) });
@@ -775,7 +672,7 @@ class PlayerSession {
     const resume = this.#menuPausedGame;
     this.#closeMenuNow();
     gamepadUI.suspend(true);
-    if (this.open) this.#startGamepadInput();
+    if (this.open) this.controls.startGamepad();
     if (resume && this.paused) await this.#resume();
   }
 
@@ -789,15 +686,15 @@ class PlayerSession {
     if (this.#closing) return this.#closing;
     const wasOpen = this.open;
     this.#consentResolve?.(false);
-    this.#touch?.releaseAll();
-    this.#stopGamepadInput();
+    this.controls.releaseTouch();
+    this.controls.stopGamepad();
     const running = this.running && !this.paused && Boolean(this.#emulator);
     this.#closeMenuNow();
     this.#releasePanel();
     this.#clock.stop(performance.now());
     // Read the resume point and SRAM before the emulator goes away; the writes continue afterwards.
     const takenAuto = settings.prefs.autoResume ? this.#takeState('auto') : null;
-    const pendingSave = this.#endSaveSession('close');
+    const pendingSave = this.#battery.end('close');
     const player = this.#emulator;
     const knownShot = this.paused ? this.#pausedShot || this.#recentShot() : null;
     this.#closing = (async () => {
@@ -843,7 +740,7 @@ class PlayerSession {
     if (!this.#emulator) return;
     const thumb = this.paused ? this.#pausedShot || this.#recentShot() : this.#recentShot();
     void this.#storeAuto(thumb);
-    void this.#endSaveSession('pagehide');
+    void this.#battery.end('pagehide');
     this.#clock.stop(performance.now());
     void this.#flushPlaytime();
     this.#destroyEmulator();
@@ -851,13 +748,13 @@ class PlayerSession {
 
   /** Backgrounding (app switch, screen off) saves and pauses; returning resumes an auto-pause. */
   async #handleVisibility() {
-    this.updateGamepadStatus();
+    this.controls.updateGamepadStatus();
     if (!this.#emulator || !this.open) return;
     try {
       if (document.visibilityState === 'hidden') {
-        this.#touch?.releaseAll();
-        this.#poller?.releaseAll();
-        void this.#captureSave('hidden');
+        this.controls.releaseTouch();
+        this.controls.releaseGamepad();
+        void this.#battery.capture('hidden');
         void this.#storeAuto(this.paused ? this.#pausedShot || this.#recentShot() : this.#recentShot());
         this.#clock.stop(performance.now());
         void this.#flushPlaytime();
@@ -950,7 +847,7 @@ class PlayerSession {
   #setFallback(active: boolean) {
     this.fullscreenFallback = active;
     if (active) showToast('Geniş ekran görünümü açıldı. Tarayıcı tam ekran API’sini desteklemediği için adres çubuğu gizlenmeyebilir.');
-    this.scheduleLayout();
+    this.controls.scheduleLayout();
   }
 
   async toggleFullscreen() {
@@ -966,150 +863,18 @@ class PlayerSession {
     const result = await enterFullscreen(modal, document);
     if (!result.supported) {
       // The player already fills the window; only the browser bars stay.
-      if (this.touchPlay) { this.showNotice('Bu tarayıcı tam ekranı desteklemiyor'); return; }
+      if (this.controls.touchPlay) { this.showNotice('Bu tarayıcı tam ekranı desteklemiyor'); return; }
       this.#setFallback(true);
       return;
     }
     if (result.error || !result.entered) {
-      if (this.touchPlay) { this.showNotice('Tarayıcı tam ekrana izin vermedi'); return; }
+      if (this.controls.touchPlay) { this.showNotice('Tarayıcı tam ekrana izin vermedi'); return; }
       this.#setFallback(true);
       return;
     }
     this.fullscreen = true;
-    this.scheduleLayout();
+    this.controls.scheduleLayout();
   }
-
-  // ---- the handheld layout -----------------------------------------------------------------------
-  /**
-   * Chooses the console's pad (and the picture shape) for the game about to start. Arcade:
-   * `arcade` = { core, buttons, ways, players } — the core that runs it and the cabinet's controls.
-   */
-  renderPad(platform: string, game: Game | null = null, arcade: ArcadePad | null = null) {
-    this.#padSource = { platform, game, arcade };
-    this.#playerCount = playerCount(platform, arcade);
-    this.#refreshPlayers();
-    this.#padSpec = padSpecFor(platform, platform === 'ARCADE' ? arcadeLayout(game?.arcade) : 'six', arcade, settings.touch);
-    this.#padAspect = platform === 'ARCADE' && game?.arcade?.vertical ? 3 / 4 : 4 / 3;
-    this.padLayout = this.#padSpec.id;
-    this.fourWay = Boolean(this.#padSpec.fourWay);
-    this.isArcade = platform === 'ARCADE';
-    const systemId = platform === 'MD' ? 'segaMD' : platform.toLowerCase();
-    this.keyHints = keyHints(this.#padSpec, { arcade: this.isArcade, systemId });
-    this.keyHintRows = this.#playerCount > 1 ? [this.keyHints, keyHints(this.#padSpec, { arcade: this.isArcade, systemId, player: 1 })] : [this.keyHints];
-    const root = this.#touchRoot;
-    if (root) { root.dataset.platform = platform; root.dataset.layout = this.#padSpec.id; }
-    this.applyLayout();
-  }
-
-  /** Lays out the player: picture, pad and buttons for the current screen size and orientation. */
-  applyLayout() {
-    const modal = this.#modal;
-    if (!modal || !this.open || !this.#touch) return;
-    const touch = this.isTouchPlay();
-    this.touchPlay = touch;
-    const width = touch ? modal.clientWidth || innerWidth : 393;
-    const height = touch ? modal.clientHeight || innerHeight : 873;
-    const layout = computeTouchLayout({ width, height, safe: touch ? readSafeArea() : {}, aspect: this.#padAspect, spec: this.#padSpec, settings: settings.touch, padHidden: touch && this.padInUse && settings.touch.hideWithGamepad });
-    if (touch) {
-      const vars: Record<string, number> = { '--scr-x': layout.screen.x, '--scr-y': layout.screen.y, '--scr-w': layout.screen.w, '--scr-h': layout.screen.h, '--bar-h': layout.chrome.bar.h, '--bar-pad': layout.chrome.bar.padTop };
-      for (const [name, value] of Object.entries(vars)) modal.style.setProperty(name, `${value}px`);
-      this.orientation = layout.orientation;
-      this.padHidden = Boolean(layout.padHidden);
-    } else {
-      this.padHidden = false;
-    }
-    this.#touch.setSettings(settings.touch);
-    this.#touch.render(layout);
-    requestAnimationFrame(() => { try { this.#emulator?.fitInParent?.(); } catch {} });
-  }
-
-  scheduleLayout() {
-    if (this.#layoutFrame) return;
-    this.#layoutFrame = requestAnimationFrame(() => { this.#layoutFrame = 0; this.applyLayout(); });
-  }
-
-  setTouch(patch: Partial<TouchSettings>) {
-    settings.setTouch(patch);
-    this.#touch?.setSettings(settings.touch);
-    if (this.open) this.renderPad(this.#padSource.platform, this.#padSource.game, this.#padSource.arcade);
-  }
-
-  resetTouch() {
-    settings.resetTouch();
-    this.#touch?.setSettings(settings.touch);
-    if (this.open) this.renderPad(this.#padSource.platform, this.#padSource.game, this.#padSource.arcade);
-  }
-
-  // ---- physical controllers ----------------------------------------------------------------------
-  /** Physical controllers drive the game directly (positional RetroPad mapping, left stick = d-pad). */
-  #startGamepadInput() {
-    if (!this.#poller) {
-      this.#poller = new GamepadPoller({
-        // Each controller is a player, in the order they are connected (players.js).
-        playerFor: (pad, active) => this.#pads.playerFor(pad, { active, count: this.#playerCount }),
-        onChange: (pressed: string[], released: string[], player: number) => {
-          for (const name of released) this.#emulator?.releaseButton?.(name, 'gamepad', player);
-          for (const name of pressed) this.#emulator?.pressButton?.(name, 'gamepad', player);
-        },
-        // Player 1's controller takes over from the touch pad; another player's does not.
-        onActivity: (player: number) => { if (player === 0) this.#setPadInUse(true); },
-        onMenu: () => this.toggleMenu()
-      });
-    }
-    this.#poller.start();
-  }
-
-  #stopGamepadInput() { this.#poller?.stop(); }
-
-  // ---- players ---------------------------------------------------------------------------------
-  #refreshPlayers() {
-    this.players = { count: this.#playerCount, pads: this.#pads.describe(connectedPads(), this.#playerCount) };
-  }
-
-  #playerOneHasPad(): boolean {
-    return this.#pads.describe(connectedPads(), this.#playerCount).some(pad => pad.player === 0);
-  }
-
-  /** A controller got a player: a second one (or more) says who it plays as. */
-  #padJoined(pad: { index: number; id: string }, player: number) {
-    queueMicrotask(() => this.#refreshPlayers());
-    if (player > 0 && player < this.#playerCount) this.showNotice(`Oyuncu ${player + 1} · ${padName(pad)}`, { timeout: 3000 });
-  }
-
-  #setPadInUse(active: boolean) {
-    if (this.padInUse === active) return;
-    this.padInUse = active;
-    if (active) this.#touch?.releaseAll();
-    this.updateGamepadStatus();
-    this.scheduleLayout();
-  }
-
-  /** The 🎮 chip: show or hide the touch pad while a controller is in use. */
-  togglePadWithGamepad() { this.setTouch({ hideWithGamepad: !settings.touch.hideWithGamepad }); }
-
-  updateGamepadStatus() {
-    const status = inspectGamepads(navigator);
-    this.gamepadState = status.state;
-    this.gamepadText = describeGamepads(status);
-    this.#refreshPlayers();
-  }
-}
-
-/** Connected controllers (the TV app's bridge included). */
-function connectedPads(): Array<{ index: number; id: string; connected?: boolean }> {
-  try { return typeof navigator.getGamepads === 'function' ? ([...navigator.getGamepads()].filter(Boolean) as Array<{ index: number; id: string; connected?: boolean }>) : []; } catch { return []; }
-}
-
-let safeAreaProbe: HTMLDivElement | null = null;
-function readSafeArea() {
-  if (!safeAreaProbe) {
-    safeAreaProbe = document.createElement('div');
-    safeAreaProbe.setAttribute('aria-hidden', 'true');
-    safeAreaProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
-    document.body.appendChild(safeAreaProbe);
-  }
-  const style = getComputedStyle(safeAreaProbe);
-  return { top: parseFloat(style.paddingTop) || 0, right: parseFloat(style.paddingRight) || 0, bottom: parseFloat(style.paddingBottom) || 0, left: parseFloat(style.paddingLeft) || 0 };
 }
 
 function revokeAll(files: ExtraFile[] | undefined) {
