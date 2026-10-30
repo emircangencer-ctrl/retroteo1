@@ -1,0 +1,57 @@
+RetroPlay third-party software notices
+====================================
+
+RetroPlay serves the following third-party software from its own site, unmodified except where
+noted. Each emulator core is distributed as published in the EmulatorJS 4.2.3 npm packages; the
+full license text of each core is included inside its .data archive (license.txt) and is shown by
+EmulatorJS. RetroPlay is a personal, non-commercial project.
+
+1. EmulatorJS 4.2.3 — GNU General Public License v3.0
+   Project: https://github.com/EmulatorJS/EmulatorJS
+   Files: /emulatorjs/4.2.3/data/ (loader, runtime, compression helpers, localization).
+   The runtime bundle emulator.min.<hash>.js is built by RetroPlay from the unmodified 4.2.3 sources
+   with a small appended addition (retroarch.cfg extras, files written next to the game, and
+   RetroPlay's own MAME 2003-Plus build registered as a MAME core).
+   Source of the addition: scripts/emulatorjs-runtime.mjs in the RetroPlay repository.
+
+2. RetroArch (built into every EmulatorJS core) — GNU General Public License v3.0
+   Project: https://github.com/libretro/RetroArch
+
+3. Emulator cores (EmulatorJS 4.2.3 builds)
+   - Nestopia UE (NES) — GNU General Public License v2.0 — https://github.com/EmulatorJS/nestopia
+   - FCEUmm (NES) — GNU General Public License v2.0 — https://github.com/EmulatorJS/libretro-fceumm
+   - Snes9x (SNES) — Snes9x non-commercial license — https://github.com/EmulatorJS/snes9x
+   - Genesis Plus GX (Mega Drive) — Genesis Plus GX non-commercial license — https://github.com/EmulatorJS/Genesis-Plus-GX
+   - FinalBurn Neo (arcade) — FinalBurn Neo non-commercial license — https://github.com/EmulatorJS/FBNeo
+   - MAME 2003-Plus (arcade) — MAME non-commercial license — https://github.com/EmulatorJS/mame2003-plus-libretro
+   - FB Alpha 2012 CPS2 (arcade) — FB Alpha non-commercial license — https://github.com/EmulatorJS/fbalpha2012_cps2
+   - MAME 2003-Plus, current sources (arcade, Namco System 12) — MAME non-commercial license (see the
+     license.txt in its .data archive) — built by RetroPlay, not part of the EmulatorJS packages:
+     source https://github.com/libretro/mame2003-plus-libretro at commit 64b3c38ac6dae0fb513e6b881fb3bfc31fca54c4,
+     modified by RetroPlay for speed (a PSX CPU to WebAssembly recompiler, WebAssembly SIMD drawing,
+     interlaced field drawing; the changes are the files in cores/mame2003_plus_next/ of the RetroPlay
+     repository and fall under the same license), compiled with EmulatorJS/RetroArch (commit
+     6dd4353937ef48b6ec0bfbdbb15d1c5992d86927, its pixel conversions compiled with SIMD) and
+     emsdk 3.1.74 by .github/workflows/cores.yml in the RetroPlay repository; files
+     /emulatorjs/4.2.3/data/cores/mame2003_plus_next-*.
+
+4. Arcade game lists (ROM set names, sizes and CRC32 values only)
+   - FinalBurn Neo v1.0.0.03 arcade DAT (EmulatorJS/FBNeo, commit dedd04f2)
+   - MAME 2003-Plus metadata/mame2003-plus.xml (EmulatorJS/mame2003-plus-libretro, commit 3a72dae)
+   - FB Alpha 2012 CPS2 ROM tables from src/burn/drv/capcom/d_cps2.c (EmulatorJS/fbalpha2012_cps2, commit 3fb5b89)
+   - Namco System 12 ROM tables from src/drivers/namcos12.c (libretro/mame2003-plus-libretro, commit 64b3c38a)
+   These lists contain no game data. No ROM, BIOS or game file is distributed with RetroPlay.
+
+5. Interface libraries and fonts bundled into the app (Faz 2)
+   - Svelte 5 (compiled into the app's JavaScript) — MIT License — https://github.com/sveltejs/svelte
+     License text: /licenses/Svelte-MIT.txt
+   - Archivo (variable, width and weight axes; latin and latin-ext subsets) — SIL Open Font License 1.1
+     Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+     Packaged by Fontsource (@fontsource-variable/archivo). License text: /licenses/Archivo-OFL-1.1.txt
+   - IBM Plex Mono (400, 500, 600; latin and latin-ext subsets) — SIL Open Font License 1.1
+     Copyright 2017 IBM Corp. (https://github.com/IBM/plex)
+     Packaged by Fontsource (@fontsource/ibm-plex-mono). License text: /licenses/IBM-Plex-Mono-OFL-1.1.txt
+   - qrcode-generator 2.0 (QR code on the TV's "Telefondan gönder" screen) — MIT License
+     Copyright (c) 2009 Kazuhiko Arase. License text: /licenses/qrcode-generator-MIT.txt
+     "QR Code" is a registered trademark of DENSO WAVE INCORPORATED.
+   The font files are served unmodified (WOFF2 subsets as published by Fontsource).

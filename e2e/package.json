@@ -1,0 +1,12 @@
+{
+  "name": "retroplay-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end tests that run the production build, which serves the pinned EmulatorJS 4.2.3 runtime and cores from RetroPlay's own origin.",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

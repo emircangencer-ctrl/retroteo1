@@ -1,0 +1,187 @@
+/* RetroPlay interface — design tokens and shared building blocks (Faz 2 design). */
+:root {
+  color-scheme: dark;
+  --bg: #0B0C0F;
+  --bg-play: #08090B;
+  --surface: #14161B;
+  --surface-2: #16181E;
+  --surface-3: #1A1C22;
+  --surface-4: #1C1F26;
+  --line: #2A2E37;
+  --line-soft: #22252D;
+  --line-faint: #1F2229;
+  --text: #F2F3F5;
+  --text-2: #A3AAB6;
+  --text-3: #8C94A1;
+  --text-4: #5D6470;
+  --accent: #FF5B2E;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, #14161B);
+  --accent-line: color-mix(in srgb, var(--accent) 55%, #2A2E37);
+  --on-accent: #0B0C0F;
+  --ok-bg: #10233B;
+  --ok-fg: #9CCBFF;
+  --warn-bg: #1A1610;
+  --warn-line: #4A3A18;
+  --warn-icon: #3A2C0E;
+  --warn-fg: #F5B547;
+  --warn-text: #C9C2B4;
+  --danger: #FF8A80;
+  --font: 'Archivo', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r: 12px;
+  --r-md: 14px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --pad-x: 20px;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --nav-h: calc(62px + max(var(--safe-b), 12px));
+  --sidebar-w: 248px;
+  --scanlines: repeating-linear-gradient(0deg, #16181E 0 7px, #1B1E25 7px 8px);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: var(--bg); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+a { color: var(--accent); }
+img { display: block; max-width: 100%; }
+h1, h2, h3, p { margin: 0; }
+[hidden] { display: none !important; }
+
+:focus { outline: none; }
+:focus-visible, html.gp-nav :focus { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
+html.gp-nav :focus { scroll-margin: 96px 24px; }
+
+.sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.mono { font-family: var(--mono); }
+
+/* Headings */
+.display-title { font-stretch: 125%; font-weight: 800; font-size: 26px; letter-spacing: 0.01em; line-height: 1.1; }
+.eyebrow { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); }
+.count { font-family: var(--mono); font-size: 13px; color: var(--text-2); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 48px; padding: 0 18px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: transparent; color: var(--text);
+  font-weight: 600; font-size: 15px; text-decoration: none; white-space: nowrap;
+  transition: background-color 120ms, border-color 120ms, transform 80ms;
+}
+.btn:hover:not(:disabled) { background: var(--surface); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; }
+.btn-primary { border-color: transparent; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 16px; min-height: 52px; }
+.btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #fff); }
+.btn-block { display: flex; width: 100%; }
+.btn-sm { min-height: 40px; padding: 0 14px; font-size: 14px; border-radius: var(--r); }
+.btn-ghost { border-color: transparent; }
+.btn-danger { color: var(--danger); border-color: transparent; }
+.icon-btn {
+  width: 44px; height: 44px; flex: none; display: grid; place-items: center; padding: 0;
+  border-radius: var(--r); border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  text-decoration: none;
+}
+.icon-btn:hover { background: var(--surface-3); }
+.icon-btn.accent { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.text-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none; }
+
+/* Chips and badges */
+.chip {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  font-weight: 600; font-size: 14px; white-space: nowrap;
+}
+.chip[aria-pressed='true'] { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 700; }
+.chip .dot { width: 8px; height: 8px; border-radius: 2px; }
+.chip .n { font-family: var(--mono); font-weight: 500; font-size: 12px; color: var(--text-2); }
+.chip[aria-pressed='true'] .n { color: inherit; }
+.badge { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: var(--r-xs); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.badge.sys { font-family: var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.badge.sys .dot { width: 6px; height: 6px; border-radius: 1px; }
+.badge.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.badge.warn { background: var(--warn-icon); color: var(--warn-fg); }
+.badge.muted { background: var(--surface-4); color: #C2C7D0; }
+
+/* Panels: rounded groups of rows (settings, details) */
+.panel { border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line-soft); display: flex; flex-direction: column; overflow: hidden; }
+.panel > * + * { border-top: 1px solid var(--line-soft); }
+.row { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 14px; color: var(--text); text-decoration: none; background: transparent; border: 0; width: 100%; text-align: left; }
+button.row:hover, a.row:hover { background: var(--surface-3); }
+.row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.row .label { font-size: 15px; font-weight: 600; }
+.row .hint { font-size: 13px; color: var(--text-2); line-height: 1.45; }
+.row.stack { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; }
+.row .value { font-family: var(--mono); font-size: 13px; color: var(--text-2); }
+
+/* Segmented control */
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 4px; border-radius: var(--r); background: var(--bg); }
+.seg button { min-height: 40px; padding: 0 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font-weight: 600; font-size: 14px; }
+.seg button[aria-pressed='true'] { background: var(--line); color: var(--text); }
+.seg button:hover:not([aria-pressed='true']) { color: var(--text); }
+
+/* Switch */
+.switch { position: relative; width: 48px; height: 28px; flex: none; border-radius: 999px; background: #2E323C; border: 0; padding: 3px; display: flex; align-items: center; justify-content: flex-start; transition: background-color 140ms; }
+.switch::after { content: ''; width: 22px; height: 22px; border-radius: 999px; background: #8C94A1; transition: transform 140ms, background-color 140ms; }
+.switch[aria-checked='true'] { background: var(--accent); }
+.switch[aria-checked='true']::after { transform: translateX(20px); background: var(--bg); }
+
+/* Range */
+input[type='range'] { width: 100%; height: 28px; margin: 0; accent-color: var(--accent); background: transparent; }
+
+/* Empty states */
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 40px 20px; border-radius: var(--r-xl); border: 1px dashed var(--line); background: var(--surface); }
+.empty .icon-wrap { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.empty h2 { font-size: 18px; font-weight: 700; }
+.empty p { font-size: 14px; color: var(--text-2); max-width: 36ch; line-height: 1.5; }
+
+/* Page scaffold */
+.page { padding: calc(var(--safe-t) + 16px) var(--pad-x) calc(var(--nav-h) + 28px); display: flex; flex-direction: column; gap: 16px; max-width: 1240px; margin: 0 auto; width: 100%; }
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.page-head .titles { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+@media (min-width: 960px) {
+  :root { --pad-x: clamp(20px, 3vw, 40px); }
+  .page { padding: 28px var(--pad-x) 48px; gap: 24px; }
+  .display-title { font-size: 30px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+/* ---- TV (RetroPlay TV app on Android TV / Google TV, or ?tv=1) ----
+   Content stays inside the TV safe area (48 × 27 px at 960 × 540), focus is always shown and a
+   little stronger, and nothing depends on hovering. */
+html.tv { --tv-x: 48px; --tv-y: 27px; --sidebar-w: 268px; cursor: none; scroll-padding-block: calc(var(--tv-y) + 16px); }
+html.tv .page { padding-top: calc(var(--tv-y) + 4px); padding-right: calc(var(--pad-x) + var(--tv-x) - 20px); padding-bottom: calc(var(--tv-y) + 24px); }
+html.tv .sidebar { padding-left: calc(var(--tv-x) - 8px); padding-top: var(--tv-y); padding-bottom: var(--tv-y); }
+html.tv :focus-visible, html.tv.gp-nav :focus { outline: 4px solid var(--accent); outline-offset: 3px; }
+html.tv .tv-hide { display: none !important; }
+html.tv ::-webkit-scrollbar { display: none; }
+
+/* Browsers without color-mix() (older Android TV WebViews): fixed tints of the default accent. */
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
+  :root { --accent-soft: #2B1A16; --accent-line: #8E3D26; }
+}
+
+/* On the TV only RetroPlay is on screen: anything a host adds next to it (the toolbar Netlify puts
+   into deploy previews, whose frame stays as a white box when its contents are refused) is hidden. */
+html.tv body > :not(#app):not(script):not(style):not(link):not(meta):not(noscript) { display: none !important; }
+html.tv > :not(head):not(body) { display: none !important; }

@@ -1,0 +1,10 @@
+export const DRIVE_READ_SCOPE: string;
+export const DRIVE_API_BASE: string;
+export const DRIVE_FOLDER_MIME: string;
+export function getDriveClientId(env?: Record<string, unknown>): string;
+export function isDriveFolder(file: unknown): boolean;
+export function isSupportedDriveGame(file: unknown): boolean;
+export function loadGoogleIdentity(options?: Record<string, unknown>): Promise<unknown>;
+export function requestDriveAccessToken(options: { clientId: string; googleLike?: unknown }): Promise<string>;
+export function listDriveFiles(options: { accessToken: string; folderId?: string; pageToken?: string; fetchImpl?: typeof fetch }): Promise<{ files: any[]; nextPageToken: string }>;
+export function downloadDriveFile(options: { accessToken: string; fileId: string; maxBytes?: number; fetchImpl?: typeof fetch }): Promise<Blob>;

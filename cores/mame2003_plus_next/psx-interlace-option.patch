@@ -1,0 +1,100 @@
+diff --git a/src/mame.h b/src/mame.h
+index 30123e0..840e01e 100644
+--- a/src/mame.h
++++ b/src/mame.h
+@@ -181,6 +181,7 @@ enum /* used to index content-specific flags */
+   CONTENT_ADSP_DYNAREC,
+   CONTENT_SH3_DYNAREC,
+   CONTENT_TX1_SCREENS,
++  CONTENT_PSX_GPU,
+   CONTENT_end,
+ };
+ 
+diff --git a/src/mame2003/core_options.c b/src/mame2003/core_options.c
+index d3a9234..407446f 100644
+--- a/src/mame2003/core_options.c
++++ b/src/mame2003/core_options.c
+@@ -771,6 +771,22 @@ static struct retro_core_option_v2_definition option_def_mips_dynarec = {
+    "enabled"
+ };
+ 
++/* RetroPlay: interlaced drawing of the PSX GPU (vidhrdw/psx_vidhrdw.c psx_fieldmode) */
++static struct retro_core_option_v2_definition option_def_psx_interlace = {
++   APPNAME"_psx_interlace",
++   "PSX Interlaced Drawing",
++   NULL,
++   "Interlaced 480-line games (Tekken 3 and others): 'fields' draws only the lines of the field that is not on screen, as the hardware does (half the drawing, much faster on phones); 'progressive' draws every line (sharper, twice the drawing).",
++   NULL,
++   NULL,
++   {
++      { "fields",      NULL },
++      { "progressive", NULL },
++      { NULL, NULL },
++   },
++   "fields"
++};
++
+ static struct retro_core_option_v2_definition option_def_adsp_dynarec = {
+    APPNAME"_adsp_dynarec",
+    "ADSP Dynarec",
+@@ -951,6 +967,7 @@ void init_core_options(void)
+   default_options[OPT_DIGITAL_JOY_CENTERING]     = option_def_digital_joy_centering;
+   default_options[OPT_CPU_CLOCK_SCALE]           = option_def_cpu_clock_scale;
+   default_options[OPT_MIPS_DYNAREC]              = option_def_mips_dynarec;
++  default_options[OPT_PSX_INTERLACE]             = option_def_psx_interlace;
+   default_options[OPT_ADSP_DYNAREC]              = option_def_adsp_dynarec;
+   default_options[OPT_SH3_DYNAREC]               = option_def_sh3_dynarec;
+   default_options[OPT_TX1_SCREENS]               = option_def_tx1_screens;
+@@ -990,6 +1007,10 @@ static void set_variables(void)
+          if(!options.content_flags[CONTENT_MIPS_DYNAREC])
+            continue; /* only offered for the games that use the recompiler */
+          break;
++      case OPT_PSX_INTERLACE:
++         if(!options.content_flags[CONTENT_PSX_GPU])
++           continue; /* only offered for the games on the PSX GPU */
++         break;
+       case OPT_ADSP_DYNAREC:
+          if(!options.content_flags[CONTENT_ADSP_DYNAREC])
+            continue; /* only offered for the games that use the recompiler */
+@@ -1317,6 +1338,13 @@ void update_variables(bool first_time)
+             options.mips_dynarec = false;
+           break;
+ 
++        case OPT_PSX_INTERLACE:
++          {
++            extern int psx_fieldmode;
++            psx_fieldmode = strcmp(var.value, "progressive") != 0;
++          }
++          break;
++
+         case OPT_ADSP_DYNAREC:
+           if(strcmp(var.value, "enabled") == 0)
+             options.adsp_dynarec = true;
+@@ -1509,6 +1537,15 @@ void set_content_flags(void)
+     options.content_flags[CONTENT_MIPS_DYNAREC] = true;
+ #endif
+ 
++  /************ PSX GPU (RetroPlay): THE INTERLACED DRAWING OPTION ************/
++#if (HAS_PSXCPU)
++  if (game_driver->source_file
++   && (strstr(game_driver->source_file, "namcos11.c") || strstr(game_driver->source_file, "namcos12.c")
++    || strstr(game_driver->source_file, "zn.c") || strstr(game_driver->source_file, "namcos10.c")
++    || strstr(game_driver->source_file, "konamigq.c")))
++    options.content_flags[CONTENT_PSX_GPU] = true;
++#endif
++
+   /************ DIE HARD: ARCADE ************/
+   if(strcasecmp(game_driver->name, "diehard") == 0)
+     options.content_flags[CONTENT_DIEHARD] = true;
+diff --git a/src/mame2003/mame2003.h b/src/mame2003/mame2003.h
+index 87038cc..086a230 100644
+--- a/src/mame2003/mame2003.h
++++ b/src/mame2003/mame2003.h
+@@ -234,6 +234,7 @@ enum CORE_OPTIONS  /* controls the order in which core options appear. common, i
+   OPT_STV_BIOS,
+   OPT_CPU_CLOCK_SCALE,
+   OPT_MIPS_DYNAREC,
++  OPT_PSX_INTERLACE,
+   OPT_ADSP_DYNAREC,
+   OPT_SH3_DYNAREC,
+   OPT_TX1_SCREENS,

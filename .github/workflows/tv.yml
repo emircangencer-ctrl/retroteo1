@@ -1,0 +1,178 @@
+name: RetroPlay TV
+
+# Builds the Android TV / Google TV app (tv/android), publishes it as the "tv-latest" release
+# (the site's /tv address points there) and runs it on an Android TV emulator against the
+# deploy of the same commit (tv/ci/tv-check.mjs).
+
+# Parked (2026-10-27): runs when the TV app or this workflow changes, or by hand; the web side's TV
+# mode stays covered by the browser E2E (TV scenario).
+on:
+  push:
+    branches:
+      - main
+      - "fix/**"
+    paths:
+      - "tv/**"
+      - ".github/workflows/tv.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tv-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RETROPLAY_URL: ${{ github.ref_name == 'main' && 'https://retroteo1.netlify.app/' || 'https://deploy-preview-2--retroteo1.netlify.app/' }}
+
+jobs:
+  apk:
+    name: Build the TV app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.11.1"
+      - name: Prepare the signing key
+        env:
+          TV_KEYSTORE_BASE64: ${{ secrets.TV_KEYSTORE_BASE64 }}
+          TV_KEYSTORE_SECRET_PASSWORD: ${{ secrets.TV_KEYSTORE_PASSWORD }}
+        run: |
+          # Never in the repository. With the TV_KEYSTORE_BASE64 / TV_KEYSTORE_PASSWORD secrets every
+          # build has the same key (updates install over the app and keep its data); without them
+          # this run makes its own key, and the published APK is replaced only when tv/android changes.
+          KEY="$RUNNER_TEMP/retroplay-tv.p12"
+          if [ -n "$TV_KEYSTORE_BASE64" ] && [ -n "$TV_KEYSTORE_SECRET_PASSWORD" ]; then
+            echo "$TV_KEYSTORE_BASE64" | base64 -d > "$KEY"
+            PASS="$TV_KEYSTORE_SECRET_PASSWORD"
+            echo "TV_SIGNING=stable" >> "$GITHUB_ENV"
+          else
+            PASS=$(openssl rand -hex 16)
+            keytool -genkeypair -keystore "$KEY" -storetype pkcs12 -alias retroplay-tv -keyalg RSA -keysize 3072 -validity 36500 \
+              -storepass "$PASS" -keypass "$PASS" -dname "CN=RetroPlay TV, O=RetroPlay" >/dev/null 2>&1
+            echo "TV_SIGNING=run" >> "$GITHUB_ENV"
+            echo "::warning title=TV signing::No TV_KEYSTORE_* secrets: this build is signed with a key made for this run (see tv/README.md)."
+          fi
+          echo "::add-mask::$PASS"
+          { echo "TV_KEYSTORE_FILE=$KEY"; echo "TV_KEYSTORE_PASSWORD=$PASS"; echo "TV_KEY_ALIAS=retroplay-tv"; } >> "$GITHUB_ENV"
+      - name: Build the APK
+        run: |
+          set -o pipefail
+          gradle -p tv/android assembleRelease --no-daemon --console=plain -PversionCode=${{ github.run_number }} -PretroplayUrl="$RETROPLAY_URL" 2>&1 | tee build.log
+      - name: Report build errors
+        if: failure()
+        run: |
+          grep -nE "error:|e: |What went wrong|FAILURE|Could not|Execution failed|\.java:[0-9]+" build.log | head -40 | while IFS= read -r line; do echo "::error title=TV build::$line"; done
+      - name: Check the APK
+        run: |
+          APK=tv/android/app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK" | head -2
+          "$BT/aapt" dump badging "$APK" | grep -E "^package:|leanback-launchable|application: label|sdkVersion|targetSdkVersion" | while IFS= read -r line; do echo "::notice title=TV apk::$line"; done
+          cp "$APK" RetroPlayTV.apk
+          echo "::notice title=TV apk::$(du -h RetroPlayTV.apk | cut -f1) · sha256 $(sha256sum RetroPlayTV.apk | cut -c1-16) · opens $RETROPLAY_URL"
+      - name: Keep the APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: RetroPlayTV
+          path: RetroPlayTV.apk
+      - name: Publish as tv-latest
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The app's own code (and the address it opens: preview or main) decides when a new APK is
+          # published: a site change reaches the TV without one, and an APK signed with another key
+          # would not install over the old one.
+          # Exception: once the TV_KEYSTORE_* secrets exist, an APK signed for one run is replaced
+          # by the permanently signed one (a single reinstall); a permanent one is never replaced
+          # by a per-run one.
+          SOURCE=$(git ls-files -s tv/android | sha256sum | cut -c1-16)
+          NOTES="RetroPlay TV 1.0.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
+          if gh release view tv-latest >/dev/null 2>&1; then
+            BODY=$(gh release view tv-latest --json body -q .body)
+            HAS_APK=$(gh release view tv-latest --json assets -q '.assets[].name' | grep -cx RetroPlayTV.apk || true)
+            if [ "$TV_SIGNING" = run ] && echo "$BODY" | grep -q "imza stable"; then
+              echo "::warning title=TV release::tv-latest is signed with the permanent key and this build is not (TV_KEYSTORE_* secrets missing); not replaced."
+              exit 0
+            fi
+            if echo "$BODY" | grep -q "kaynak $SOURCE" && echo "$BODY" | grep -qF "açtığı site: $RETROPLAY_URL." && [ "$HAS_APK" = 1 ] && ! { [ "$TV_SIGNING" = stable ] && echo "$BODY" | grep -q "imza run"; }; then
+              echo "::notice title=TV release::The app's code did not change; tv-latest keeps its APK."
+              exit 0
+            fi
+            gh release edit tv-latest --notes "$NOTES"
+          else
+            gh release create tv-latest --prerelease --title "RetroPlay TV" --notes "$NOTES" --target "$GITHUB_SHA"
+          fi
+          gh release upload tv-latest RetroPlayTV.apk --clobber
+          echo "::notice title=TV release::Published RetroPlay TV 1.0.${{ github.run_number }} (source $SOURCE)."
+
+  emulator:
+    name: Run on an Android TV emulator
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: google-tv
+            api: 34
+          - target: android-tv
+            api: 33
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install the checker (Playwright, Android support only)
+        working-directory: e2e
+        run: npm install --no-audit --no-fund
+      - name: Get the APK
+        uses: actions/download-artifact@v7
+        with:
+          name: RetroPlayTV
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Wait for the deploy of this commit
+        run: bash tv/ci/wait-deploy.sh "$RETROPLAY_URL" "$GITHUB_SHA"
+      - name: Run the TV app on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86
+          profile: tv_1080p
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: node tv/ci/tv-check.mjs RetroPlayTV.apk
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tv-ci-${{ matrix.target }}-${{ matrix.api }}
+          path: tv-ci/
+      - name: Attach the screenshots to tv-latest
+        if: always() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -d tv-ci ] || exit 0
+          cd tv-ci
+          for f in *; do mv "$f" "ci-${{ matrix.target }}-${{ matrix.api }}-$f"; done
+          gh release upload tv-latest ci-* --clobber || true

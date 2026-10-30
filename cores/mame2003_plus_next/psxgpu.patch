@@ -1,0 +1,623 @@
+diff --git a/src/vidhrdw/psx_vidhrdw.c b/src/vidhrdw/psx_vidhrdw.c
+index 4a3cda1..e2e83f4 100644
+--- a/src/vidhrdw/psx_vidhrdw.c
++++ b/src/vidhrdw/psx_vidhrdw.c
+@@ -719,6 +719,45 @@ VIDEO_STOP( psx )
+ #else
+ #define PSX_NEON	0
+ #endif
++/* WebAssembly SIMD (browser builds compiled with -msimd128): the same 8
++   pixels at a time, written for it (RetroPlay) */
++#if !PSX_NEON && defined( __wasm_simd128__ )
++#define PSX_WASM_SIMD	1
++#include <wasm_simd128.h>
++#else
++#define PSX_WASM_SIMD	0
++#endif
++
++/*
++	Interlaced field drawing (RetroPlay). In interlaced 480-line mode with
++	drawing to the displayed field off (GP0(E1h) bit 10 clear) the PSX GPU
++	draws only the lines of the field that is not on screen. This driver
++	drew every line (a progressive picture, twice the drawing); with
++	psx_fieldmode on (the default, core option "PSX Interlaced Drawing")
++	it draws as the hardware does, half the lines, and the display shows
++	the field drawn last on both of its lines (bob).
++	GPUSTAT bit 31 is the field being drawn (odd lines when set).
++*/
++#ifndef PSX_FIELDMODE_DEFAULT
++#define PSX_FIELDMODE_DEFAULT	1
++#endif
++int psx_fieldmode = PSX_FIELDMODE_DEFAULT;
++static int m_b_fieldskip;			/* drawing skips the displayed field's lines */
++static UINT32 m_n_fieldparity;		/* lines drawn: ( y & 1 ) == parity */
++static int m_b_fieldshown;			/* the last frame was drawn by fields */
++static UINT32 m_n_fieldshownparity;
++
++#define PSX_DRAW_LINE( y )	( !m_b_fieldskip || ( (UINT32)( y ) & 1 ) == m_n_fieldparity )
++
++#ifdef PSX_GPU_STATS
++/* measurement builds: what the span code draws, reported every 300 frames */
++enum { GS_SPANS, GS_PIXELS, GS_FALLBACK_SPANS, GS_FALLBACK_PIXELS, GS_TP0, GS_TP1, GS_TP2, GS_WIN, GS_FIXROW, GS_SOLID_SPANS, GS_SOLID_PIXELS, GS_REJECT_OVERLAP, GS_REJECT_OTHER, GS_COUNT };
++static unsigned long psx_gs[ GS_COUNT ];
++#define PSX_GS( n, v )	( psx_gs[ ( n ) ] += ( v ) )
++#else
++#define PSX_GS( n, v )	do { } while( 0 )
++#endif
++
+ 
+ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
+ {
+@@ -733,6 +772,17 @@ static void psx_line_to_rgb15( UINT16 *dst, const UINT16 *src, int n )
+ 		uint16x8_t b = vandq_u16( vshrq_n_u16( v, 10 ), m5 );
+ 		vst1q_u16( dst, vorrq_u16( vorrq_u16( r, g ), b ) );
+ 	}
++#elif PSX_WASM_SIMD
++	const v128_t m5 = wasm_i16x8_splat( 0x001f );
++	const v128_t m_g = wasm_i16x8_splat( 0x03e0 );
++	for( ; n >= 8; n -= 8, src += 8, dst += 8 )
++	{
++		v128_t v = wasm_v128_load( src );
++		v128_t r = wasm_i16x8_shl( wasm_v128_and( v, m5 ), 10 );
++		v128_t g = wasm_v128_and( v, m_g );
++		v128_t b = wasm_v128_and( wasm_u16x8_shr( v, 10 ), m5 );
++		wasm_v128_store( dst, wasm_v128_or( wasm_v128_or( r, g ), b ) );
++	}
+ #endif
+ 	while( n-- > 0 )
+ 	{
+@@ -808,6 +858,22 @@ VIDEO_UPDATE( psx )
+ #endif
+ 
+ 	set_visible_area( 0, m_n_screenwidth - 1, 0, m_n_screenheight - 1 );
++#ifdef PSX_GPU_STATS
++	{
++		static unsigned long frames;
++		if( ++frames % 300 == 0 )
++		{
++			const double f = 300.0;
++			fprintf( stderr, "GPUSTATS frame %lu screen %ux%u start %u,%u status %08x drawarea %u,%u-%u,%u offset %d,%d | per frame: spans %.0f px %.0f (tp0 %.0f tp1 %.0f tp2 %.0f win %.0f fixrow %.0f) fallback spans %.0f px %.0f solid spans %.0f px %.0f reject overlap %.0f other %.0f\n",
++				frames, m_n_screenwidth, m_n_screenheight, m_n_displaystartx, m_n_displaystarty, m_n_gpustatus,
++				m_n_drawarea_x1, m_n_drawarea_y1, m_n_drawarea_x2, m_n_drawarea_y2, (int)m_n_drawoffset_x, (int)m_n_drawoffset_y,
++				psx_gs[ GS_SPANS ] / f, psx_gs[ GS_PIXELS ] / f, psx_gs[ GS_TP0 ] / f, psx_gs[ GS_TP1 ] / f, psx_gs[ GS_TP2 ] / f, psx_gs[ GS_WIN ] / f, psx_gs[ GS_FIXROW ] / f,
++				psx_gs[ GS_FALLBACK_SPANS ] / f, psx_gs[ GS_FALLBACK_PIXELS ] / f, psx_gs[ GS_SOLID_SPANS ] / f, psx_gs[ GS_SOLID_PIXELS ] / f,
++				psx_gs[ GS_REJECT_OVERLAP ] / f, psx_gs[ GS_REJECT_OTHER ] / f );
++			memset( psx_gs, 0, sizeof( psx_gs ) );
++		}
++	}
++#endif
+ 
+ 	if( ( m_n_gpustatus & ( 1 << 0x17 ) ) != 0 )
+ 	{
+@@ -889,9 +955,14 @@ VIDEO_UPDATE( psx )
+ 			}
+ 		}
+ 		else
++		{
++		/* drawn by fields: each line shows the line of the field drawn last (bob) */
++		const int bob = psx_fieldmode && m_b_fieldshown &&
++			( m_n_gpustatus & ( ( 1 << 19 ) | ( 1 << 22 ) | ( 1 << 10 ) ) ) == ( ( 1 << 19 ) | ( 1 << 22 ) );
+ 		for( n_y = 0; n_y < (UINT32)n_lines; n_y++ )
+       {
+-         const uint16_t *src = (m_p_p_vram[ n_y + m_n_displaystarty ] + n_x);
++         const UINT32 n_row = ( bob && ( ( n_y + m_n_displaystarty ) & 1 ) != m_n_fieldshownparity ) ? ( ( n_y + m_n_displaystarty ) ^ 1 ) : n_y + m_n_displaystarty;
++         const uint16_t *src = (m_p_p_vram[ n_row ] + n_x);
+          int dy = bitmap->rowpixels;
+          UINT16 *dst = (UINT16 *)bitmap->base + ( n_y + n_top ) * dy;
+          int length = m_n_screenwidth;
+@@ -902,6 +973,7 @@ VIDEO_UPDATE( psx )
+             while (length--)
+                *dst++ = *src++;
+       }
++		}
+ 	}
+ }
+ 
+@@ -1204,7 +1276,7 @@ f  e  d  c| b| a  9| 8  7| 6  5| 4| 3  2  1  0
+ 	high 16 bits masked with umask/vmask (0xff when the caller's
+ 	coordinates are bytes). Returns 1 when the span was drawn.
+ */
+-#if PSX_NEON
++#if PSX_NEON || PSX_WASM_SIMD
+ #define PSX_TEXSPAN			1
+ #else
+ #define PSX_TEXSPAN			0
+@@ -1284,7 +1356,9 @@ static INLINE void psx_texspan_pixel( const struct psx_texspan *s, UINT16 *p_vra
+ /* does the span read the row it draws to (texture rows, CLUT)? */
+ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT16 *p_vram, int n )
+ {
+-	const UINT32 n_row = ( p_vram - m_p_vram ) / m_n_vram_width;
++	/* (shifts and masks when vram is a power of 2 wide and high: no divisions per span) */
++	const UINT32 n_width = m_n_vram_width;
++	const UINT32 n_row = ( n_width & ( n_width - 1 ) ) == 0 ? (UINT32)( p_vram - m_p_vram ) >> __builtin_ctz( n_width ) : (UINT32)( p_vram - m_p_vram ) / n_width;
+ 	const UINT32 n_height = m_n_vram_height;
+ 	const UINT16 *row = m_p_vram + n_row * m_n_vram_width;
+ 	INT64 v0 = (INT64)s->v, v1 = (INT64)s->v + (INT64)s->dv * ( n - 1 );
+@@ -1331,6 +1405,10 @@ static int psx_texspan_overlap( const struct psx_texspan *s, int win, const UINT
+ 	{
+ 		return 1;
+ 	}
++	if( ( n_height & ( n_height - 1 ) ) == 0 )
++	{
++		return ( ( n_row - ( s->ty + vmin ) ) & ( n_height - 1 ) ) <= vmax - vmin;
++	}
+ 	return ( n_row + n_height - ( s->ty + vmin ) % n_height ) % n_height <= vmax - vmin;
+ }
+ 
+@@ -1352,6 +1430,7 @@ PSX_TS_ALWAYS UINT32 psx_ts_mod( UINT32 x, UINT32 d, UINT32 m )
+ 	return x - d * (UINT32)( ( (UINT64)x * m ) >> 32 );
+ }
+ 
++#if PSX_NEON
+ /* psx_ts_mod on 8 lanes */
+ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
+ {
+@@ -1361,6 +1440,7 @@ PSX_TS_ALWAYS uint16x8_t psx_ts_vmod( uint16x8_t x, UINT32 d, UINT32 m )
+ 	const uint32x4_t qhi = vcombine_u32( vshrn_n_u64( vmull_u32( vget_low_u32( hi ), mv ), 32 ), vshrn_n_u64( vmull_u32( vget_high_u32( hi ), mv ), 32 ) );
+ 	return vmlsq_n_u16( x, vcombine_u16( vmovn_u32( qlo ), vmovn_u32( qhi ) ), (UINT16)d );
+ }
++#endif
+ 
+ /* texel n_u of a texture row (tx already added) */
+ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const int tp, UINT32 n_u )
+@@ -1376,6 +1456,7 @@ PSX_TS_ALWAYS UINT16 psx_ts_texel( const UINT16 *clut, const UINT16 *row, const
+ 	}
+ }
+ 
++#if PSX_NEON
+ /* largest lane */
+ PSX_TS_ALWAYS UINT16 psx_texspan_max( uint16x8_t x )
+ {
+@@ -1669,6 +1750,261 @@ PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int
+ 	}
+ }
+ 
++#else	/* PSX_WASM_SIMD */
++
++/*
++	The span as with NEON above, in WebAssembly SIMD. Texels are fetched
++	one lane at a time with the plain C texel lookup (WebAssembly has no
++	gather and no per-lane shifts); the shading, semi-transparency, the
++	transparent colour 0 and the store are done on 8 pixels together,
++	with the same arithmetic as the NEON code.
++*/
++PSX_TS_ALWAYS void psx_ts_span( const struct psx_texspan *s, UINT16 *p_vram, int n, const int tp, const int win, const int fixrow )
++{
++	const v128_t lane_lo = wasm_i32x4_make( 0, 1, 2, 3 ), lane_hi = wasm_i32x4_make( 4, 5, 6, 7 );
++	const v128_t lane16 = wasm_i16x8_make( 0, 1, 2, 3, 4, 5, 6, 7 );
++	const v128_t m5 = wasm_i16x8_splat( 0x1f );
++	const v128_t c31 = wasm_i16x8_splat( 31 );
++	const v128_t zero = wasm_i16x8_splat( 0 );
++	const v128_t over = wasm_i16x8_splat( (INT16)0xff00 );
++	const UINT16 *vram_end = m_p_vram + m_n_vram_size;
++	const UINT16 *clut = s->clut;
++	const UINT32 umask = s->umask, vmask = s->vmask;
++	const INT32 du = s->du, dv = s->dv;
++	const UINT32 tww = m_n_tww, twh = m_n_twh;
++	const UINT32 mw = win ? psx_ts_recip( 0, tww ) : 0, mh = win ? psx_ts_recip( 1, twh ) : 0;
++	UINT32 u = s->u, v = s->v, r = s->r, g = s->g, b = s->b;
++	v128_t r_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)r ), wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( s->dr ) ) );
++	v128_t r_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)r ), wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( s->dr ) ) );
++	v128_t g_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)g ), wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( s->dg ) ) );
++	v128_t g_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)g ), wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( s->dg ) ) );
++	v128_t b_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)b ), wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( s->db ) ) );
++	v128_t b_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)b ), wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( s->db ) ) );
++	const v128_t r_step = wasm_i32x4_splat( (INT32)( (UINT32)s->dr * 8 ) );
++	const v128_t g_step = wasm_i32x4_splat( (INT32)( (UINT32)s->dg * 8 ) );
++	const v128_t b_step = wasm_i32x4_splat( (INT32)( (UINT32)s->db * 8 ) );
++	const v128_t semi_bgr = wasm_i16x8_splat( (INT16)( s->semi ? 0xc210 : 0x4210 ) );
++	const UINT16 *row = NULL;
++	/* texel addresses on 8 lanes when vram is a power of 2 high (no texture window) */
++	const UINT32 vram_h = m_n_vram_height;
++	const int vecrows = !win && ( vram_h & ( vram_h - 1 ) ) == 0 && m_n_vram_width <= 0xffff;
++	const v128_t du_lo = wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( du ) ), du_hi = wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( du ) );
++	const v128_t dv_lo = wasm_i32x4_mul( lane_lo, wasm_i32x4_splat( dv ) ), dv_hi = wasm_i32x4_mul( lane_hi, wasm_i32x4_splat( dv ) );
++	const v128_t umask_v = wasm_i16x8_splat( (INT16)umask ), vmask_v = wasm_i16x8_splat( (INT16)vmask );
++	const v128_t ty_v = wasm_i16x8_splat( (INT16)s->ty ), hmask_v = wasm_i16x8_splat( (INT16)( vram_h - 1 ) );
++	const v128_t tx_v = wasm_i32x4_splat( (INT32)s->tx ), vw_v = wasm_i32x4_splat( (INT32)m_n_vram_width );
++	const UINT16 *vr = m_p_vram;
++	v128_t clut_lo = zero, clut_hi = zero;
++	int i;
++
++	if( fixrow )
++	{
++		row = m_p_p_vram[ s->ty + ( ( v >> 16 ) & vmask ) ] + s->tx;
++	}
++	if( tp == 0 && vecrows )
++	{
++		/* the 16 CLUT entries as two byte tables (low bytes, high bytes) for swizzle */
++		const v128_t c0 = wasm_v128_load( clut ), c1 = wasm_v128_load( clut + 8 );
++		clut_lo = wasm_i8x16_shuffle( c0, c1, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30 );
++		clut_hi = wasm_i8x16_shuffle( c0, c1, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31 );
++	}
++
++	for( ; n > 0; n -= 8, p_vram += 8 )
++	{
++		UINT16 a_bgr[ 8 ];
++		const int m = n < 8 ? n : 8;
++		UINT32 r0 = r, g0 = g, b0 = b;
++		v128_t bgr, sr, sg, sb, cr, cg, cb, rr, rg, rb, out, dst;
++
++		if( m < 8 && p_vram + 8 > vram_end )
++		{
++			/* the last pixels of vram */
++			for( i = 0; i < m; i++ )
++			{
++				UINT32 n_u = ( u >> 16 ) & umask, n_v = ( v >> 16 ) & vmask;
++				if( win )
++				{
++					n_u = psx_ts_mod( n_u, tww, mw );
++					n_v = psx_ts_mod( n_v, twh, mh );
++				}
++				psx_texspan_pixel( s, p_vram + i, tp == 3 ? ( s->semi ? 0xc210 : 0x4210 ) : psx_ts_texel( clut, fixrow ? row : m_p_p_vram[ s->ty + n_v ] + s->tx, tp, n_u ), r, g, b );
++				u += du; v += dv; r += s->dr; g += s->dg; b += s->db;
++			}
++			return;
++		}
++
++		/* the texels */
++		if( tp == 3 )
++		{
++			/* untextured: level 16 on each channel, the semi-transparency bit when it is on */
++			bgr = semi_bgr;
++			if( m < 8 )
++			{
++				bgr = wasm_v128_and( bgr, wasm_u16x8_lt( lane16, wasm_i16x8_splat( m ) ) );
++			}
++		}
++		else if( fixrow && du == 0x10000 && m == 8 && tp != 0 && ( ( u >> 16 ) & umask ) + 7 <= umask )
++		{
++			/* one row, consecutive texels */
++			const UINT32 n_u = ( u >> 16 ) & umask;
++			if( tp == 2 )
++			{
++				bgr = wasm_v128_load( row + n_u );
++			}
++			else
++			{
++				const UINT8 *p8 = (const UINT8 *)row + n_u;
++				bgr = wasm_u16x8_make( clut[ p8[ 0 ] ], clut[ p8[ 1 ] ], clut[ p8[ 2 ] ], clut[ p8[ 3 ] ],
++					clut[ p8[ 4 ] ], clut[ p8[ 5 ] ], clut[ p8[ 6 ] ], clut[ p8[ 7 ] ] );
++			}
++			u += 0x80000;
++			v += dv * 8;
++		}
++		else if( vecrows )
++		{
++			/* texel addresses on all 8 lanes, then one load per lane (unused lanes read */
++			/* inside vram and are made transparent below) */
++			const v128_t uu_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)u ), du_lo ), uu_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)u ), du_hi );
++			const v128_t vv_lo = wasm_i32x4_add( wasm_i32x4_splat( (INT32)v ), dv_lo ), vv_hi = wasm_i32x4_add( wasm_i32x4_splat( (INT32)v ), dv_hi );
++			const v128_t n_u = wasm_v128_and( wasm_i8x16_shuffle( uu_lo, uu_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 ), umask_v );
++			const v128_t n_v = wasm_v128_and( wasm_i8x16_shuffle( vv_lo, vv_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 ), vmask_v );
++			const v128_t line = wasm_v128_and( wasm_i16x8_add( n_v, ty_v ), hmask_v );
++			const v128_t n_w = tp == 0 ? wasm_u16x8_shr( n_u, 2 ) : tp == 1 ? wasm_u16x8_shr( n_u, 1 ) : n_u;
++			const v128_t idx_lo = wasm_i32x4_add( wasm_i32x4_add( wasm_i32x4_mul( wasm_u32x4_extend_low_u16x8( line ), vw_v ), tx_v ), wasm_u32x4_extend_low_u16x8( n_w ) );
++			const v128_t idx_hi = wasm_i32x4_add( wasm_i32x4_add( wasm_i32x4_mul( wasm_u32x4_extend_high_u16x8( line ), vw_v ), tx_v ), wasm_u32x4_extend_high_u16x8( n_w ) );
++			const v128_t w = wasm_u16x8_make(
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 0 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 1 ) ],
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 2 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_lo, 3 ) ],
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 0 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 1 ) ],
++				vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 2 ) ], vr[ (UINT32)wasm_i32x4_extract_lane( idx_hi, 3 ) ] );
++			if( tp == 0 )
++			{
++				/* 4-bit: the nibble (n_u & 3) of each word, then the CLUT as a byte table lookup */
++				const v128_t sel = wasm_v128_and( n_u, wasm_i16x8_splat( 3 ) );
++				const v128_t m4 = wasm_i16x8_splat( 0x0f );
++				v128_t nib = wasm_v128_and( w, m4 );
++				v128_t idx8;
++				nib = wasm_v128_bitselect( wasm_v128_and( wasm_u16x8_shr( w, 4 ), m4 ), nib, wasm_i16x8_eq( sel, wasm_i16x8_splat( 1 ) ) );
++				nib = wasm_v128_bitselect( wasm_v128_and( wasm_u16x8_shr( w, 8 ), m4 ), nib, wasm_i16x8_eq( sel, wasm_i16x8_splat( 2 ) ) );
++				nib = wasm_v128_bitselect( wasm_u16x8_shr( w, 12 ), nib, wasm_i16x8_eq( sel, wasm_i16x8_splat( 3 ) ) );
++				idx8 = wasm_u8x16_narrow_i16x8( nib, nib );
++				bgr = wasm_i8x16_shuffle( wasm_i8x16_swizzle( clut_lo, idx8 ), wasm_i8x16_swizzle( clut_hi, idx8 ),
++					0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23 );
++			}
++			else if( tp == 1 )
++			{
++				/* 8-bit: the byte (n_u & 1) of each word through the CLUT */
++				const v128_t m8 = wasm_i16x8_splat( 0xff );
++				const v128_t t = wasm_v128_bitselect( wasm_u16x8_shr( w, 8 ), wasm_v128_and( w, m8 ),
++					wasm_i16x8_eq( wasm_v128_and( n_u, wasm_i16x8_splat( 1 ) ), wasm_i16x8_splat( 1 ) ) );
++				bgr = wasm_u16x8_make(
++					clut[ wasm_u16x8_extract_lane( t, 0 ) ], clut[ wasm_u16x8_extract_lane( t, 1 ) ],
++					clut[ wasm_u16x8_extract_lane( t, 2 ) ], clut[ wasm_u16x8_extract_lane( t, 3 ) ],
++					clut[ wasm_u16x8_extract_lane( t, 4 ) ], clut[ wasm_u16x8_extract_lane( t, 5 ) ],
++					clut[ wasm_u16x8_extract_lane( t, 6 ) ], clut[ wasm_u16x8_extract_lane( t, 7 ) ] );
++			}
++			else
++			{
++				bgr = w;
++			}
++			if( m < 8 )
++			{
++				/* unused lanes: transparent */
++				bgr = wasm_v128_and( bgr, wasm_u16x8_lt( lane16, wasm_i16x8_splat( m ) ) );
++			}
++			u += (UINT32)du * 8;
++			v += (UINT32)dv * 8;
++		}
++		else
++		{
++			for( i = 0; i < m; i++ )
++			{
++				UINT32 n_u = ( u >> 16 ) & umask, n_v = ( v >> 16 ) & vmask;
++				if( win )
++				{
++					n_u = psx_ts_mod( n_u, tww, mw );
++					n_v = psx_ts_mod( n_v, twh, mh );
++				}
++				a_bgr[ i ] = psx_ts_texel( clut, fixrow ? row : m_p_p_vram[ s->ty + n_v ] + s->tx, tp, n_u );
++				u += du; v += dv;
++			}
++			for( ; i < 8; i++ )
++			{
++				a_bgr[ i ] = 0;
++			}
++			bgr = wasm_v128_load( a_bgr );
++		}
++
++		/* 8 lanes of the high 16 bits of r, g, b */
++		sr = wasm_i8x16_shuffle( r_lo, r_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 );
++		sg = wasm_i8x16_shuffle( g_lo, g_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 );
++		sb = wasm_i8x16_shuffle( b_lo, b_hi, 2, 3, 6, 7, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31 );
++		r_lo = wasm_i32x4_add( r_lo, r_step ); r_hi = wasm_i32x4_add( r_hi, r_step );
++		g_lo = wasm_i32x4_add( g_lo, g_step ); g_hi = wasm_i32x4_add( g_hi, g_step );
++		b_lo = wasm_i32x4_add( b_lo, b_step ); b_hi = wasm_i32x4_add( b_hi, b_step );
++		r += (UINT32)s->dr * 8; g += (UINT32)s->dg * 8; b += (UINT32)s->db * 8;
++
++		/* a shade above 255 would mix into the table index: use the tables */
++		if( wasm_v128_any_true( wasm_v128_and( wasm_v128_or( wasm_v128_or( sr, sg ), sb ), over ) ) )
++		{
++			wasm_v128_store( a_bgr, bgr );
++			for( i = 0; i < m; i++ )
++			{
++				psx_texspan_pixel( s, p_vram + i, a_bgr[ i ], r0, g0, b0 );
++				r0 += s->dr; g0 += s->dg; b0 += s->db;
++			}
++			continue;
++		}
++
++		/* level x shade / 128, before the clamp to 31 */
++		cr = wasm_v128_and( bgr, m5 );
++		cg = wasm_v128_and( wasm_u16x8_shr( bgr, 5 ), m5 );
++		cb = wasm_v128_and( wasm_u16x8_shr( bgr, 10 ), m5 );
++		rr = wasm_u16x8_shr( wasm_i16x8_mul( cr, sr ), 7 );
++		rg = wasm_u16x8_shr( wasm_i16x8_mul( cg, sg ), 7 );
++		rb = wasm_u16x8_shr( wasm_i16x8_mul( cb, sb ), 7 );
++
++		out = wasm_v128_or( wasm_u16x8_min( rr, c31 ),
++			wasm_v128_or( wasm_i16x8_shl( wasm_u16x8_min( rg, c31 ), 5 ), wasm_i16x8_shl( wasm_u16x8_min( rb, c31 ), 10 ) ) );
++
++		dst = wasm_v128_load( p_vram );
++		if( s->semi )
++		{
++			v128_t fr, fg, fb, br, bgc, bb, tr, tg, tb, blend;
++			br = wasm_v128_and( dst, m5 );
++			bgc = wasm_v128_and( wasm_u16x8_shr( dst, 5 ), m5 );
++			bb = wasm_v128_and( wasm_u16x8_shr( dst, 10 ), m5 );
++			switch( s->abr )
++			{
++			case 0x00:	/* 0.5 x B + 0.5 x F */
++				fr = wasm_u16x8_min( wasm_u16x8_shr( rr, 1 ), c31 ); fg = wasm_u16x8_min( wasm_u16x8_shr( rg, 1 ), c31 ); fb = wasm_u16x8_min( wasm_u16x8_shr( rb, 1 ), c31 );
++				br = wasm_u16x8_shr( br, 1 ); bgc = wasm_u16x8_shr( bgc, 1 ); bb = wasm_u16x8_shr( bb, 1 );
++				tr = wasm_u16x8_min( wasm_i16x8_add( br, fr ), c31 ); tg = wasm_u16x8_min( wasm_i16x8_add( bgc, fg ), c31 ); tb = wasm_u16x8_min( wasm_i16x8_add( bb, fb ), c31 );
++				break;
++			case 0x02:	/* 1.0 x B - 1.0 x F */
++				fr = wasm_u16x8_min( rr, c31 ); fg = wasm_u16x8_min( rg, c31 ); fb = wasm_u16x8_min( rb, c31 );
++				tr = wasm_u16x8_sub_sat( br, fr ); tg = wasm_u16x8_sub_sat( bgc, fg ); tb = wasm_u16x8_sub_sat( bb, fb );
++				break;
++			case 0x03:	/* 1.0 x B + 0.25 x F */
++				fr = wasm_u16x8_min( wasm_u16x8_shr( rr, 2 ), c31 ); fg = wasm_u16x8_min( wasm_u16x8_shr( rg, 2 ), c31 ); fb = wasm_u16x8_min( wasm_u16x8_shr( rb, 2 ), c31 );
++				tr = wasm_u16x8_min( wasm_i16x8_add( br, fr ), c31 ); tg = wasm_u16x8_min( wasm_i16x8_add( bgc, fg ), c31 ); tb = wasm_u16x8_min( wasm_i16x8_add( bb, fb ), c31 );
++				break;
++			default:	/* 1.0 x B + 1.0 x F */
++				fr = wasm_u16x8_min( rr, c31 ); fg = wasm_u16x8_min( rg, c31 ); fb = wasm_u16x8_min( rb, c31 );
++				tr = wasm_u16x8_min( wasm_i16x8_add( br, fr ), c31 ); tg = wasm_u16x8_min( wasm_i16x8_add( bgc, fg ), c31 ); tb = wasm_u16x8_min( wasm_i16x8_add( bb, fb ), c31 );
++				break;
++			}
++			blend = wasm_v128_or( tr, wasm_v128_or( wasm_i16x8_shl( tg, 5 ), wasm_i16x8_shl( tb, 10 ) ) );
++			/* the pixels with bit 15 (semi-transparent texels) blend */
++			out = wasm_v128_bitselect( blend, out, wasm_i16x8_shr( bgr, 15 ) );
++		}
++		/* colour 0 is transparent (and so are the unused lanes) */
++		wasm_v128_store( p_vram, wasm_v128_bitselect( dst, out, wasm_i16x8_eq( bgr, zero ) ) );
++	}
++}
++
++#endif	/* PSX_WASM_SIMD */
++
+ /*
+ 	SOLIDFILL through the same code: an untextured pixel is what the tables
+ 	give for a texel of level 16 on each channel (0x4210), with bit 15 set
+@@ -1683,10 +2019,19 @@ static int psx_texspan_draw( const struct psx_texspan *s, UINT16 *p_vram, int n
+ {
+ 	const int win = ( m_n_twh != 256 || m_n_tww != 256 || m_n_twx != 0 || m_n_twy != 0 );
+ 
+-	if( n < 1 || s->tp > 2 || ( win && ( m_n_tww < 2 || m_n_twh < 2 ) ) || psx_texspan_overlap( s, win, p_vram, n ) )
++	if( n < 1 || s->tp > 2 || ( win && ( m_n_tww < 2 || m_n_twh < 2 ) ) )
++	{
++		PSX_GS( GS_REJECT_OTHER, 1 );
++		return 0;
++	}
++	if( psx_texspan_overlap( s, win, p_vram, n ) )
+ 	{
++		PSX_GS( GS_REJECT_OVERLAP, 1 );
+ 		return 0;
+ 	}
++	PSX_GS( GS_SPANS, 1 ); PSX_GS( GS_PIXELS, n );
++	PSX_GS( s->tp == 0 ? GS_TP0 : s->tp == 1 ? GS_TP1 : GS_TP2, n );
++	if( win ) PSX_GS( GS_WIN, n ); else if( s->dv == 0 ) PSX_GS( GS_FIXROW, n );
+ 
+ 	if( win )
+ 	{
+@@ -1822,6 +2167,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
+ 	p_vram = m_p_p_vram[ n_y ] + n_x;
+ 	if( n_distance > 0 )
+ 	{
++		PSX_GS( GS_SOLID_SPANS, 1 ); PSX_GS( GS_SOLID_PIXELS, n_distance );
+ 		memset( &s, 0, sizeof( s ) );
+ 		s.r = r; s.dr = dr; s.g = g; s.dg = dg; s.b = b; s.db = db;
+ 		s.tp = 3; s.abr = abr & 3; s.semi = semi;
+@@ -1870,6 +2216,7 @@ static void psx_solidspan_fill( INT32 n_x, INT32 n_y, INT32 *p_distance, UINT16
+ 		n_distance = ( m_n_drawarea_x2 - n_x ) + 1; \
+ 	} \
+ 	p_vram = m_p_p_vram[ n_y ] + n_x; \
++	if( n_distance > 0 ) { PSX_GS( GS_FALLBACK_SPANS, 1 ); PSX_GS( GS_FALLBACK_PIXELS, n_distance ); } \
+  \
+ 	if( n_ti != 0 ) \
+ 	{ \
+@@ -2209,7 +2556,7 @@ static void FlatPolygon( int n_points )
+ 			}
+ 			n_dx2 = (INT32)( ( COORD_X( m_packet.FlatPolygon.vertex[ n_rightpoint ].n_coord ) << 16 ) - n_cx2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -2409,7 +2756,7 @@ static void FlatTexturedPolygon( int n_points )
+ 			n_du2 = (INT32)( ( TEXTURE_U( m_packet.FlatTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cu2.d ) / n_distance;
+ 			n_dv2 = (INT32)( ( TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cv2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -2611,7 +2958,7 @@ static void GouraudPolygon( int n_points )
+ 			n_dg2 = (INT32)( ( BGR_G( m_packet.GouraudPolygon.vertex[ n_rightpoint ].n_bgr ) << 16 ) - n_cg2.d ) / n_distance;
+ 			n_db2 = (INT32)( ( BGR_B( m_packet.GouraudPolygon.vertex[ n_rightpoint ].n_bgr ) << 16 ) - n_cb2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -2893,7 +3240,7 @@ static void GouraudTexturedPolygon( int n_points )
+ 			n_du2 = (INT32)( ( TEXTURE_U( m_packet.GouraudTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cu2.d ) / n_distance;
+ 			n_dv2 = (INT32)( ( TEXTURE_V( m_packet.GouraudTexturedPolygon.vertex[ n_rightpoint ].n_texture ) << 16 ) - n_cv2.d ) / n_distance;
+ 		}
+-		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( (INT16)n_cx1.w.h != (INT16)n_cx2.w.h && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( (INT16)n_cx1.w.h < (INT16)n_cx2.w.h )
+ 			{
+@@ -3057,7 +3404,7 @@ static void MonochromeLine( void )
+ 		if( (INT16)n_x.w.h >= (INT32)m_n_drawarea_x1 &&
+ 			(INT16)n_y.w.h >= (INT32)m_n_drawarea_y1 &&
+ 			(INT16)n_x.w.h <= (INT32)m_n_drawarea_x2 &&
+-			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 )
++			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( (INT16)n_y.w.h ) )
+ 		{
+ 			p_vram = m_p_p_vram[ n_y.w.h ] + n_x.w.h;
+ 			if( n_cmd & 0x02 )
+@@ -3190,7 +3537,7 @@ static void GouraudLine( void )
+ 		if( (INT16)n_x.w.h >= (INT32)m_n_drawarea_x1 &&
+ 			(INT16)n_y.w.h >= (INT32)m_n_drawarea_y1 &&
+ 			(INT16)n_x.w.h <= (INT32)m_n_drawarea_x2 &&
+-			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 )
++			(INT16)n_y.w.h <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( (INT16)n_y.w.h ) )
+ 		{
+ 			p_vram = m_p_p_vram[ n_y.w.h ] + n_x.w.h;
+ 			if( n_cmd & 0x02 )
+@@ -3249,7 +3596,7 @@ static void FrameBufferRectangleDraw( void )
+ 	{
+ 		n_x = COORD_X( m_packet.FlatRectangle.n_coord );
+ 
+-		n_distance = SIZE_W( m_packet.FlatRectangle.n_size );
++		n_distance = PSX_DRAW_LINE( n_y & 1023 ) ? SIZE_W( m_packet.FlatRectangle.n_size ) : 0;
+ 		while( n_distance > 0 )
+ 		{
+ 			*( m_p_p_vram[ n_y & 1023 ] + ( n_x & 1023 ) ) =
+@@ -3316,7 +3663,7 @@ static void FlatRectangle( void )
+ 		n_x = S11_COORD_X( m_packet.FlatRectangle.n_coord ) + m_n_drawoffset_x;
+ 
+ 		n_distance = SIZE_W( m_packet.FlatRectangle.n_size );
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3413,7 +3760,7 @@ static void FlatTexturedRectangle( void )
+ 		n_u = TEXTURE_U( m_packet.FlatTexturedRectangle.n_texture );
+ 
+ 		n_distance = SIZE_W( m_packet.FlatTexturedRectangle.n_size );
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3520,7 +3867,7 @@ static void Sprite8x8( void )
+ 		n_u = TEXTURE_U( m_packet.Sprite8x8.n_texture );
+ 
+ 		n_distance = 8;
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3627,7 +3974,7 @@ static void Sprite16x16( void )
+ 		n_u = TEXTURE_U( m_packet.Sprite16x16.n_texture );
+ 
+ 		n_distance = 16;
+-		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 )
++		if( n_distance > 0 && n_y >= (INT32)m_n_drawarea_y1 && n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 		{
+ 			if( ( (INT32)m_n_drawarea_x1 - n_x ) > 0 )
+ 			{
+@@ -3691,7 +4038,7 @@ static void Dot( void )
+ 	if( (INT16)n_x >= (INT32)m_n_drawarea_x1 &&
+ 		(INT16)n_y >= (INT32)m_n_drawarea_y1 &&
+ 		(INT16)n_x <= (INT32)m_n_drawarea_x2 &&
+-		(INT16)n_y <= (INT32)m_n_drawarea_y2 )
++		(INT16)n_y <= (INT32)m_n_drawarea_y2 && PSX_DRAW_LINE( n_y ) )
+ 	{
+ 		p_vram = m_p_p_vram[ n_y ] + n_x;
+ 		if( n_cmd & 0x02 )
+@@ -3766,8 +4113,45 @@ enum
+ 	PSX_DRAW_FLATRECTANGLE8X8, PSX_DRAW_FLATRECTANGLE16X16, PSX_DRAW_TEXTUREDDOT
+ };
+ 
++/*
++	Frame skipping (RetroPlay): on a frame the core skips (frameskip core
++	option, manual or auto), drawing into the displayed area is left out
++	too, so a skipped frame costs no drawing. Uploads, copies and drawing
++	elsewhere in VRAM (textures drawn by the game) still run. The picture
++	on screen is the last one drawn, as for any skipped frame.
++*/
++static int psx_draws_on_screen( void )
++{
++	const UINT32 dx1 = m_n_displaystartx, dy1 = m_n_displaystarty;
++	const UINT32 dx2 = dx1 + m_n_screenwidth - 1, dy2 = dy1 + m_n_screenheight - 1;
++	return m_n_drawarea_x1 <= dx2 && m_n_drawarea_x2 >= dx1 && m_n_drawarea_y1 <= dy2 && m_n_drawarea_y2 >= dy1;
++}
++
+ static void psx_draw_run( int n_op )
+ {
++	if( n_op != PSX_DRAW_MOVEIMAGE && osd_skip_this_frame() )
++	{
++		if( n_op == PSX_DRAW_FRAMEBUFFERRECTANGLE )
++		{
++			/* a fill inside the displayed area */
++			const UINT32 x = COORD_X( m_packet.FlatRectangle.n_coord ) & 1023, y = COORD_Y( m_packet.FlatRectangle.n_coord ) & 1023;
++			if( x >= m_n_displaystartx && x < m_n_displaystartx + m_n_screenwidth && y >= m_n_displaystarty && y < m_n_displaystarty + m_n_screenheight )
++			{
++				return;
++			}
++		}
++		else if( psx_draws_on_screen() )
++		{
++			return;
++		}
++	}
++	m_b_fieldskip = psx_fieldmode && ( m_n_gpustatus & ( ( 1 << 19 ) | ( 1 << 22 ) | ( 1 << 10 ) ) ) == ( ( 1 << 19 ) | ( 1 << 22 ) );
++	if( m_b_fieldskip )
++	{
++		m_n_fieldparity = ( ( m_n_gpustatus >> 31 ) ^ m_n_displaystarty ) & 1;
++		m_b_fieldshown = 1;
++		m_n_fieldshownparity = m_n_fieldparity;
++	}
+ 	switch( n_op )
+ 	{
+ 	case PSX_DRAW_FLATPOLYGON3: FlatPolygon( 3 ); break;

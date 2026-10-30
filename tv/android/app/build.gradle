@@ -1,0 +1,59 @@
+// RetroPlay TV: a small Android TV / Google TV app that hosts the RetroPlay web app in a WebView,
+// with the TV remote, game controllers and a local upload page for game files. No libraries.
+plugins {
+    id 'com.android.application'
+}
+
+def retroplayUrl = (project.findProperty('retroplayUrl') ?: 'https://deploy-preview-2--retroteo1.netlify.app/').toString()
+def buildNumber = (project.findProperty('versionCode') ?: '1').toString().toInteger()
+
+android {
+    namespace 'app.retroplay.tv'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'app.retroplay.tv'
+        minSdk 24
+        targetSdk 35
+        versionCode buildNumber
+        versionName "1.0.${buildNumber}"
+        buildConfigField 'String', 'START_URL', "\"${retroplayUrl}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // The signing key never lives in the repository. CI passes one in: the TV_KEYSTORE_* secrets
+    // when they exist (the same key for every build, so new versions install over old ones and keep
+    // the app's data), otherwise a key made for that run. Without either, the debug key is used.
+    signingConfigs {
+        ci {
+            def store = System.getenv('TV_KEYSTORE_FILE')
+            if (store) {
+                storeFile file(store)
+                storePassword System.getenv('TV_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('TV_KEY_ALIAS') ?: 'retroplay-tv'
+                keyPassword System.getenv('TV_KEYSTORE_PASSWORD')
+                storeType 'pkcs12'
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig System.getenv('TV_KEYSTORE_FILE') ? signingConfigs.ci : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

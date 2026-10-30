@@ -1,0 +1,62 @@
+name: RetroPlay CI
+
+on:
+  push:
+    branches:
+      - main
+      - "fix/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Check JavaScript syntax
+        run: npm run check
+      - name: Run unit tests
+        run: npm test
+      - name: Build production bundle
+        run: npm run build
+      - name: Verify output exists
+        run: test -s dist/index.html && test -s dist/THIRD-PARTY-NOTICES.txt && test -s dist/emulatorjs/runtime-manifest.json && test -s dist/emulatorjs/4.2.3/data/loader.js && test -s dist/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data && ! grep -q "__RETROPLAY_BUILD_ID__" dist/service-worker.js
+
+  e2e:
+    name: Browser E2E (EmulatorJS 4.2.3)
+    runs-on: ubuntu-latest
+    needs: verify
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install app dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build production bundle
+        run: npm run build
+      - name: Install E2E dependencies
+        working-directory: e2e
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run browser E2E against the production build
+        working-directory: e2e
+        run: npm test
