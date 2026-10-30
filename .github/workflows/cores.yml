@@ -123,13 +123,17 @@ jobs:
           case "${{ matrix.opt }}" in next) ;; *) sed -i 's/ALLOW_TABLE_GROWTH=1$/ALLOW_TABLE_GROWTH=1 --profiling-funcs/' ../Makefile.emulatorjs; grep -q profiling-funcs ../Makefile.emulatorjs;; esac
           # RetroArch's own SSE2 code for the pixel conversion (the core gives 0RGB1555) and the audio
           # conversions, which emscripten turns into WebAssembly SIMD (the core needs SIMD anyway)
-          printf '\n$(OBJDIR)/libretro-common/gfx/scaler/pixconv.o $(OBJDIR)/libretro-common/audio/conversion/s16_to_float.o $(OBJDIR)/libretro-common/audio/conversion/float_to_s16.o: CFLAGS += -msimd128 -msse2\n' >> ../Makefile.emulatorjs
+          # (objects are named after $(LIBRETRO_COMM_DIR) = ./libretro-common)
+          printf '\n$(OBJDIR)/./libretro-common/gfx/scaler/pixconv.o $(OBJDIR)/./libretro-common/audio/conversion/s16_to_float.o $(OBJDIR)/./libretro-common/audio/conversion/float_to_s16.o: CFLAGS += -msimd128 -msse2\n' >> ../Makefile.emulatorjs
           tail -n 2 ../Makefile.emulatorjs
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
           set -o pipefail
           link() { emmake ./build-emulatorjs.sh "$@" > link.log 2>&1 || { grep -iE "error" link.log | head -n 10 | sed 's/^/::error::/'; tail -n 30 link.log; return 1; }; tail -n 5 link.log; }
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
           link --clean
+          # the SSE2 path really went in (WebAssembly SIMD instructions in the pixel conversion)
+          N=$("$EMSDK/upstream/bin/llvm-objdump" -d ../obj-emscripten/./libretro-common/gfx/scaler/pixconv.o | grep -c 'i16x8\|v128' || true)
+          echo "pixconv SIMD instructions: $N"; [ "$N" -gt 0 ] || { echo "::error::pixconv.o has no SIMD"; exit 1; }
           cp ../../core/mame2003_plus_libretro_emscripten.bc .
           link --clean --legacy
           ls -la ../../EmulatorJS/data/cores/
