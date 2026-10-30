@@ -55,6 +55,8 @@
 #define JIT_TABLE_SIZE		(1 << JIT_TABLE_BITS)
 #define JIT_MAX_BLOCK		64				/* instructions */
 #define JIT_CODEMAP_SHIFT	2				/* host address granules of 4 bytes (one word), one byte each */
+#define JIT_CODEMAP_BLOCK	1				/* the word is in a block */
+#define JIT_CODEMAP_INLINE	2				/* the word is a branch target's first instruction run in some block */
 #define JIT_CODEMAP_BITS	22
 #define JIT_CODEMAP_SIZE	(1 << JIT_CODEMAP_BITS)
 #define JIT_MAX_MODULE		4096			/* synchronous WebAssembly.Module() limit on the main thread */
@@ -243,6 +245,13 @@ static void jit_invalidate_host( const void *host )
 {
 	int i;
 	int k;
+
+	if( jit_codemap[ jit_codemap_index( host ) ] & JIT_CODEMAP_INLINE )
+	{
+		/* a block anywhere may run this word: start again (code is rarely overwritten) */
+		jit_flush();
+		return;
+	}
 
 	for( i = 0; i < fastram_count; i++ )
 	{
@@ -1991,9 +2000,8 @@ static UINT32 jit_build( UINT32 pc, const UINT32 *ops, UINT32 maxcount, UINT32 l
 	/*
 		Taken branches whose delay slot loads a register: the target's
 		first instruction runs in the block when it is a simple one in fast
-		RAM the block can answer for: read-only, or close enough after the
-		block start that a store there finds and drops this block
-		(jit_invalidate_host looks JIT_MAX_BLOCK words back).
+		RAM. A store to that word (code map JIT_CODEMAP_INLINE) starts the
+		translation cache again.
 	*/
 	ctx.extra = 0;
 	for( i = 0; i < count; i++ )
@@ -2008,8 +2016,7 @@ static UINT32 jit_build( UINT32 pc, const UINT32 *ops, UINT32 maxcount, UINT32 l
 			{
 				UINT32 target = jit_branch_target( ops[ i ], pc + i * 4 );
 				struct psx_fastram *region = find_fastram( target, 4 );
-				if( region && !( target & 3 ) && target != pc_hook_pc &&
-					( region->readonly || ( target >= pc && target - pc < JIT_MAX_BLOCK * 4 ) ) )
+				if( region && !( target & 3 ) && target != pc_hook_pc )
 				{
 					const UINT8 *host = region->base + ( target - region->start );
 					UINT32 top = *(const UINT32 *)(const void *)host;
@@ -2254,7 +2261,7 @@ static void jit_compile( struct jit_block *block, UINT32 pc )
 	{
 		for( i = 0; i < count; i++ )
 		{
-			jit_codemap[ jit_codemap_index( host + i * 4 ) ] = 1;
+			jit_codemap[ jit_codemap_index( host + i * 4 ) ] |= JIT_CODEMAP_BLOCK;
 		}
 		jit_code_present = 1;
 	}
@@ -2262,7 +2269,7 @@ static void jit_compile( struct jit_block *block, UINT32 pc )
 	{
 		if( ctx.inline_host[ i ] )
 		{
-			jit_codemap[ jit_codemap_index( ctx.inline_host[ i ] ) ] = 1;
+			jit_codemap[ jit_codemap_index( ctx.inline_host[ i ] ) ] |= JIT_CODEMAP_INLINE;
 			jit_code_present = 1;
 		}
 	}
