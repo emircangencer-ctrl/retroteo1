@@ -42,6 +42,14 @@ EmulatorJS. RetroPlay is a personal, non-commercial project.
    - Namco System 12 ROM tables from src/drivers/namcos12.c (libretro/mame2003-plus-libretro, commit 64b3c38a)
    These lists contain no game data. No ROM, BIOS or game file is distributed with RetroPlay.
 
+   Cover lists (public/assets/covers/*.json: picture names and ROM CRC32 values only)
+   - Picture names from libretro-thumbnails (https://github.com/libretro-thumbnails), repositories
+     Nintendo_-_Nintendo_Entertainment_System (4d21463b), Nintendo_-_Super_Nintendo_Entertainment_System
+     (cdd8f1d4), Sega_-_Mega_Drive_-_Genesis (b81fd421), FBNeo_-_Arcade_Games (9d04d3f2), MAME (98a41676)
+   - No-Intro ROM checksums from libretro-database metadat/no-intro (commit 77f15a81)
+   The pictures themselves are not distributed with RetroPlay: the app fetches a game's picture from
+   raw.githubusercontent.com when the player has that game, as RetroArch does.
+
 5. Interface libraries and fonts bundled into the app (Faz 2)
    - Svelte 5 (compiled into the app's JavaScript) — MIT License — https://github.com/sveltejs/svelte
      License text: /licenses/Svelte-MIT.txt

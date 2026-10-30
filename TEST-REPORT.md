@@ -420,3 +420,12 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - Also checked and left out: run-ahead (compiled into the cores but no effect with EmulatorJS 4.2.3: 2 frames from press to picture with and without it, in four configurations).
 - Tests: unit 305/305 (titles, controls table vs catalog, fast forward/rewind and their keys). E2E: new scenarios (start screen and one tap, fast forward and rewind on the real core, arcade start without the catalog); updated: controller focus, arcade, TV.
 - **Not verified here:** on the user's phone and computer (feel of the new card, rewind smoothness on real games, whether Chrome grants persistence there).
+
+## Stage 46 — real cover art (2026-10-31)
+
+- Box art from libretro-thumbnails (RetroArch's archive), lists pinned to a commit per repository. Consoles are recognised by No-Intro ROM checksum first (NES headerless, SNES without copier header), then by name; arcade by name. Matched at list-build time: NES 5327 checksums, SNES 3416, Mega Drive 1863; name lists NES 5452/8158 (box art/title screens), SNES 3676/3641, MD 2350/2084, FBNeo 6283/11062, MAME 6029/12401. Lists load only for systems in the library (gzip 54–172 KB each).
+- Pictures fetched once, made 320 px WebP and kept in Cache Storage `retroplay-covers-v1`; IndexedDB unchanged (still version 4, same stores — checked in E2E). No lookups while a game runs. Setting to turn covers off; ⋯ → **Kapak resmini kaldır** on a game's page.
+- Titles: "Legend of Zelda, The (USA)" now reads "The Legend of Zelda".
+- Real network (this container, Chromium): five NES test cartridges — one carrying Super Mario Bros.'s No-Intro checksum under the name "my game", three named like releases, one unknown — got four covers in ~2.3 s; the unknown one keeps the drawn cover.
+- Tests: unit 315/315 (matching against the shipped lists, checksums, list builder, addresses, article titles). E2E: new scenario with raw.githubusercontent.com answered locally — checksum and name matches, exactly one request per game at the pinned commit, 320 px pictures, nothing fetched after a reload, setting off/on, removal stays after a reload, deleting a game deletes its picture. All other scenarios run with covers on.
+- **Not verified here:** on the user's phone (look of the covers, first fetch over mobile data).

@@ -253,6 +253,27 @@ sets), MAME 2003-Plus (`3a72dae`, 5257 sets) and FB Alpha 2012 CPS2 (EmulatorJS/
   it), the next core is offered instead of switching silently — a core given a file it cannot
   handle can crash the page.
 
+## Cover art
+
+Games show their box art (or, without one, their title screen) from
+[libretro-thumbnails](https://github.com/libretro-thumbnails), the archive RetroArch uses.
+`scripts/build-cover-index.mjs` makes one list per system (`public/assets/covers/*.json`: picture
+names at a pinned commit of each repository, symbolic links resolved) and, for NES, Super Nintendo
+and Mega Drive, a table of No-Intro ROM checksums (libretro-database `metadat/no-intro`) → picture.
+
+- A console game is recognised by its ROM checksum first (NES without its 16-byte header, Super
+  Nintendo without a 512-byte copier header), the way RetroArch does, so the file name does not
+  matter; then by name: exact, same letters and digits ("PuckMan" = "Puck Man", "Legend of Zelda,
+  The" = "The Legend of Zelda"), then another version of the same game (closest region and tags; no
+  hacks, prototypes or pirate copies unless asked for by name). Arcade games are found by name.
+- The picture is fetched once from raw.githubusercontent.com (CORS-enabled; only the game's name is
+  in the address), made 320 px wide (WebP, ~20 KB) and kept in its own Cache Storage bucket
+  `retroplay-covers-v1`. The library database is not touched; the service worker does not clear the
+  bucket on updates. A game with no picture is remembered until the lists change (`__COVER_LISTS__`).
+- Lookups run only when no game is running; offline they wait for the network. Settings → Görüntü →
+  **Kapak resimleri** turns covers off (nothing is fetched); a wrong cover can be removed from the
+  game's page (⋯ → **Kapak resmini kaldır**); removing a game removes its picture.
+
 ## Save data
 
 Library records, ROM blobs, battery saves (`batterySaves`), save states (`saveStates`) and BIOS

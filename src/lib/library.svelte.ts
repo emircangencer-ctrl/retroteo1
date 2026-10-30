@@ -8,6 +8,7 @@ import { readZipDirectory } from '../zip-rom.js';
 import { loadCatalogs, identifyArcadeZip } from '../arcade.js';
 import { ARCADE_CATALOG_REV, arcadeRecord, needsArcadeRecheck } from './arcade-records.ts';
 import { showToast } from './toast.svelte.ts';
+import { coverArt } from './cover-art.svelte.ts';
 
 class Library {
   games = $state.raw<Game[]>([]);
@@ -128,6 +129,7 @@ class Library {
   async remove(id: string) {
     await db.deleteGame(id);
     this.games = this.games.filter(g => g.id !== id);
+    void coverArt.forget(id);
     if (this.saveIds.has(id)) this.saveIds = new Set([...this.saveIds].filter(x => x !== id));
     if (this.slots.has(id)) { const slots = new Map(this.slots); slots.delete(id); this.slots = slots; }
   }

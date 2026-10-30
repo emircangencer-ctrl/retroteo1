@@ -111,6 +111,10 @@
         {/each}
       </div>
     </div>
+    <div class="row">
+      <span class="grow"><span class="label">Kapak resimleri</span><span class="hint">Oyunların kutu resimleri RetroArch'ın kapak arşivinden (GitHub) bir kez indirilir ve bu cihazda saklanır. Arşive yalnızca oyunun adı gider, dosyası gitmez.</span></span>
+      <button type="button" class="switch" role="switch" aria-checked={settings.prefs.covers} aria-label="Kapak resimleri" id="setting-covers" onclick={() => settings.setPrefs({ covers: !settings.prefs.covers })}></button>
+    </div>
   </div>
 
   <h2 class="eyebrow section" id="settings-controls">Kontroller</h2>

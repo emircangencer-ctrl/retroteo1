@@ -61,12 +61,21 @@ function emulatorJsSelfHost() {
   };
 }
 
+/** A short hash of the cover lists: a game without a cover is looked up again when they change. */
+function coverListsStamp() {
+  const dir = path.join(root, 'public', 'assets', 'covers');
+  const hash = createHash('sha256');
+  for (const name of fs.existsSync(dir) ? fs.readdirSync(dir).sort() : []) hash.update(name).update(fs.readFileSync(path.join(dir, name)));
+  return hash.digest('hex').slice(0, 12);
+}
+
 export default defineConfig({
   base: '/',
   publicDir: 'public',
   define: {
     // Used for backup metadata so exported files name the real app version.
-    __APP_VERSION__: JSON.stringify(pkg.version)
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __COVER_LISTS__: JSON.stringify(coverListsStamp())
   },
   plugins: [svelte(), emulatorJsSelfHost()],
   build: {

@@ -16,6 +16,7 @@
   import { exportRom, exportSram } from '../lib/exports.ts';
   import { importer } from '../lib/importer.svelte.ts';
   import { tv } from '../lib/tv.svelte.ts';
+  import { coverArt } from '../lib/cover-art.svelte.ts';
   import { player, slotName } from '../player/session.svelte.ts';
   import { SYSTEM_CORE_LABELS } from '../player/launch.ts';
   import { crc32, diagnoseSuperMarioBros3Rom, inspectNesRom } from '../nes-rom.js';
@@ -135,6 +136,7 @@
             <div class="popover" role="menu">
               {#if game.blob && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; exportRom(game); }}><Icon name="download" size={18} />ROM'u indir</button>{/if}
               {#if hasSram && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; void exportSram(game); }}><Icon name="save" size={18} />Oyun içi kaydı indir (.srm)</button>{/if}
+              {#if coverArt.picture(game.id)}<button type="button" role="menuitem" id="remove-cover" onclick={() => { menuOpen = false; void coverArt.remove(game.id).then(() => showToast('Kapak resmi kaldırıldı; bu oyun için yeniden aranmayacak.')); }}><Icon name="close" size={18} />Kapak resmini kaldır</button>{/if}
               <button type="button" role="menuitem" class="danger" onclick={remove}><Icon name="trash" size={18} />Kütüphaneden kaldır</button>
             </div>
           {/if}

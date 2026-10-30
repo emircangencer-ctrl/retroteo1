@@ -1,6 +1,23 @@
 // Minimal PNG decoder for Playwright screenshots (8-bit RGB/RGBA, non-interlaced) — used to measure
 // how game pixels land on screen without extra dependencies.
-import { inflateSync } from 'node:zlib';
+import { inflateSync, deflateSync, crc32 } from 'node:zlib';
+
+/** An RGB PNG; pixel(x, y) returns [r, g, b]. */
+export function encodePng(width, height, pixel) {
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (width * 3 + 1);
+    for (let x = 0; x < width; x++) raw.set(pixel(x, y), row + 1 + x * 3);
+  }
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(8); head.writeUInt32BE(data.length, 0); head.write(type, 4, 'ascii');
+    const tail = Buffer.alloc(4); tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])) >>> 0, 0);
+    return Buffer.concat([head, data, tail]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
 
 export function decodePng(buffer) {
   const signature = '89504e470d0a1a0a';

@@ -4,6 +4,28 @@
 //   so SRAM changes constantly and a restored save is observable after a soft reset.
 const PRG_BANK = 16384;
 
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crcState = (bytes, crc = 0xffffffff) => { for (const b of bytes) crc = (CRC_TABLE[(crc ^ b) & 0xff] ^ (crc >>> 8)) >>> 0; return crc; };
+
+/**
+ * A copy of `rom` whose last 4 bytes are changed so the CRC32 of rom[from..] is `target`: a
+ * self-authored cartridge that a checksum list takes for a given game (it holds none of that game).
+ */
+export function withChecksum(rom, target, from = 16) {
+  const out = Uint8Array.from(rom);
+  const body = out.subarray(from);
+  let t = (Number.parseInt(target, 16) ^ 0xffffffff) >>> 0;
+  const ks = [];
+  for (let i = 0; i < 4; i++) {
+    const k = CRC_TABLE.findIndex(v => v >>> 24 === t >>> 24);
+    ks.unshift(k);
+    t = ((t ^ CRC_TABLE[k]) << 8) >>> 0;
+  }
+  let crc = crcState(body.subarray(0, body.length - 4));
+  ks.forEach((k, i) => { body[body.length - 4 + i] = (crc ^ k) & 0xff; crc = (CRC_TABLE[k] ^ (crc >>> 8)) >>> 0; });
+  return out;
+}
+
 function bank(code, vectors) {
   const bytes = new Uint8Array(PRG_BANK).fill(0xea);
   bytes.set(code, 0);

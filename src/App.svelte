@@ -20,11 +20,15 @@
   import { gamepadUI } from './lib/gamepad-ui.svelte.ts';
   import { player } from './player/session.svelte.ts';
   import { tv } from './lib/tv.svelte.ts';
+  import { coverArt } from './lib/cover-art.svelte.ts';
 
   const route = $derived(router.route);
   const scrollMemory = new Map<string, number>();
 
   $effect(() => { document.documentElement.style.setProperty('--accent', settings.prefs.accent); });
+  // Cover pictures: stored ones show at once; new games are looked up when no game is running.
+  $effect(() => { coverArt.setActive(settings.prefs.covers && !player.open); });
+  $effect(() => { if (library.ready) void coverArt.sync(library.games); });
   // On the TV the screen stays on while a game runs (no screensaver over the game).
   $effect(() => { if (tv.bridge) tv.keepScreenOn(player.running && !player.paused); });
   $effect(() => {
