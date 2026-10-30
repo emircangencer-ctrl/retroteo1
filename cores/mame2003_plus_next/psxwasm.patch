@@ -1,3 +1,45 @@
+diff --git a/src/cpu/mips/psx_cpu.c b/src/cpu/mips/psx_cpu.c
+index a7f811a3..cc00db85 100644
+--- a/src/cpu/mips/psx_cpu.c
++++ b/src/cpu/mips/psx_cpu.c
+@@ -1793,6 +1793,9 @@ static INLINE void mips_step( void )
+ 
+ int mips_execute( int cycles )
+ {
++#ifdef PSXWASM_STATS
++	jit_stat_slice( cycles );
++#endif
+ 	mips_ICount = cycles;
+ 	/* a polling loop's pass is only trusted within one timeslice (psxloop.c): */
+ 	/* RAM may change between timeslices, and after a state load or a reset */
+@@ -1812,7 +1815,17 @@ int mips_execute( int cycles )
+ 				pc_hook_fn();
+ 			}
+ 			mipscpu.op = cpu_readop32( from );
++#ifdef PSXWASM_STATS
++			{
++				int slow = psx_slow_access;
++				psx_slow_access = 0;
++				mips_step();
++				jit_stat_interp( mipscpu.op, psx_slow_access );
++				psx_slow_access |= slow;
++			}
++#else
+ 			mips_step();
++#endif
+ 			mips_ICount--;
+ 			/* back to an earlier address: maybe a wait loop to skip (psxloop.c) */
+ 			if( mipscpu.pc < from && mipscpu.delayr == 0 )
+@@ -2377,6 +2390,9 @@ unsigned mips_dasm( char *buffer, UINT32 pc )
+ 
+ static void docop2( int gteop )
+ {
++#ifdef PSXWASM_STATS
++	jit_stat_gte( gteop );
++#endif
+ 	if( !gte_docop2( gteop ) )
+ 	{
+ 		usrintf_showmessage_secs( 1, "unknown GTE op %08x", gteop );
 diff --git a/src/cpu/mips/psxjit.c b/src/cpu/mips/psxjit.c
 index 85fea82e..3e06ebaa 100644
 --- a/src/cpu/mips/psxjit.c
