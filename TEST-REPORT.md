@@ -438,3 +438,9 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - Same results: an exhaustive comparison of every set of every core, named and renamed (19,864 cases), against identifyArcadeZip over the full lists: 0 differences. Unit test keeps a sample (named, renamed, split, one file missing, BIOS) plus a round trip of every stored set.
 - Service worker shell cache `retroplay-shell-v15`: drops the full lists earlier versions kept (up to 11 MB per device).
 - **Not verified here:** on the user's phone (import speed of a real arcade zip).
+
+## Stage 48 — player code split; multi-core emulation evaluated (2026-10-31)
+
+- `src/player/session.svelte.ts` (1126 lines) split: `controls.svelte.ts` (touch pad and layout, controllers and players, keyboard hints; components read `player.controls.*`) and `battery.ts` (in-game saves kept by the app). The session keeps starting, menu, slots, play time, speed, fullscreen, leaving (891 lines). No behaviour change: unit 319/319, E2E 47/47.
+- Multi-core emulation (Document-Isolation-Policy + EmulatorJS thread cores), measured in Chromium 153 with `Document-Isolation-Policy: isolate-and-require-corp`: the page and the player frame are cross-origin isolated, SharedArrayBuffer is there, and EmulatorJS 4.2.3's `-thread` cores load and run. Speed: Nestopia headroom 7.73× without threads vs 7.74× with (average of 4 runs each, 7.25–8.53 spread) — no gain, because the libretro cores emulate on one thread; RetroArch's threaded video (`video_threaded`) makes the game fail to start. Shipping it would add the thread cores (~10 MB offline) and an isolation header every embedded resource must satisfy, for nothing. **Not shipped**; worth revisiting only for a core that itself runs on several threads (for example RetroPlay's own MAME 2003-Plus build — Tekken is on hold).
+
