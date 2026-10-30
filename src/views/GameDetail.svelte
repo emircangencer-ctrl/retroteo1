@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { splitTitle } from '../lib/title.ts';
   import { untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import Cover from '../components/Cover.svelte';
@@ -68,6 +69,7 @@
   const slotMap = $derived(new Map(slots.map(s => [s.slot, s])));
   const used = $derived(slots.length);
   const coreLabel = $derived(!game ? '' : game.platform === 'NES' ? (game.nesCore === 'fceumm' ? 'FCEUmm' : 'Nestopia') : game.platform === 'ARCADE' ? ((ARCADE_CORES as Record<string, { label: string }>)[game.arcade?.core || '']?.label || 'Arcade') : SYSTEM_CORE_LABELS[game.platform] || '—');
+  const titleParts = $derived(splitTitle(game?.title || ''));
   const meta = $derived(!game || !look ? '' : [look.label, game.year, game.arcade?.manufacturer, game.arcade?.set ? `${game.arcade.set}.zip` : ''].filter(Boolean).join(' · '));
   const biosMissing = $derived(Boolean(game?.arcade?.bios && !library.biosIds.has(`${game.arcade.bios}.zip`)));
   const parentMissing = $derived(Boolean(game?.arcade && !arcadeParentInstalled(game.arcade, library.games)));
@@ -143,7 +145,8 @@
     <section class="hero">
       <div class="cover-box"><Cover {game} size="md" /></div>
       <div class="hero-text">
-        <h1 class="title">{game.title}</h1>
+        <h1 class="title">{titleParts.name}</h1>
+        {#if titleParts.detail}<p class="title-detail" id="title-detail">{titleParts.detail}</p>{/if}
         <p class="meta">{meta}</p>
         <div class="badges">
           {#if dump === 'verified'}<span class="badge ok"><Icon name="check" size={14} stroke={2.2} />Doğrulanmış döküm</span>{/if}
@@ -270,6 +273,7 @@
 {/if}
 
 <style>
+  .title-detail { margin-top: 2px; font-size: 14px; color: var(--text-2); }
   .head-actions { display: flex; gap: 8px; }
   .fav[aria-pressed='true'] { color: var(--accent); }
   .more-wrap { position: relative; }

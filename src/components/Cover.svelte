@@ -1,6 +1,7 @@
 <script lang="ts">
   // Typographic cover from the design: the system's colour stripe and the title on scan lines.
   import { gameLook } from '../lib/systems.ts';
+  import { shortTitle } from '../lib/title.ts';
   import Icon from './Icon.svelte';
   import type { Game } from '../lib/types.ts';
 
@@ -12,7 +13,7 @@
 <span class={`cover ${size}`} style:--stripe={look.stripe} aria-hidden="true">
   <span class="stripe"><span class="sys">{look.stripeLabel}</span>{#if favorite}<span class="fav"><Icon name="heart-fill" size={size === 'xs' ? 10 : 14} /></span>{/if}</span>
   <!-- Game titles are mostly English or Japanese: upper-cased without Turkish dotted İ. -->
-  <span class="art"><span class="t" lang="en">{game.title}</span></span>
+  <span class="art"><span class="t" lang="en">{shortTitle(game.title)}</span></span>
 </span>
 
 <style>

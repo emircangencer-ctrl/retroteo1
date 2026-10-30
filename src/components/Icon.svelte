@@ -15,6 +15,8 @@
     chevron: { d: 'M9 6l6 6-6 6', cap: true },
     close: { d: 'M6 6l12 12M18 6L6 18', cap: true },
     play: { d: 'M8 5v14l11-7z', fill: true },
+    forward: { d: 'M4 6v12l8-6zM12 6v12l8-6z', fill: true },
+    rewind: { d: 'M20 6v12l-8-6zM12 6v12l-8-6z', fill: true },
     pause: { d: 'M9 6v12M15 6v12', cap: true },
     download: { d: 'M12 4v11M7 10l5 5 5-5M5 20h14', cap: true, join: true },
     upload: { d: 'M12 20V9M7 14l5-5 5 5M5 4h14', cap: true, join: true },

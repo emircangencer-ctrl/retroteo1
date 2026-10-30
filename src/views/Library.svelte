@@ -2,12 +2,13 @@
   import { onMount, tick, untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import GameCard from '../components/GameCard.svelte';
+  import ContinueCard from '../components/ContinueCard.svelte';
   import { library } from '../lib/library.svelte.ts';
   import { settings } from '../lib/settings.svelte.ts';
   import { router } from '../lib/router.svelte.ts';
   import { routeHref } from '../lib/route.ts';
-  import { filterGames, sortGames, systemCounts, SORTS, normalizeSort, type SortKey } from '../lib/library-view.ts';
-  import { systemLook } from '../lib/systems.ts';
+  import { filterGames, sortGames, systemCounts, SORTS, normalizeSort, continueCandidate, isPlayable, type SortKey } from '../lib/library-view.ts';
+  import { systemLook, gameLook } from '../lib/systems.ts';
   import { gamepadUI } from '../lib/gamepad-ui.svelte.ts';
   import { player } from '../player/session.svelte.ts';
 
@@ -22,9 +23,10 @@
   let sentinel: HTMLElement | null = $state(null);
 
   // Links like #/library?fav=1, ?sort=recent, ?system=NES or ?focus=search set the view once.
+  // (The library is also the start screen, "#/".)
   $effect(() => {
     const route = router.route;
-    if (route.name !== 'library') return;
+    if (route.name !== 'library' && route.name !== 'home') return;
     const q = route.query;
     untrack(() => {
       favorites = q.fav === '1';
@@ -42,6 +44,8 @@
   const filtered = $derived(sortGames(filterGames(library.games, { query, system, favorites, withSaves, saveIds: savedIds }), settings.prefs.sort));
   const visible = $derived(filtered.slice(0, limit));
   const favoriteCount = $derived(library.games.filter(g => g.favorite).length);
+  // The last game played leads the unfiltered view ("Kaldığın yerden").
+  const hero = $derived(!query && system === 'ALL' && !favorites && !withSaves ? continueCandidate(library.games) : null);
 
   function pick(next: string) { system = next; favorites = false; withSaves = false; limit = PAGE_SIZE; syncUrl(); }
   function pickFavorites() { favorites = !favorites; if (favorites) { system = 'ALL'; withSaves = false; } limit = PAGE_SIZE; syncUrl(); }
@@ -92,7 +96,9 @@
     <a class="icon-btn accent add" href="#/import" aria-label="Oyun ekle" data-action="add"><Icon name="plus" size={22} stroke={2.2} /><span class="add-label">Oyun ekle</span></a>
   </header>
 
-  <div class="tools">
+  {#if hero}<ContinueCard game={hero} />{/if}
+
+  <div class="tools" hidden={library.ready && library.games.length === 0}>
     <label class="search">
       <Icon name="search" />
       <span class="sr-only">Oyun ara</span>
@@ -128,12 +134,21 @@
   {#if !library.ready}
     <div class="grid" aria-hidden="true">{#each Array(6) as _, i (i)}<span class="ghost"></span>{/each}</div>
   {:else if library.games.length === 0}
-    <div class="empty" id="empty-state">
-      <span class="icon-wrap"><Icon name="plus" size={26} /></span>
-      <h2>Burada henüz oyun yok</h2>
-      <p>Bir ROM ya da ZIP dosyası ekleyerek kütüphaneni oluştur. Dosyalar bu cihazda kalır.</p>
-      <a class="btn btn-primary" href="#/import">Oyun ekle</a>
-    </div>
+    <section class="welcome" id="empty-state" aria-labelledby="welcome-title">
+      <span class="eyebrow">Kişisel retro kütüphanen</span>
+      <h2 id="welcome-title" class="display-title">Oyunlarını ekle,<br />kaldığın yerden oyna.</h2>
+      <p>NES, Super Nintendo, Mega Drive ve arcade oyunların bu cihazda kalır. Hesap yok, internet gerekmez; kayıtların otomatik alınır.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#/import" data-nav-default><Icon name="plus" size={18} stroke={2.2} />Oyun ekle</a>
+        <a class="btn" href="#/help">Nasıl çalışır?</a>
+      </div>
+      <ul class="systems" aria-label="Desteklenen sistemler">
+        {#each ['NES', 'SNES', 'MD', 'ARCADE'] as key (key)}
+          {@const l = gameLook({ id: key, title: key, platform: key })}
+          <li><span class="dot" style:background={l.stripe}></span>{l.label}</li>
+        {/each}
+      </ul>
+    </section>
   {:else if filtered.length === 0}
     <div class="empty" id="empty-state">
       <span class="icon-wrap"><Icon name="search" size={26} /></span>
@@ -147,6 +162,9 @@
         <GameCard {game} layout={settings.prefs.layout === 'list' ? 'list' : 'grid'} resume={library.hasResume(game.id)} navDefault={i === 0} />
       {/each}
     </div>
+    {#if library.games.some(g => !isPlayable(g)) && !query && system === 'ALL' && !favorites && !withSaves}
+      <p class="foot-note">Bazı kayıtlar henüz açılamıyor (ROM'u eksik, desteklenmeyen sistem ya da eksik arcade seti). Kartın ⋯ köşesinden nedenini görürsün.</p>
+    {/if}
     {#if visible.length < filtered.length}
       <div bind:this={sentinel} class="sentinel" aria-hidden="true"></div>
       <button type="button" class="btn more" id="library-load-more" data-load-more="library" onclick={() => (limit += PAGE_SIZE)}>Daha fazla göster ({Math.min(PAGE_SIZE, filtered.length - visible.length)})</button>
@@ -162,6 +180,13 @@
 
 <style>
   .add .add-label { display: none; }
+  .welcome { display: flex; flex-direction: column; gap: 14px; padding: 28px 20px; border-radius: var(--r-xl); background: radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%), var(--surface); border: 1px solid var(--line); }
+  .welcome p { color: var(--text-2); font-size: 15px; line-height: 1.55; max-width: 46ch; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+  .systems { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+  .systems li { display: flex; align-items: center; gap: 6px; }
+  .systems .dot { width: 8px; height: 8px; border-radius: 2px; }
+  .foot-note { font-size: 13px; color: var(--text-3); line-height: 1.5; }
   .tools { display: flex; flex-direction: column; gap: 14px; }
   .search { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line); color: var(--text-2); }
   .search:focus-within { border-color: var(--accent-line); }

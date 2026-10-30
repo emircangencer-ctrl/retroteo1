@@ -5,7 +5,6 @@
   import Dialog from './components/Dialog.svelte';
   import Toast from './components/Toast.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
-  import Home from './views/Home.svelte';
   import Library from './views/Library.svelte';
   import GameDetail from './views/GameDetail.svelte';
   import Import from './views/Import.svelte';
@@ -91,9 +90,7 @@
 <div class="app-shell" id="app-shell" inert={player.open || undefined}>
   <Sidebar />
   <main class="app-content" class:with-sidebar={true} data-nav-region="page">
-    {#if route.name === 'home'}
-      <Home />
-    {:else if route.name === 'library'}
+    {#if route.name === 'home' || route.name === 'library'}
       <Library />
     {:else if route.name === 'game'}
       {#key route.id}<GameDetail />{/key}

@@ -11,7 +11,7 @@ export function buildEmulatorDocument(gameUrl: string, gameName: string, systemI
 export interface EmulatorJsPlayerOptions {
   onError?: (error: Error) => void;
   onWarning?: (message: string) => void;
-  onHotkey?: (key: string) => void;
+  onHotkey?: (key: string, pressed?: boolean) => void;
   gameId?: number;
   systemId?: string;
   systemLabel?: string;
@@ -44,6 +44,11 @@ export class EmulatorJsPlayer {
   setVolume(value: number): boolean;
   screenshot(options?: { timeout?: number }): Promise<Blob | null>;
   restartGame(): boolean;
+  fastForward: boolean;
+  rewinding: boolean;
+  setFastForward(active: boolean): boolean;
+  supportsRewind(): boolean;
+  setRewind(active: boolean): boolean;
   pressButton(name: string, source?: string, player?: number): void;
   releaseButton(name: string, source?: string, player?: number): void;
   tapButton(name: string, ms?: number, player?: number): boolean;

@@ -179,7 +179,13 @@
         <li><span class="sw m-saves"></span><span class="grow">Kayıtlar, devam noktaları ve BIOS</span><span class="value">{usage?.saves == null ? '…' : formatBytes((usage.saves || 0) + (usage.bios || 0))}</span></li>
         <li><span class="sw m-cores"></span><span class="grow">Emülatörler (çevrimdışı)</span><span class="value">{usage?.caches == null ? app.offline : formatBytes(usage.caches)}</span></li>
       </ul>
-      <p class="hint">Dosyalar bu tarayıcı profilinde saklanır{app.persisted ? '; tarayıcı bu alanı kalıcı olarak ayırdı' : app.persisted === false ? '; tarayıcı yer darlığında silebilir, yedek almayı unutma' : ''}.</p>
+      <p class="hint" id="storage-persist">Dosyalar bu tarayıcı profilinde saklanır{app.persisted ? '; tarayıcı bu alanı kalıcı olarak ayırdı, yer daralsa da silmez' : app.persisted === false ? '; tarayıcı şimdilik yer darlığında silebilir' : ''}.</p>
+      {#if app.persisted === false}
+        <div class="persist-row">
+          <button type="button" class="btn btn-sm" id="persist-storage" onclick={async () => { if (await app.requestPersistence()) showToast('Depolama kalıcı oldu.'); else showToast(tv.bridge ? 'TV bu alanı kalıcı yapmadı.' : 'Tarayıcı henüz izin vermedi. Uygulamayı ana ekrana yükleyince Chrome kalıcı tutar.'); }}>Kalıcı yap</button>
+          <span class="hint">Ana ekrana yüklenmiş uygulamada Chrome bunu kendisi açar. Yine de yedek almayı unutma.</span>
+        </div>
+      {/if}
     </div>
     <div class="row">
       <span class="grow"><span class="label">Çevrimdışı kullanım</span><span class="hint">Uygulama ve NES, SNES, Mega Drive çekirdekleri ilk açılışta cihaza kaydedilir; arcade çekirdekleri ilk kullanımda.</span></span>
@@ -262,6 +268,8 @@
   .m-games { background: var(--text); }
   .m-saves { background: var(--accent); }
   .m-cores { background: var(--ok-fg); }
+  .persist-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  .persist-row .hint { flex: 1 1 200px; }
   .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
   .legend li { display: flex; align-items: center; gap: 8px; }
   .legend .grow { flex: 1; }

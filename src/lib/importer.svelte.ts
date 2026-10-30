@@ -1,5 +1,6 @@
 // Import, step 2: the review list the user confirms, then storing the chosen files.
 import { loadCatalogs, describeArcadeStatus } from '../arcade.js';
+import { app } from './app-state.svelte.ts';
 import { classifyImport } from '../import-match.js';
 import { platformInfo } from '../platforms.js';
 import * as db from './db.ts';
@@ -110,6 +111,8 @@ class Importer {
     this.summary = summary;
     this.phase = 'done';
     if (summary.added) showToast(summary.bios && summary.bios === summary.added ? `${summary.bios} BIOS dosyası eklendi.` : `${summary.added} dosya eklendi.`);
+    // Now there is something to keep: ask again for storage the browser will not clear.
+    if (summary.added && app.persisted !== true) void app.requestPersistence();
     else showToast(summary.failed ? 'Dosyalar eklenemedi. Ayrıntılar içe aktarma ekranında.' : 'Eklenecek yeni dosya yoktu.', 'error');
     return summary;
   }

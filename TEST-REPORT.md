@@ -408,3 +408,15 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - With the user's own Tekken 3 set (local only): 5, 1 then 6, 2 bring both players in; → moves 1P's cursor, A moves 2P's; J and F pick; the fight starts (Nina vs King).
 - Tests: unit 300/300 (keyboard map of both players and every system, no shared keys, halves do not cross, hints per player, automatic controller order, sensor filter). E2E: two-player, phone, desktop, arcade and TV scenarios updated.
 - **Not verified here:** a real laptop keyboard with two people (key rollover differs per keyboard), real controllers on the user's devices.
+
+## Stage 45 — simpler, faster, safer: the "Hemen" package (2026-10-30)
+
+- From the audit and research (summary given to the user): six small changes with direct effect.
+- Library = start screen: Home merged into the library (three tabs: Kütüphane, Oyun ekle, Ayarlar); "Kaldığın yerden" card on top of the unfiltered library; the first-run welcome is the empty library. One tap on a cover plays (records that cannot start open their page); ⋯ on the cover (Y on a controller, I on the keyboard) opens the page.
+- Clean titles: "Tekken 3 (Japan, TET1/VER.E1)" shows as "Tekken 3" with "Japan, TET1/VER.E1" underneath (cards, game page, player bar); "[!]" marks dropped; search keeps the full title.
+- Arcade start: the 3.4 MB MAME catalog is no longer downloaded and parsed to start a game; a 95 KB controls table generated from it (identical values, unit-tested) is read instead. E2E: after a reload, starting Puck Man requests `arcade-input.json` and none of the full lists.
+- Storage the browser keeps: persistence was already requested at start, but a refusal was final. Now asked again after games are added and from Settings (**Kalıcı yap**), with the state shown. (Correction to the audit summary, which said it was never requested.)
+- Fast forward and rewind: verified on the real core first (colour-cycle test cartridge): fast forward 60 → 166 fps in this container; rewind runs the colour sequence backwards exactly and the game continues afterwards; rewind cost measured on Super Nintendo: a state every frame ~25–35 % more work per frame, every 2nd frame ~15 % → consoles start with `rewind_granularity = 2`, arcade without rewind. Bar: ⏩ toggle, ⏪ hold; keyboard Space (toggle) and Backspace (hold).
+- Also checked and left out: run-ahead (compiled into the cores but no effect with EmulatorJS 4.2.3: 2 frames from press to picture with and without it, in four configurations).
+- Tests: unit 305/305 (titles, controls table vs catalog, fast forward/rewind and their keys). E2E: new scenarios (start screen and one tap, fast forward and rewind on the real core, arcade start without the catalog); updated: controller focus, arcade, TV.
+- **Not verified here:** on the user's phone and computer (feel of the new card, rewind smoothness on real games, whether Chrome grants persistence there).

@@ -125,3 +125,35 @@ export function twoPlayerRom() {
   rom.set(bank(code, vectors), 16);
   return rom;
 }
+
+/**
+ * colour-cycle.nes — NROM: a frame counter drives the backdrop colour, one of 16 hues ($10–$1F) for
+ * 8 frames each, so the picture shows which way time runs (forward, fast forward, rewind).
+ */
+export function colourCycleRom() {
+  const code = [
+    0x78, 0xd8, 0xa2, 0xff, 0x9a,                         // SEI, CLD, LDX #$FF, TXS
+    0xa9, 0x00, 0x8d, 0x00, 0x20, 0x8d, 0x01, 0x20,       // rendering off
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // wait for vblank
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // and once more
+    0xa9, 0x00, 0x85, 0x02                                // counter = 0
+  ];
+  const loop = 0xc000 + code.length;
+  code.push(
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // loop: wait for vblank
+    0xe6, 0x02,                                           // INC counter
+    0xa5, 0x02, 0x4a, 0x4a, 0x4a, 0x29, 0x0f, 0x09, 0x10, // A = $10 + (counter / 8) % 16
+    0x48,                                                 // PHA
+    0xa9, 0x3f, 0x8d, 0x06, 0x20, 0xa9, 0x00, 0x8d, 0x06, 0x20, // PPUADDR = $3F00
+    0x68, 0x8d, 0x07, 0x20,                               // PLA, STA $2007
+    0xa9, 0x00, 0x8d, 0x06, 0x20, 0x8d, 0x06, 0x20,       // PPUADDR = $0000
+    0x4c, loop & 0xff, loop >> 8                          // JMP loop
+  );
+  const rti = 0xc000 + code.length;
+  code.push(0x40);
+  const vectors = { nmi: rti, reset: 0xc000, irq: rti };
+  const rom = new Uint8Array(16 + PRG_BANK + 8192);
+  rom.set([0x4e, 0x45, 0x53, 0x1a, 1, 1, 0x00, 0x00], 0);
+  rom.set(bank(code, vectors), 16);
+  return rom;
+}

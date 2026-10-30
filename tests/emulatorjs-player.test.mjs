@@ -584,3 +584,54 @@ test('while the pause menu is open the keyboard drives the menu, not the game', 
     restore();
   }
 });
+
+test('fast forward and rewind: on and off through the runtime; rewind only when the game was started with it', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    player = makePlayer(calls);
+    player.started = true;
+    const gm = player.frame.contentWindow.EJS_emulator.gameManager;
+    const ff = [], rw = [];
+    gm.toggleFastForward = value => ff.push(value);
+    gm.functions = { toggleRewind: value => rw.push(value) };
+    assert.equal(player.setFastForward(true), true);
+    assert.equal(player.fastForward, true);
+    assert.equal(player.setFastForward(false), true);
+    assert.deepEqual(ff, [1, 0]);
+    assert.equal(player.supportsRewind(), false);
+    assert.equal(player.setRewind(true), false, 'no rewind buffer: nothing to rewind');
+    player.documentOptions.retroarchConfig = { rewind_enable: 'true', rewind_granularity: '2' };
+    assert.equal(player.setRewind(true), true);
+    assert.equal(player.rewinding, true);
+    player.setRewind(false);
+    assert.deepEqual(rw, [1, 0]);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('Space held fast-forwards and Backspace held rewinds (as hotkeys, never game buttons); repeats are ignored', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  const hotkeys = [];
+  let player;
+  try {
+    player = makePlayer(calls, { onHotkey: (key, pressed) => hotkeys.push(`${key}:${pressed}`) });
+    player.started = true;
+    player.boundFrameLoad();
+    const win = player.frame.contentWindow;
+    for (const [type, code, repeat] of [['keydown', 'Space'], ['keydown', 'Space', true], ['keyup', 'Space'], ['keydown', 'Backspace'], ['keyup', 'Backspace']]) {
+      const event = keyEvent(type, code, code === 'Space' ? ' ' : code, { repeat: Boolean(repeat) });
+      win.dispatchEvent(event);
+      assert.equal(event.defaultPrevented, true, `${type} ${code}`);
+    }
+    assert.deepEqual(hotkeys, ['FastForward:true', 'FastForward:false', 'Rewind:true', 'Rewind:false']);
+    assert.deepEqual(calls, [], 'no game input');
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});

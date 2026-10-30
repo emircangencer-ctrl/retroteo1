@@ -347,3 +347,23 @@ test('the 2026 MAME 2003-Plus build needs WebAssembly SIMD; the other arcade cor
   assert.equal(arcadeCoreSupported('mame2003_plus_next', { simd: true }), true);
   for (const id of ['fbneo', 'fbalpha2012_cps2', 'mame2003_plus']) assert.equal(arcadeCoreSupported(id, { simd: false }), true, id);
 });
+
+test('starting an arcade game reads the small controls table, identical to the controls in the MAME catalog', async () => {
+  const { arcadeInputInfo, loadArcadeInput, ARCADE_INPUT_URL } = await import('../src/arcade.js');
+  const { inputTable } = await import('../scripts/build-arcade-catalogs.mjs');
+  const shipped = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
+  const table = JSON.parse(await readFile(new URL('../public/assets/arcade-input.json', import.meta.url), 'utf8'));
+  assert.deepEqual(table, inputTable(shipped.games), 'arcade-input.json is generated from the shipped catalog');
+  assert.equal(Object.keys(table.games).length, Object.values(shipped.games).filter(game => Array.isArray(game[7])).length);
+  assert.ok(JSON.stringify(table).length < JSON.stringify(shipped).length / 30, 'about 1/30 of the catalog');
+  for (const arcade of [{ set: 'tekken3' }, { set: 'tekken3je1', parent: 'tekken3' }, { set: 'sf2ce', parent: 'sf2' }, { set: 'tmnt' }, { set: 'nosuchset' }]) {
+    assert.deepEqual(arcadeInputInfo(arcade, { input: table.games }), arcadeInputInfo(arcade, { mame2003_plus: shipped }), arcade.set);
+  }
+  assert.deepEqual(arcadeInputInfo({ set: 'tmnt' }, { input: table.games }), { buttons: 2, ways: 8, players: 4 });
+  const calls = [];
+  const fetchImpl = async url => { calls.push(url); return { ok: true, json: async () => table }; };
+  const first = await loadArcadeInput(fetchImpl);
+  const second = await loadArcadeInput(fetchImpl);
+  assert.equal(first, second);
+  assert.deepEqual(calls, [ARCADE_INPUT_URL], 'fetched once per session');
+});

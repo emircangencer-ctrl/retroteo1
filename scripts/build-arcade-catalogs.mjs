@@ -149,7 +149,23 @@ export function compactMameDriverSource(source) {
 export const NEXT_DRIVERS = Object.freeze(['namcos12.c']);
 export const NEXT_SOURCE = 'libretro/mame2003-plus-libretro 64b3c38a';
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--next') {
+/**
+ * The cabinet controls alone, for starting a game: set → [buttons, joystick ways, players] from the
+ * MAME 2003-Plus catalog (about 1/30 of its size, so a game does not wait for the whole list).
+ */
+export function inputTable(mameGames) {
+  const games = {};
+  for (const [name, game] of Object.entries(mameGames)) if (Array.isArray(game[7])) games[name] = game[7];
+  return { source: 'MAME 2003-Plus input data (arcade-mame2003plus.json)', games };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--input') {
+  // node scripts/build-arcade-catalogs.mjs --input   (from the shipped MAME 2003-Plus catalog)
+  const mame = JSON.parse(fs.readFileSync(path.join(OUT_DIR, 'arcade-mame2003plus.json'), 'utf8'));
+  const table = inputTable(mame.games);
+  const size = write('arcade-input.json', table);
+  console.log(`arcade-input: ${Object.keys(table.games).length} sets, ${(size / 1e3).toFixed(1)} KB`);
+} else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--next') {
   // node scripts/build-arcade-catalogs.mjs --next <src/drivers directory of the pinned commit>
   const dir = process.argv[3];
   if (!dir) { console.error('usage: node scripts/build-arcade-catalogs.mjs --next <mame2003-plus src/drivers>'); process.exit(2); }
@@ -169,5 +185,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const a = write('arcade-fbneo.json', fbneo);
   const b = write('arcade-mame2003plus.json', mame);
   const c = write('arcade-fba2012-cps2.json', fba);
+  write('arcade-input.json', inputTable(mame.games));
   console.log(`fbneo: ${Object.keys(fbneo.games).length} sets, ${(a / 1e6).toFixed(2)} MB; mame2003_plus: ${Object.keys(mame.games).length} sets, ${(b / 1e6).toFixed(2)} MB; fbalpha2012_cps2: ${Object.keys(fba.games).length} sets, ${(c / 1e6).toFixed(2)} MB`);
 }

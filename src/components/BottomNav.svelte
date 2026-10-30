@@ -2,9 +2,9 @@
   import Icon from './Icon.svelte';
   import { router } from '../lib/router.svelte.ts';
 
+  // The library is the start screen: three tabs.
   const tabs = [
-    { href: '#/', label: 'Ana ekran', icon: 'home', match: ['home'] },
-    { href: '#/library', label: 'Kütüphane', icon: 'grid', match: ['library', 'game'] },
+    { href: '#/', label: 'Kütüphane', icon: 'grid', match: ['home', 'library', 'game'] },
     { href: '#/import', label: 'Oyun ekle', icon: 'plus', match: ['import'] },
     { href: '#/settings', label: 'Ayarlar', icon: 'sliders', match: ['settings', 'help'] }
   ];
@@ -25,7 +25,7 @@
   .bottom-nav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; height: var(--nav-h);
     padding: 6px 12px max(var(--safe-b), 12px);
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     background: rgba(11, 12, 15, 0.94); border-top: 1px solid var(--line-faint);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   }

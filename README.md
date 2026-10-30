@@ -83,6 +83,13 @@ Source layout:
 
 ## Offline and updates
 
+Games, saves and slots live in IndexedDB. The app asks the browser to keep them when the device runs
+low on space (`navigator.storage.persist()`: at start, again after games are added, and from
+Settings → Depolama with **Kalıcı yap**); browsers decide by use (Chrome grants installed or
+often-used apps, Firefox asks), and Settings says which it is. Starting an arcade game reads only
+the cabinet controls (`/assets/arcade-input.json`, ~95 KB, generated from the MAME 2003-Plus catalog
+by `scripts/build-arcade-catalogs.mjs --input`) instead of the 3.4 MB catalog.
+
 The service worker stores the app shell, every built asset (including lazily loaded chunks and the
 arcade game lists), the EmulatorJS runtime and the NES, SNES and Mega Drive cores when the app is
 installed; arcade cores are stored on first use. After one online visit a game starts with no
@@ -98,9 +105,18 @@ game) and reloads when the player taps it.
    (sub-folders included; files that are not games are passed over and counted). Every file is
    checked first and listed — playable, flagged (for example an unrecognised SMB3 dump), already in
    the library or chosen twice, not supported — and only the ticked ones are added.
-2. **Oyna** / **Devam et** on the game page or the home screen. On phones and tablets the player
-   becomes a handheld (see *Touch controls and controllers*); on a computer the game fills the
-   window at 4:3 and keyboard and controllers work.
+2. The library is the start screen (three tabs: Kütüphane, Oyun ekle, Ayarlar). A tap on a cover
+   plays the game; the cover's ⋯ corner (controllers: Y; keyboard: I) opens its page. A record that
+   cannot start yet (no ROM, an incomplete set, a missing BIOS) opens its page, which says why. The
+   last game played leads the unfiltered library as **Kaldığın yerden** with its last picture.
+   Titles show the name only ("Tekken 3"); versions and regions from the DATs ("Japan, TET1/VER.E1",
+   "USA · Rev 1") sit on the line underneath (`src/lib/title.ts`); search still uses the full title.
+   On phones and tablets the player becomes a handheld (see *Touch controls and controllers*); on a
+   computer the game fills the window at 4:3 and keyboard and controllers work. The bar's ⏩ (or
+   Space) switches fast forward on and off (RetroArch's 3×, as far as the device keeps up); on NES,
+   Super Nintendo and Mega Drive ⏪ held (or Backspace held) rewinds: those games start with
+   RetroArch's rewind buffer, a state every 2nd frame (about 15 % more work per frame on Super
+   Nintendo, measured); arcade boards' states are too large for it.
 3. The menu (☰, Esc, the controller's guide button or Select+Start) pauses the game: Oyuna dön,
    Hızlı kaydet / Hızlı yükle, Kayıt yuvaları, Ekran ve ses, Kontroller, Tam ekran, Performansı ölç,
    Yeniden başlat, Oyundan çık. On a phone held upright it opens from the top; held sideways and on

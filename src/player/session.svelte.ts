@@ -8,7 +8,7 @@ import { getEmulatedSystem, supportsRomExtension } from '../emulator-systems.js'
 import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllowed } from '../nes-rom.js';
 import { emulatorGameId, createBatterySaveRecord } from '../save-data.js';
 import { createSaveCapture, decideSaveRestore } from '../save-sync.js';
-import { loadCatalogs, loadCatalog, arcadeLayout, arcadeInputInfo, ARCADE_CORES, missingSummary } from '../arcade.js';
+import { loadCatalogs, loadArcadeInput, arcadeLayout, arcadeInputInfo, ARCADE_CORES, missingSummary } from '../arcade.js';
 import { needsArcadeRecheck } from '../lib/arcade-records.ts';
 import { readZipDirectory } from '../zip-rom.js';
 import { TouchController } from '../touch-controller.js';
@@ -26,6 +26,7 @@ import { showToast } from '../lib/toast.svelte.ts';
 import { gamepadUI } from '../lib/gamepad-ui.svelte.ts';
 import { isPlayable } from '../lib/library-view.ts';
 import { fileExt } from '../lib/format.ts';
+import { shortTitle } from '../lib/title.ts';
 import { PlayClock } from '../lib/playtime.ts';
 import { importer } from '../lib/importer.svelte.ts';
 import { resolveLaunch, rememberCore, type ExtraFile } from './launch.ts';
@@ -35,6 +36,8 @@ import { tv } from '../lib/tv.svelte.ts';
 import type { Game, SaveStateRecord, SlotId, SlotInfo } from '../lib/types.ts';
 
 export const SAVE_CAPTURE_INTERVAL_MS = 30_000;
+/** RetroArch rewind for the consoles: a state every 2nd frame (Super Nintendo: ~15 % more work per frame). */
+export const REWIND_CONFIG = Object.freeze({ rewind_enable: 'true', rewind_granularity: '2' });
 export type MenuPanel = 'main' | 'slots' | 'display' | 'controls';
 export interface PlayerAction { label: string; run: () => void }
 interface StartOptions { coreOverride?: string; fresh?: boolean; slot?: SlotId }
@@ -82,6 +85,10 @@ class PlayerSession {
   keyHints = $state.raw<KeyHint[]>([]);
   /** Several players: how many the game has, and the connected controllers with their players (0 = player 1). */
   players = $state.raw<{ count: number; pads: PadPlayer[] }>({ count: 2, pads: [] });
+  /** Fast forward on; the game running backwards (rewind held); whether this game can rewind. */
+  fastForward = $state(false);
+  rewinding = $state(false);
+  canRewind = $state(false);
   /** Keyboard keys of each player for the current game (desktop hints): player 1, then player 2. */
   keyHintRows = $state.raw<KeyHint[][]>([]);
   gamepadState = $state('unknown');
@@ -227,7 +234,7 @@ class PlayerSession {
     this.#releaseExtraFiles();
 
     this.gameId = game.id;
-    this.title = game.title;
+    this.title = shortTitle(game.title);
     this.platform = game.platform;
     this.paused = false;
     this.running = false;
@@ -318,7 +325,7 @@ class PlayerSession {
       const candidate = launch.cores[0];
       if (game.platform === 'ARCADE') {
         let input: { buttons?: number; ways?: number; players?: number } | null = null;
-        try { input = arcadeInputInfo(game.arcade, { mame2003_plus: await loadCatalog('mame2003_plus') }); } catch {}
+        try { input = arcadeInputInfo(game.arcade, { input: await loadArcadeInput() }); } catch {}
         if (session !== this.#session) { this.#releaseExtraFiles(); return; }
         this.renderPad(game.platform, game, { core: candidate.coreId, buttons: input?.buttons, ways: input?.ways, players: input?.players });
       }
@@ -331,13 +338,22 @@ class PlayerSession {
         systemLabel: candidate.label,
         gameId: emulatorGameId(game),
         shader: start.shader,
-        retroarchConfig: { ...start.retroarchConfig },
+        // Consoles keep RetroArch's rewind buffer (a state every 2nd frame: about 15 % more work per
+        // frame on Super Nintendo, measured); arcade boards' states are too large for it.
+        retroarchConfig: { ...start.retroarchConfig, ...(game.platform === 'ARCADE' ? {} : REWIND_CONFIG) },
         extraFiles: launch.extraFiles,
         // Non-fatal runtime messages (for example a denied screen wake lock) are logged only.
         onWarning: (message: string) => console.warn('[RetroPlay] EmulatorJS uyarısı:', message),
-        onHotkey: (key: string) => { if (key === 'Escape') this.toggleMenu(); }
+        onHotkey: (key: string, pressed?: boolean) => {
+          if (key === 'Escape') this.toggleMenu();
+          else if (key === 'FastForward' && pressed) this.toggleFastForward();
+          else if (key === 'Rewind') this.setRewinding(Boolean(pressed));
+        }
       }) as Player;
       this.#emulator = player;
+      this.fastForward = false;
+      this.rewinding = false;
+      this.canRewind = player.supportsRewind?.() ?? false;
       this.startedDisplay = { ...display };
       player.romInfo = validation;
       player.romDiagnostic = smb3Diagnostic;
@@ -674,6 +690,7 @@ class PlayerSession {
   async #pause({ picture = true, stillWanted = () => true }: { picture?: boolean; stillWanted?: () => boolean } = {}) {
     const player = this.#emulator;
     if (!player || !this.running || this.paused) return;
+    this.#stopSpeedModes();
     if (picture) {
       const shot = await player.screenshot?.({ timeout: 400 }).catch(() => null);
       // The menu may have closed while the picture was taken: then the game keeps running.
@@ -856,7 +873,31 @@ class PlayerSession {
     }
   }
 
+  // ---- speed: fast forward and rewind --------------------------------------------------------------
+  /** ⏩ in the bar or Space: fast forward on or off. */
+  toggleFastForward() {
+    if (!this.running || this.paused || !this.#emulator) return;
+    const next = !this.fastForward;
+    if (this.#emulator.setFastForward?.(next)) this.fastForward = next;
+  }
+
+  /** ⏪ held in the bar or Backspace held: the game runs backwards. */
+  setRewinding(active: boolean) {
+    if (active && (!this.running || this.paused || !this.canRewind)) return;
+    if (!active && !this.rewinding) return;
+    if (this.#emulator?.setRewind?.(active)) this.rewinding = active;
+    else this.rewinding = false;
+  }
+
+  #stopSpeedModes() {
+    if (this.rewinding) { try { this.#emulator?.setRewind?.(false); } catch {} }
+    this.rewinding = false;
+  }
+
   #destroyEmulator() {
+    this.#stopSpeedModes();
+    this.fastForward = false;
+    this.canRewind = false;
     if (!this.#emulator) return;
     try { this.#emulator.destroy(); } catch {}
     this.#emulator = null;

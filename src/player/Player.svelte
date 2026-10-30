@@ -36,6 +36,17 @@
     player.tapInput(name);
     (event.currentTarget as HTMLElement).blur();
   }
+
+  // ⏪ rewinds while held (finger or mouse); ⏩ switches fast forward on and off.
+  function rewindDown(event: PointerEvent) {
+    const button = event.currentTarget as HTMLElement;
+    try { button.setPointerCapture(event.pointerId); } catch {}
+    player.setRewinding(true);
+  }
+  function rewindUp(event: PointerEvent) {
+    player.setRewinding(false);
+    (event.currentTarget as HTMLElement).blur();
+  }
 </script>
 
 <div
@@ -72,6 +83,8 @@
       <button type="button" class="play-chip desk-only arcade-chip coin" id="play-coin" disabled={!player.running || player.paused} title="Jeton at" onclick={event => tap(event, 'BUTTON_SELECT')}>Jeton<kbd>{keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_SELECT)}</kbd></button>
       <button type="button" class="play-chip desk-only arcade-chip" id="play-start" disabled={!player.running || player.paused} title="Başla (1. oyuncu)" onclick={event => tap(event, 'BUTTON_START')}>Başla<kbd>{keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_START)}</kbd></button>
     {/if}
+    <button type="button" class="play-chip speed-chip" id="play-rewind" hidden={!player.canRewind} disabled={!player.running || player.paused} aria-pressed={player.rewinding} aria-label="Geri sar (basılı tut)" title="Geri sar · basılı tut (Backspace)" onpointerdown={rewindDown} onpointerup={rewindUp} onpointercancel={rewindUp} onlostpointercapture={() => player.setRewinding(false)} oncontextmenu={event => event.preventDefault()}><Icon name="rewind" size={18} /></button>
+    <button type="button" class="play-chip speed-chip" id="play-ff" disabled={!player.running || player.paused} aria-pressed={player.fastForward} aria-label="Hızlı ileri" title="Hızlı ileri · aç/kapat (Space)" onclick={event => { player.toggleFastForward(); (event.currentTarget as HTMLElement).blur(); }}><Icon name="forward" size={18} /></button>
     <button type="button" class="play-chip" id="play-save" disabled={!player.canSave || !player.running} onclick={() => player.quickSave()}>Kaydet</button>
     <button type="button" class="play-chip" id="play-load" disabled={!player.canLoad || !player.running} onclick={() => player.quickLoad()}>Yükle</button>
     <button type="button" class="play-chip desk-only" id="bar-fullscreen" aria-label={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} title={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} onclick={() => player.toggleFullscreen()}><Icon name={player.fullscreen || player.fullscreenFallback ? 'fullscreen-exit' : 'fullscreen'} size={18} /></button>

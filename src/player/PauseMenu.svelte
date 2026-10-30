@@ -184,7 +184,7 @@
         <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.isArcade ? ' Select jeton atar, Start başlatır.' : ''} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
         {#if !player.touchPlay && !tv.active}
           <div class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span>{#each player.keyHintRows as hints, i (i)}<span class="hint-row" data-player={i + 1}>{#if player.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>{/each}</div>
-          <p class="note">{player.isArcade ? '1. oyuncu: jeton 5 veya Sağ Shift, başla 1 veya Enter.' : '1. oyuncu: Start Enter ya da 1, Select Sağ Shift ya da 5.'}{player.keyHintRows.length > 1 ? (player.isArcade ? ' 2. oyuncu: jeton 6, başla 2.' : ' 2. oyuncu: Start 2, Select 6.') : ''}</p>
+          <p class="note">{player.isArcade ? '1. oyuncu: jeton 5 veya Sağ Shift, başla 1 veya Enter.' : '1. oyuncu: Start Enter ya da 1, Select Sağ Shift ya da 5.'}{player.keyHintRows.length > 1 ? (player.isArcade ? ' 2. oyuncu: jeton 6, başla 2.' : ' 2. oyuncu: Start 2, Select 6.') : ''} Boşluk hızlı ileri sarar{player.canRewind ? ', Backspace basılı tutulunca geri sarar' : ''}.</p>
         {/if}
       </div>
     {/if}

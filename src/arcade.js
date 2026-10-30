@@ -282,12 +282,27 @@ export function missingSummary(arcade) {
  * { buttons, ways } — e.g. Pac-Man { buttons: 0, ways: 4 }, 1942 { buttons: 2, ways: 8 } — or null.
  */
 export function arcadeInputInfo(arcade, catalogs) {
+  // `catalogs.input` is the small controls table (loadArcadeInput); the full MAME catalog works too.
+  const table = catalogs?.input || null;
   const mame = catalogs?.mame2003_plus?.games;
-  if (!mame || !arcade) return null;
+  if ((!table && !mame) || !arcade) return null;
   // (the current MAME 2003-Plus build's sets, e.g. tekken3je1, are found through their parent)
   for (const name of [arcade.set, arcade.parent, ...(arcade.alternatives || []).map(alt => alt.set)]) {
-    const input = name && mame[name]?.[7];
+    const input = name && (table ? table[name] : mame[name]?.[7]);
     if (Array.isArray(input)) return { buttons: Number(input[0]) || 0, ways: Number(input[1]) || 0, players: Number(input[2]) || 0 };
   }
   return null;
+}
+
+/** The cabinet controls of every MAME 2003-Plus set (set → [buttons, ways, players]), ~95 KB. */
+export const ARCADE_INPUT_URL = '/assets/arcade-input.json';
+let inputCache = null;
+export function loadArcadeInput(fetchImpl = globalThis.fetch) {
+  if (!inputCache) {
+    inputCache = fetchImpl(ARCADE_INPUT_URL).then(response => {
+      if (!response.ok) throw new Error(`Kabin bilgisi yüklenemedi (${response.status}).`);
+      return response.json();
+    }).then(data => data?.games || {}).catch(error => { inputCache = null; throw error; });
+  }
+  return inputCache;
 }
