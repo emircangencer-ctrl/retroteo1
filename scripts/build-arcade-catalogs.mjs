@@ -28,7 +28,7 @@ const text = (body, name) => { const match = body.match(new RegExp(`<${name}>([^
  * Compact form per game: [title, year, manufacturer, cloneof, romof, flags, roms, input?]
  * flags: 1 = BIOS set, 2 = vertical screen, 4 = not runnable
  * roms:  [name, size, crc32 hex, merge-name or ''] — ROMs without a dump (no CRC) are left out.
- * input: [buttons, joystick ways] when the DAT describes the controls (MAME XML does, FBNeo's not).
+ * input: [buttons, joystick ways, players] when the DAT describes the controls (MAME XML does, FBNeo's not).
  */
 export function compactDat(xml) {
   const games = {};
@@ -48,12 +48,12 @@ export function compactDat(xml) {
       roms.push([info.name, Number(info.size) || 0, info.crc.toLowerCase().padStart(8, '0'), info.merge || '']);
     }
     const game = [text(body, 'description') || meta.name, text(body, 'year'), text(body, 'manufacturer'), meta.cloneof || '', meta.romof || '', flags, roms];
-    // MAME lists the cabinet's controls: [buttons, joystick ways (4 or 8; 0 for dials, guns …)].
+    // MAME lists the cabinet's controls: [buttons, joystick ways (4 or 8; 0 for dials, guns …), players].
     const input = body.match(/<input\s([^>]*)\/?>/);
     if (input) {
       const info = attrs(input[1]);
       const control = info.control || '';
-      game.push([Number(info.buttons) || 0, /4way/.test(control) ? 4 : /joy|stick/.test(control) ? 8 : 0]);
+      game.push([Number(info.buttons) || 0, /4way/.test(control) ? 4 : /joy|stick/.test(control) ? 8 : 0, Number(info.players) || 0]);
     }
     games[meta.name] = game;
   }

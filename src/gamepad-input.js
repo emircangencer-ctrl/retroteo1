@@ -5,7 +5,7 @@
 // applies its own console layout (NES B·A, Super Nintendo diamond, Mega Drive A·B·C …), so a
 // controller feels like the original pad whatever letters are printed on it. The left stick
 // works as a d-pad. EmulatorJS's own gamepad handling is switched off in the player so a press is
-// never delivered twice.
+// never delivered twice. Each controller plays as its own player (see players.js).
 import { dpadSector, sectorButtons } from './touch-layout.js';
 
 /** W3C "standard" gamepad button index → RetroPad button. */
@@ -53,32 +53,40 @@ export const MENU_COMBO_MS = 90;
 const SYSTEM_BUTTONS = Object.freeze(['BUTTON_SELECT', 'BUTTON_START']);
 
 /**
- * Polls connected controllers once per frame while a game runs and reports changes:
- * onChange(pressed[], released[]), onActivity() when a controller is used, onMenu() on the guide
- * button or on Select+Start together (many Android controllers have no guide button the browser
- * can see). Select and Start alone reach the game MENU_COMBO_MS later, so the combination never
- * presses them in the game. Buttons already held when polling starts (for example the one that
- * closed the menu) are ignored until released. All connected controllers act as player 1.
+ * Polls connected controllers once per frame while a game runs and reports changes per player:
+ * onChange(pressed[], released[], player), onActivity(player) when a controller is used, onMenu()
+ * on the guide button or on Select+Start together (many Android controllers have no guide button
+ * the browser can see). playerFor(pad, active) says which player a controller plays as (0 = player
+ * 1); null leaves a controller out (one that has not been used yet). Controllers of the same player
+ * are combined. Select and Start alone reach the game MENU_COMBO_MS later, so the combination
+ * never presses them in the game. Buttons already held when polling starts (for example the one
+ * that closed the menu) are ignored until released. Without playerFor every controller is player 1.
  */
 export class GamepadPoller {
-  constructor({ getGamepads = () => (globalThis.navigator?.getGamepads ? [...navigator.getGamepads()] : []), onChange, onActivity, onMenu, requestFrame, cancelFrame, now } = {}) {
+  constructor({ getGamepads = () => (globalThis.navigator?.getGamepads ? [...navigator.getGamepads()] : []), onChange, onActivity, onMenu, playerFor, requestFrame, cancelFrame, now } = {}) {
     this.getGamepads = getGamepads;
     this.onChange = onChange || (() => {});
     this.onActivity = onActivity || (() => {});
     this.onMenu = onMenu || (() => {});
+    this.playerFor = playerFor || (() => 0);
     this.requestFrame = requestFrame || (cb => globalThis.requestAnimationFrame(cb));
     this.cancelFrame = cancelFrame || (id => globalThis.cancelAnimationFrame(id));
-    this.held = new Set();
+    /** player → { held, ignored, deferredSince, comboDown } */
+    this.players = new Map();
     this.sectors = new Map();
     this.menuDown = false;
     this.now = now || (() => globalThis.performance.now());
-    this.ignored = new Set();
-    this.deferredSince = new Map();
-    this.comboDown = false;
     this.primePending = false;
     this.frame = 0;
     this.running = false;
     this.tick = () => { this.frame = 0; if (!this.running) return; this.poll(); if (this.running && !this.frame) this.frame = this.requestFrame(this.tick); };
+  }
+  /** Buttons player 1 holds (the single-player view). */
+  get held() { return this.#player(0).held; }
+  #player(player) {
+    let state = this.players.get(player);
+    if (!state) { state = { held: new Set(), ignored: new Set(), deferredSince: new Map(), comboDown: false }; this.players.set(player, state); }
+    return state;
   }
   start() { if (this.running) return; this.running = true; this.primePending = true; if (!this.frame) this.frame = this.requestFrame(this.tick); }
   stop() {
@@ -88,61 +96,80 @@ export class GamepadPoller {
     this.releaseAll();
   }
   releaseAll() {
-    if (this.held.size) this.onChange([], [...this.held]);
-    this.held.clear();
+    for (const [player, state] of this.players) {
+      if (state.held.size) this.onChange([], [...state.held], player);
+      state.held = new Set();
+      state.deferredSince.clear();
+    }
     this.sectors.clear();
     this.menuDown = false;
-    this.deferredSince.clear();
   }
   poll() {
     let pads = [];
     try { pads = (this.getGamepads() || []).filter(Boolean); } catch { pads = []; }
-    const raw = new Set();
-    let active = false, menu = false;
+    const raw = new Map();
+    const active = new Set();
+    let menu = false;
     for (const pad of pads) {
       const state = readGamepad(pad, { previousSector: this.sectors.get(pad.index) ?? -1 });
       this.sectors.set(pad.index, state.sector);
-      for (const name of state.buttons) raw.add(name);
-      active = active || state.active;
       menu = menu || state.menu;
+      let player = null;
+      try { player = this.playerFor(pad, state.active); } catch { player = 0; }
+      if (!Number.isInteger(player) || player < 0) continue;
+      if (state.active) active.add(player);
+      if (!raw.has(player)) raw.set(player, new Set());
+      for (const name of state.buttons) raw.get(player).add(name);
     }
     const t = this.now();
-    if (this.primePending) {
-      this.primePending = false;
-      for (const name of raw) this.ignored.add(name);
-      this.menuDown = menu;
-      this.comboDown = raw.has('BUTTON_SELECT') && raw.has('BUTTON_START');
-    }
-    for (const name of [...this.ignored]) if (!raw.has(name)) this.ignored.delete(name);
-    // Select + Start together: the menu, and neither button reaches the game.
-    const combo = raw.has('BUTTON_SELECT') && raw.has('BUTTON_START');
+    const prime = this.primePending;
+    this.primePending = false;
+    if (prime) this.menuDown = menu;
     let comboEdge = false;
-    if (combo && !this.comboDown) {
-      comboEdge = true;
-      for (const name of SYSTEM_BUTTONS) { this.ignored.add(name); this.deferredSince.delete(name); }
-    }
-    this.comboDown = combo;
-    const effective = new Set([...raw].filter(name => !this.ignored.has(name)));
-    for (const name of SYSTEM_BUTTONS) {
-      if (this.held.has(name)) { this.deferredSince.delete(name); continue; }
-      if (effective.has(name)) {
-        // A new press of Select or Start waits a moment for the other one.
-        if (!this.deferredSince.has(name)) this.deferredSince.set(name, t);
-        if (t - this.deferredSince.get(name) < MENU_COMBO_MS) effective.delete(name);
-        else this.deferredSince.delete(name);
-      } else if (this.deferredSince.has(name)) {
-        // Tapped and let go before it was delivered: press it now, the release follows next frame.
-        this.deferredSince.delete(name);
-        if (!this.ignored.has(name)) effective.add(name);
+    const all = { pressed: [], released: [] };
+    const changes = [];
+    for (const player of new Set([...raw.keys(), ...this.players.keys()])) {
+      const state = this.#player(player);
+      const buttons = raw.get(player) || new Set();
+      if (prime) {
+        for (const name of buttons) state.ignored.add(name);
+        state.comboDown = buttons.has('BUTTON_SELECT') && buttons.has('BUTTON_START');
       }
+      for (const name of [...state.ignored]) if (!buttons.has(name)) state.ignored.delete(name);
+      // Select + Start together: the menu, and neither button reaches the game.
+      const combo = buttons.has('BUTTON_SELECT') && buttons.has('BUTTON_START');
+      if (combo && !state.comboDown) {
+        comboEdge = true;
+        for (const name of SYSTEM_BUTTONS) { state.ignored.add(name); state.deferredSince.delete(name); }
+      }
+      state.comboDown = combo;
+      const effective = new Set([...buttons].filter(name => !state.ignored.has(name)));
+      for (const name of SYSTEM_BUTTONS) {
+        if (state.held.has(name)) { state.deferredSince.delete(name); continue; }
+        if (effective.has(name)) {
+          // A new press of Select or Start waits a moment for the other one.
+          if (!state.deferredSince.has(name)) state.deferredSince.set(name, t);
+          if (t - state.deferredSince.get(name) < MENU_COMBO_MS) effective.delete(name);
+          else state.deferredSince.delete(name);
+        } else if (state.deferredSince.has(name)) {
+          // Tapped and let go before it was delivered: press it now, the release follows next frame.
+          state.deferredSince.delete(name);
+          if (!state.ignored.has(name)) effective.add(name);
+        }
+      }
+      const pressed = [...effective].filter(name => !state.held.has(name));
+      const released = [...state.held].filter(name => !effective.has(name));
+      state.held = effective;
+      if (pressed.length || released.length) changes.push([pressed, released, player]);
+      all.pressed.push(...pressed);
+      all.released.push(...released);
     }
-    const pressed = [...effective].filter(name => !this.held.has(name));
-    const released = [...this.held].filter(name => !effective.has(name));
-    this.held = effective;
-    if (pressed.length || released.length) this.onChange(pressed, released);
-    if (active) this.onActivity();
+    // Players that let go come first: a controller moved to another player is let go on the old one before it presses on the new one.
+    changes.sort((a, b) => (b[1].length ? 1 : 0) - (a[1].length ? 1 : 0));
+    for (const [pressed, released, player] of changes) this.onChange(pressed, released, player);
+    for (const player of active) this.onActivity(player);
     if ((menu && !this.menuDown) || comboEdge) this.onMenu();
     this.menuDown = menu;
-    return { pressed, released };
+    return all;
   }
 }

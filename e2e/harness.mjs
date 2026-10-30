@@ -204,15 +204,15 @@ export function recordInputs(page) {
     const gm = frame.EJS_emulator.gameManager;
     const original = gm.simulateInput.bind(gm);
     window.__inputs = [];
-    gm.simulateInput = (player, index, value) => { window.__inputs.push([index, value]); return original(player, index, value); };
+    gm.simulateInput = (player, index, value) => { window.__inputs.push([index, value, player]); return original(player, index, value); };
   });
 }
 const RETROPAD = { 0: 'B', 1: 'Y', 2: 'SELECT', 3: 'START', 4: 'UP', 5: 'DOWN', 6: 'LEFT', 7: 'RIGHT', 8: 'A', 9: 'X', 10: 'L', 11: 'R', 12: 'L2', 13: 'R2' };
-/** RetroPad buttons currently held, e.g. "B+RIGHT" ("-" for none). */
+/** RetroPad buttons player 1 currently holds, e.g. "B+RIGHT" ("-" for none). */
 export function heldInputs(page) {
   return page.evaluate(names => {
     const state = new Map();
-    for (const [index, value] of window.__inputs || []) state.set(index, value);
+    for (const [index, value, player] of window.__inputs || []) if (!player) state.set(index, value);
     return [...state].filter(([, value]) => value).map(([index]) => names[index] || index).sort().join('+') || '-';
   }, RETROPAD);
 }

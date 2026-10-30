@@ -58,3 +58,8 @@ test('bounds controller names and reports additional controllers without dumping
   assert.equal(status.connected[0].id.length, 80);
   assert.match(describeGamepads(status), /\+2$/);
 });
+
+test('controller names in the status lose the browser\'s vendor/product suffix', () => {
+  const status = { state: 'connected', supported: true, connected: [{ index: 0, id: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)', mapping: 'standard' }, { index: 1, id: '054c-09cc-Wireless Controller', mapping: 'standard' }] };
+  assert.equal(describeGamepads(status), 'Gamepad bağlı (2) · Xbox Wireless Controller, Wireless Controller');
+});

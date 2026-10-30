@@ -14,6 +14,7 @@ import { readZipDirectory } from '../zip-rom.js';
 import { TouchController } from '../touch-controller.js';
 import { computeTouchLayout, padSpecFor } from '../touch-layout.js';
 import { GamepadPoller } from '../gamepad-input.js';
+import { PlayerAssignment, playerCount, padName, type PadPlayer } from '../players.js';
 import { inspectGamepads, describeGamepads } from '../gamepad-status.js';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from '../fullscreen.js';
 import { displayStart, displayShader, displayLabel, DISPLAY_SCALES } from '../display-modes.js';
@@ -38,6 +39,8 @@ export type MenuPanel = 'main' | 'slots' | 'display' | 'controls';
 export interface PlayerAction { label: string; run: () => void }
 interface StartOptions { coreOverride?: string; fresh?: boolean; slot?: SlotId }
 
+/** An arcade game's pad: the core that runs it and the cabinet's controls (MAME's input data). */
+type ArcadePad = { core?: string; buttons?: number; ways?: number; players?: number };
 type Player = InstanceType<typeof EmulatorJsPlayer> & { romInfo?: { mapper?: number | null; mapperNumber?: number | null } | null; romDiagnostic?: unknown };
 
 const SLOT_NAMES: Record<SlotId, string> = { auto: 'Devam noktası', quick: 'Hızlı kayıt', '1': 'Yuva 1', '2': 'Yuva 2', '3': 'Yuva 3' };
@@ -77,6 +80,8 @@ class PlayerSession {
   isArcade = $state(false);
   /** Keyboard keys for the current game's pad (desktop hints). */
   keyHints = $state.raw<KeyHint[]>([]);
+  /** Local multiplayer: players the game has, and who plays as whom (0 = player 1). */
+  players = $state.raw<{ count: number; touch: number; keyboard: number; pads: PadPlayer[] }>({ count: 2, touch: 0, keyboard: 0, pads: [] });
   gamepadState = $state('unknown');
   gamepadText = $state('Gamepad durumu kontrol ediliyor…');
   /** Integer scaling chosen at start (changing it applies on the next start). */
@@ -95,8 +100,9 @@ class PlayerSession {
   #extraFiles: ExtraFile[] = [];
   #touch: TouchController | null = null;
   #poller: GamepadPoller | null = null;
+  #assignment = new PlayerAssignment();
   #padSpec = padSpecFor('NES');
-  #padSource: { platform: string; game: Game | null; arcade: { core?: string; buttons?: number; ways?: number } | null } = { platform: 'NES', game: null, arcade: null };
+  #padSource: { platform: string; game: Game | null; arcade: ArcadePad | null } = { platform: 'NES', game: null, arcade: null };
   #padAspect = 4 / 3;
   #layoutFrame = 0;
   #noticeTimer: ReturnType<typeof setTimeout> | 0 = 0;
@@ -120,8 +126,8 @@ class PlayerSession {
     this.#touchRoot = touchRoot;
     this.#biosInput = biosInput;
     this.#touch = new TouchController(touchRoot, {
-      press: (input: string) => this.#emulator?.pressButton?.(input, 'touch'),
-      release: (input: string) => this.#emulator?.releaseButton?.(input, 'touch'),
+      press: (input: string) => this.#emulator?.pressButton?.(input, 'touch', this.#assignment.touch),
+      release: (input: string) => this.#emulator?.releaseButton?.(input, 'touch', this.#assignment.touch),
       vibrate: typeof navigator.vibrate === 'function' ? (ms: number) => navigator.vibrate(ms) : null
     });
     this.#touch.setSettings(settings.touch);
@@ -142,11 +148,13 @@ class PlayerSession {
     document.addEventListener('webkitfullscreenchange', onFullscreen);
     document.addEventListener('visibilitychange', () => { void this.#handleVisibility(); });
     window.addEventListener('pagehide', () => this.#pageHide());
-    window.addEventListener('gamepadconnected', () => this.updateGamepadStatus());
+    window.addEventListener('gamepadconnected', () => { this.updateGamepadStatus(); this.#refreshPlayers(); });
     window.addEventListener('gamepaddisconnected', () => {
       this.updateGamepadStatus();
-      const pads = typeof navigator.getGamepads === 'function' ? [...navigator.getGamepads()].filter(Boolean) : [];
-      if (!pads.length) this.#setPadInUse(false);
+      // A controller that left gives its player back; the touch pad returns when no controller plays as its player.
+      this.#assignment.sync(connectedPads());
+      this.#refreshPlayers();
+      if (!this.#touchPlayerHasPad()) this.#setPadInUse(false);
     });
     window.addEventListener('focus', () => this.updateGamepadStatus());
     biosInput.addEventListener('change', () => {
@@ -305,10 +313,10 @@ class PlayerSession {
       // given a file it cannot handle may crash the page, so that is the player's choice.
       const candidate = launch.cores[0];
       if (game.platform === 'ARCADE') {
-        let input: { buttons?: number; ways?: number } | null = null;
+        let input: { buttons?: number; ways?: number; players?: number } | null = null;
         try { input = arcadeInputInfo(game.arcade, { mame2003_plus: await loadCatalog('mame2003_plus') }); } catch {}
         if (session !== this.#session) { this.#releaseExtraFiles(); return; }
-        this.renderPad(game.platform, game, { core: candidate.coreId, buttons: input?.buttons, ways: input?.ways });
+        this.renderPad(game.platform, game, { core: candidate.coreId, buttons: input?.buttons, ways: input?.ways, players: input?.players });
       }
       const display = settings.display;
       const start = displayStart(display);
@@ -326,6 +334,7 @@ class PlayerSession {
         onHotkey: (key: string) => { if (key === 'Escape') this.toggleMenu(); }
       }) as Player;
       this.#emulator = player;
+      player.setKeyboardPlayer?.(this.#assignment.keyboard);
       this.startedDisplay = { ...display };
       player.romInfo = validation;
       player.romDiagnostic = smb3Diagnostic;
@@ -412,10 +421,11 @@ class PlayerSession {
     setTimeout(() => this.tapInput(name), 120);
   }
 
-  /** Jeton / Başla from the bar or a notice: a short press the game is sure to see. */
+  /** Jeton / Başla from the bar or a notice: a short press the game is sure to see (for the player of the screen or keyboard). */
   tapInput(name: 'BUTTON_SELECT' | 'BUTTON_START'): boolean {
     if (!this.running || this.paused || !this.#emulator) return false;
-    return this.#emulator.tapButton?.(name) ?? false;
+    const player = this.touchPlay ? this.#assignment.touch : this.#assignment.keyboard;
+    return this.#emulator.tapButton?.(name, undefined, player) ?? false;
   }
 
   #showBlocked(status: string, message: string, action: PlayerAction | null = null) {
@@ -927,10 +937,13 @@ class PlayerSession {
   // ---- the handheld layout -----------------------------------------------------------------------
   /**
    * Chooses the console's pad (and the picture shape) for the game about to start. Arcade:
-   * `arcade` = { core, buttons, ways } — the core that runs it and the cabinet's controls.
+   * `arcade` = { core, buttons, ways, players } — the core that runs it and the cabinet's controls.
    */
-  renderPad(platform: string, game: Game | null = null, arcade: { core?: string; buttons?: number; ways?: number } | null = null) {
+  renderPad(platform: string, game: Game | null = null, arcade: ArcadePad | null = null) {
     this.#padSource = { platform, game, arcade };
+    this.#assignment.setCount(playerCount(platform, arcade));
+    this.#emulator?.setKeyboardPlayer?.(this.#assignment.keyboard);
+    this.#refreshPlayers();
     this.#padSpec = padSpecFor(platform, platform === 'ARCADE' ? arcadeLayout(game?.arcade) : 'six', arcade, settings.touch);
     this.#padAspect = platform === 'ARCADE' && game?.arcade?.vertical ? 3 / 4 : 4 / 3;
     this.padLayout = this.#padSpec.id;
@@ -986,11 +999,19 @@ class PlayerSession {
   #startGamepadInput() {
     if (!this.#poller) {
       this.#poller = new GamepadPoller({
-        onChange: (pressed: string[], released: string[]) => {
-          for (const name of released) this.#emulator?.releaseButton?.(name, 'gamepad');
-          for (const name of pressed) this.#emulator?.pressButton?.(name, 'gamepad');
+        // Each controller plays as its own player: the first one used is player 1, the next player 2 …
+        playerFor: (pad, active) => {
+          if (!active) return this.#assignment.playerOf(pad);
+          const { player, joined } = this.#assignment.use(pad);
+          if (joined) this.#padJoined(pad, player);
+          return player;
         },
-        onActivity: () => this.#setPadInUse(true),
+        onChange: (pressed: string[], released: string[], player: number) => {
+          for (const name of released) this.#emulator?.releaseButton?.(name, 'gamepad', player);
+          for (const name of pressed) this.#emulator?.pressButton?.(name, 'gamepad', player);
+        },
+        // A controller of the touch pad's player takes over from it; another player's does not.
+        onActivity: (player: number) => { if (player === this.#assignment.touch) this.#setPadInUse(true); },
         onMenu: () => this.toggleMenu()
       });
     }
@@ -998,6 +1019,44 @@ class PlayerSession {
   }
 
   #stopGamepadInput() { this.#poller?.stop(); }
+
+  // ---- players (local multiplayer) ---------------------------------------------------------------
+  #refreshPlayers() {
+    const a = this.#assignment;
+    this.players = { count: a.count, touch: a.touch, keyboard: a.keyboard, pads: a.describe(connectedPads()) };
+  }
+
+  #touchPlayerHasPad(): boolean {
+    return connectedPads().some(pad => this.#assignment.playerOf(pad) === this.#assignment.touch);
+  }
+
+  #padJoined(pad: { index: number; id: string }, player: number) {
+    this.#refreshPlayers();
+    // A second controller (or one for another player) says who it plays as; one controller alone is just player 1.
+    if (player > 0) this.showNotice(`Oyuncu ${player + 1} · ${padName(pad)}`, { timeout: 3000 });
+  }
+
+  /** Menu: the player a controller plays as. */
+  setPadPlayer(entry: PadPlayer, player: number) {
+    this.#assignment.setPad(entry, player);
+    this.#refreshPlayers();
+    this.#setPadInUse(this.padInUse && this.#touchPlayerHasPad());
+  }
+
+  /** Menu: the player the touch pad plays as. */
+  setTouchPlayer(player: number) {
+    this.#touch?.releaseAll();
+    this.#assignment.setTouch(player);
+    this.#refreshPlayers();
+    this.#setPadInUse(this.padInUse && this.#touchPlayerHasPad());
+  }
+
+  /** Menu: the player the keyboard plays as. */
+  setKeyboardPlayer(player: number) {
+    this.#assignment.setKeyboard(player);
+    this.#emulator?.setKeyboardPlayer?.(this.#assignment.keyboard);
+    this.#refreshPlayers();
+  }
 
   #setPadInUse(active: boolean) {
     if (this.padInUse === active) return;
@@ -1014,7 +1073,13 @@ class PlayerSession {
     const status = inspectGamepads(navigator);
     this.gamepadState = status.state;
     this.gamepadText = describeGamepads(status);
+    this.#refreshPlayers();
   }
+}
+
+/** Connected controllers (the TV app's bridge included). */
+function connectedPads(): Array<{ index: number; id: string; connected?: boolean }> {
+  try { return typeof navigator.getGamepads === 'function' ? ([...navigator.getGamepads()].filter(Boolean) as Array<{ index: number; id: string; connected?: boolean }>) : []; } catch { return []; }
 }
 
 let safeAreaProbe: HTMLDivElement | null = null;

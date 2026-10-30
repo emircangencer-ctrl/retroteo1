@@ -39,7 +39,8 @@ export function describeGamepads(status) {
   const names = status.connected
     .slice(0, 2)
     .map((pad, index) => {
-      const name = String(pad.id || '').trim();
+      // Without the browser's "(STANDARD GAMEPAD Vendor: … Product: …)" suffix.
+      const name = String(pad.id || '').replace(/\s*\([^)]*(?:STANDARD GAMEPAD|Vendor:)[^)]*\)\s*$/i, '').replace(/^[0-9a-f]{1,4}-[0-9a-f]{1,4}-/i, '').trim();
       return name || `Gamepad ${pad.index >= 0 ? pad.index + 1 : index + 1}`;
     });
   const extra = status.connected.length > names.length

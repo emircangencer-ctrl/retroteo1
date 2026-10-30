@@ -234,24 +234,31 @@ test("the shipped FB Alpha 2012 CPS2 list runs the user's old X-Men Vs. Street F
   assert.equal(result.status, 'complete');
 });
 
-test('cabinet controls come from MAME 2003-Plus by set name, then parent', async () => {
+test('cabinet controls and player count come from MAME 2003-Plus by set name, then parent', async () => {
   const { arcadeInputInfo } = await import('../src/arcade.js');
   const { compactDat } = await import('../scripts/build-arcade-catalogs.mjs');
   const games = compactDat(`<mame><game name="puckman"><description>Puck Man</description><rom name="a" size="4" crc="12345678"/><input players="2" control="joy4way" coins="2"/></game>
 <game name="sf2" ><description>SF II</description><rom name="b" size="4" crc="22345678"/><input players="2" control="joy8way" buttons="6" coins="2"/></game>
-<game name="arkanoid"><description>Arkanoid</description><rom name="c" size="4" crc="32345678"/><input players="2" control="dial" buttons="1"/></game></mame>`);
-  assert.deepEqual(games.puckman[7], [0, 4]);
-  assert.deepEqual(games.sf2[7], [6, 8]);
-  assert.deepEqual(games.arkanoid[7], [1, 0]);
+<game name="arkanoid"><description>Arkanoid</description><rom name="c" size="4" crc="32345678"/><input players="2" control="dial" buttons="1"/></game>
+<game name="tmnt"><description>TMNT</description><rom name="d" size="4" crc="42345678"/><input players="4" control="joy8way" buttons="2"/></game></mame>`);
+  assert.deepEqual(games.puckman[7], [0, 4, 2]);
+  assert.deepEqual(games.sf2[7], [6, 8, 2]);
+  assert.deepEqual(games.arkanoid[7], [1, 0, 2]);
+  assert.deepEqual(games.tmnt[7], [2, 8, 4]);
   const catalogs = { mame2003_plus: { games } };
-  assert.deepEqual(arcadeInputInfo({ set: 'puckman' }, catalogs), { buttons: 0, ways: 4 });
-  assert.deepEqual(arcadeInputInfo({ set: 'sf2ce', parent: 'sf2' }, catalogs), { buttons: 6, ways: 8 });
+  assert.deepEqual(arcadeInputInfo({ set: 'puckman' }, catalogs), { buttons: 0, ways: 4, players: 2 });
+  assert.deepEqual(arcadeInputInfo({ set: 'sf2ce', parent: 'sf2' }, catalogs), { buttons: 6, ways: 8, players: 2 });
+  assert.deepEqual(arcadeInputInfo({ set: 'tmnt' }, catalogs), { buttons: 2, ways: 8, players: 4 });
+  // An older catalog entry without the player count reads as unknown (0).
+  assert.deepEqual(arcadeInputInfo({ set: 'old' }, { mame2003_plus: { games: { old: ['Old', '', '', '', '', 0, [], [2, 8]] } } }), { buttons: 2, ways: 8, players: 0 });
   assert.equal(arcadeInputInfo({ set: 'unknown' }, catalogs), null);
   const shipped = JSON.parse(await readFile(new URL('../public/assets/arcade-mame2003plus.json', import.meta.url), 'utf8'));
-  assert.deepEqual(shipped.games.puckman[7], [0, 4]);
-  assert.deepEqual(shipped.games.dkong[7], [1, 4]);
-  assert.deepEqual(shipped.games['1942'][7], [2, 8]);
-  assert.deepEqual(shipped.games.mslug[7], [4, 8]);
+  assert.deepEqual(shipped.games.puckman[7], [0, 4, 2]);
+  assert.deepEqual(shipped.games.dkong[7], [1, 4, 2]);
+  assert.deepEqual(shipped.games['1942'][7], [2, 8, 2]);
+  assert.deepEqual(shipped.games.mslug[7], [4, 8, 2]);
+  assert.deepEqual(shipped.games.tmnt[7], [2, 8, 4], 'four-player cabinet');
+  assert.deepEqual(shipped.games.tekken3[7], [6, 8, 2]);
 });
 
 // ---- RetroPlay's own MAME 2003-Plus build (mame2003_plus_next) for Namco System 12 ----------------

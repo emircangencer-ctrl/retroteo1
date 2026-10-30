@@ -287,7 +287,7 @@ export function arcadeInputInfo(arcade, catalogs) {
   // (the current MAME 2003-Plus build's sets, e.g. tekken3je1, are found through their parent)
   for (const name of [arcade.set, arcade.parent, ...(arcade.alternatives || []).map(alt => alt.set)]) {
     const input = name && mame[name]?.[7];
-    if (Array.isArray(input)) return { buttons: Number(input[0]) || 0, ways: Number(input[1]) || 0 };
+    if (Array.isArray(input)) return { buttons: Number(input[0]) || 0, ways: Number(input[1]) || 0, players: Number(input[2]) || 0 };
   }
   return null;
 }

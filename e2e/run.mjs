@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, recordInputs, heldInputs, touchScreen, padGeometry } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
 
@@ -23,6 +23,8 @@ const unverifiedRom = path.join(tmp, 'Super Mario Bros. 3 (U) (PRG 1) [h2].nes')
 fs.writeFileSync(unverifiedRom, unverifiedMmc3Rom());
 const checkerRom = path.join(tmp, 'checkerboard.nes');
 fs.writeFileSync(checkerRom, checkerboardRom());
+const twoPlayersRom = path.join(tmp, 'two players.nes');
+fs.writeFileSync(twoPlayersRom, twoPlayerRom());
 
 // Arcade sets made of CRC-matched placeholder files (zeros; no game data), built from the catalogs.
 const fbneoCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fbneo.json'), 'utf8'));
@@ -106,6 +108,13 @@ const fakePad = () => {
   const pad = { id: 'Test Pad (STANDARD GAMEPAD)', index: 0, connected: true, mapping: 'standard', timestamp: 0, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })) };
   window.__pad = pad; window.__padOn = false;
   Object.defineProperty(Navigator.prototype, 'getGamepads', { configurable: true, value: () => (window.top.__padOn ? [window.top.__pad, null, null, null] : [null, null, null, null]) });
+};
+// Two controllers (the second one is used second, so it becomes player 2).
+const fakePads = () => {
+  const make = (index, id) => ({ id, index, connected: true, mapping: 'standard', timestamp: 0, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })) });
+  window.__pads = [make(0, 'First Pad (STANDARD GAMEPAD Vendor: 0001 Product: 0001)'), make(1, 'Second Pad (STANDARD GAMEPAD Vendor: 0002 Product: 0002)')];
+  window.__padsOn = false;
+  Object.defineProperty(Navigator.prototype, 'getGamepads', { configurable: true, value: () => (window.top.__padsOn ? [window.top.__pads[0], window.top.__pads[1], null, null] : [null, null, null, null]) });
 };
 
 // ---- saves -----------------------------------------------------------------------------------------
@@ -664,6 +673,101 @@ await scenario('a USB/Bluetooth controller plays the game: buttons by position, 
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-touch-settings')).hideWithGamepad), false, 'the chip brings the touch pad back');
 }, { mobile: true, init: fakePad });
 
+await scenario('two players: the second controller really plays player 2 in the core, the menu changes who plays as whom, the keyboard can be player 2', async page => {
+  await importFile(page, twoPlayersRom);
+  const state = await play(page, 'two players');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  await recordInputs(page);
+  // The test cartridge shows red while player 1 holds A, green while player 2 does, black otherwise.
+  const colour = async () => {
+    const { image } = await gameScreenshot(page);
+    const [r, g, b] = image.rgb(Math.floor(image.width / 2), Math.floor(image.height / 2));
+    return r > g + 60 ? 'red' : g > r + 60 ? 'green' : r + g + b < 120 ? 'black' : `${r},${g},${b}`;
+  };
+  const waitColour = async want => { let got = ''; for (let i = 0; i < 30 && got !== want; i++) { got = await colour(); if (got !== want) await page.waitForTimeout(100); } return got; };
+  const hold = (index, button, down) => page.evaluate(([i, b, d]) => { window.__pads[i].buttons[b].pressed = d; window.__pads[i].buttons[b].value = d ? 1 : 0; }, [index, button, down]);
+  const rows = () => page.evaluate(() => [...document.querySelectorAll('#players .player-row')].map(row => `${(row.querySelector('.who .name') || row.querySelector('.who')).textContent.trim()}=${row.querySelector('[aria-pressed="true"]')?.dataset.player || '-'}`));
+  await page.evaluate(() => { window.__padsOn = true; window.dispatchEvent(new Event('gamepadconnected')); });
+  assert.equal(await waitColour('black'), 'black', 'nobody holds A');
+  await hold(0, 1, true);
+  assert.equal(await waitColour('red'), 'red', 'the first controller used is player 1');
+  await hold(0, 1, false);
+  assert.equal(await waitColour('black'), 'black');
+  await hold(1, 1, true);
+  assert.equal(await waitColour('green'), 'green', 'the second controller is player 2 in the game');
+  await notice(page, /^Oyuncu 2 · Second Pad$/);
+  assert.deepEqual(await page.evaluate(() => window.__inputs.filter(([index, value]) => index === 8 && value).map(([, , player]) => player)), [0, 1], 'A on the first port, then on the second');
+  await hold(1, 1, false);
+  assert.equal(await waitColour('black'), 'black');
+  // Menu → Kontroller ve oyuncular: the second controller becomes player 1, the keyboard player 2.
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('#player-modal').classList.contains('menu-open'));
+  await click(page, '#touch-settings-open');
+  assert.deepEqual(await rows(), ['Klavye=1', 'First Pad=1', 'Second Pad=2']);
+  assert.match(await page.evaluate(() => document.querySelector('#players-note').textContent), /ilk tuşa basıldıkları sırayla/);
+  await click(page, '#players [data-pad="1"] [data-player="1"]');
+  await click(page, '#players [data-input="keyboard"] [data-player="2"]');
+  assert.deepEqual(await rows(), ['Klavye=2', 'First Pad=1', 'Second Pad=1']);
+  await click(page, '#ts-done');
+  await waitStatus(page, /^Çalışıyor/);
+  // (a button already held when the game resumes waits for a release: the one that closed the menu)
+  await page.waitForTimeout(300);
+  await hold(1, 1, true);
+  assert.equal(await waitColour('red'), 'red', 'the second controller now plays player 1');
+  await hold(1, 1, false);
+  assert.equal(await waitColour('black'), 'black');
+  await page.keyboard.down('x');
+  assert.equal(await waitColour('green'), 'green', 'the keyboard plays player 2');
+  await page.keyboard.up('x');
+  assert.equal(await waitColour('black'), 'black');
+}, { init: fakePads });
+
+await scenario('phone: the touch pad and a friend\'s controller play as two players; the touch pad stays on screen while player 2 plays', async (page, context) => {
+  await importFile(page, twoPlayersRom);
+  const state = await play(page, 'two players');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  const colour = async () => {
+    const { image } = await gameScreenshot(page);
+    const [r, g, b] = image.rgb(Math.floor(image.width / 2), Math.floor(image.height / 2));
+    return r > g + 60 ? 'red' : g > r + 60 ? 'green' : r + g + b < 120 ? 'black' : `${r},${g},${b}`;
+  };
+  const waitColour = async want => { let got = ''; for (let i = 0; i < 30 && got !== want; i++) { got = await colour(); if (got !== want) await page.waitForTimeout(100); } return got; };
+  const hold = (index, button, down) => page.evaluate(([i, b, d]) => { window.__pads[i].buttons[b].pressed = d; window.__pads[i].buttons[b].value = d ? 1 : 0; }, [index, button, down]);
+  const padHidden = () => page.evaluate(() => document.querySelector('#player-modal').classList.contains('pad-hidden'));
+  await page.evaluate(() => { window.__padsOn = true; window.dispatchEvent(new Event('gamepadconnected')); });
+  // One controller alone is player 1 and takes over from the touch pad (single-player as before).
+  await hold(0, 1, true);
+  assert.equal(await waitColour('red'), 'red');
+  await hold(0, 1, false);
+  assert.equal(await padHidden(), true, 'the touch pad steps aside for player 1\'s controller');
+  await click(page, '#play-menu');
+  await click(page, '#touch-settings-open');
+  const rows = () => page.evaluate(() => [...document.querySelectorAll('#players .player-row')].map(row => `${(row.querySelector('.who .name') || row.querySelector('.who')).textContent.trim()}=${row.querySelector('[aria-pressed="true"]')?.dataset.player || '-'}`));
+  assert.deepEqual(await rows(), ['Dokunmatik=1', 'First Pad=1', 'Second Pad=-']);
+  assert.match(await page.evaluate(() => document.querySelector('#players [data-pad="1"] small')?.textContent || ''), /bir tuşa basınca katılır/);
+  await click(page, '#players [data-pad="0"] [data-player="2"]');
+  assert.deepEqual(await rows(), ['Dokunmatik=1', 'First Pad=2', 'Second Pad=-']);
+  await click(page, '#ts-done');
+  await waitStatus(page, /^Çalışıyor/);
+  // (the layout follows on an animation frame)
+  await page.waitForFunction(() => !document.querySelector('#player-modal').classList.contains('pad-hidden'), null, { timeout: 3000 }).catch(() => {});
+  assert.equal(await padHidden(), false, 'the touch pad is back: no controller plays as its player');
+  await page.waitForTimeout(300);
+  await hold(0, 1, true);
+  assert.equal(await waitColour('green'), 'green', 'the friend\'s controller plays player 2');
+  await page.waitForTimeout(200);
+  assert.equal(await padHidden(), false, 'and the touch pad stays');
+  await hold(0, 1, false);
+  assert.equal(await waitColour('black'), 'black');
+  const touch = await touchScreen(context, page);
+  const { face } = await padGeometry(page);
+  const A = face.find(button => button.input === 'BUTTON_A');
+  await touch('touchStart', [[A.x, A.y, 1]]);
+  assert.equal(await waitColour('red'), 'red', 'the touch pad plays player 1');
+  await touch('touchEnd', []);
+  assert.equal(await waitColour('black'), 'black');
+}, { mobile: true, init: fakePads });
+
 await scenario('every console has its own pad: Super Nintendo diamond with L/R, Mega Drive A B C under X Y Z', async page => {
   await importFile(page, snesRom);
   let state = await play(page, 'snes pad');
@@ -890,7 +994,7 @@ const recordTimedInputs = page => page.evaluate(() => {
   const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager;
   const original = gm.simulateInput.bind(gm);
   window.__timed = [];
-  gm.simulateInput = (player, index, value) => { window.__timed.push([index, value, performance.now()]); return original(player, index, value); };
+  gm.simulateInput = (player, index, value) => { window.__timed.push([index, value, performance.now(), player]); return original(player, index, value); };
 });
 const takeTimed = page => page.evaluate(() => window.__timed.splice(0));
 const pressLength = (events, index) => {
@@ -933,12 +1037,12 @@ await scenario('desktop arcade: Jeton and Başla in the bar and on 5 / 1; a quic
   await page.waitForTimeout(300);
   assert.ok(pressLength(await takeTimed(page), 3) >= 130, 'Başla button');
   // Keys typed while the emulator frame has focus: EmulatorJS's own bindings (2 = load its state,
-  // E = R, Tab = L2) stay silent and V inserts one coin, not two.
+  // E = R, Tab = L2) stay silent; 2 is player 2's start (MAME's key) and V inserts one coin, not two.
   await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.focus());
   for (const key of ['Digit2', 'KeyE', 'Tab', 'KeyV']) await page.keyboard.press(key);
   await page.waitForTimeout(250);
   events = await takeTimed(page);
-  assert.deepEqual(events.filter(([, v]) => v).map(([i]) => i), [2], 'only the coin');
+  assert.deepEqual(events.filter(([, v]) => v).map(([i, , , player]) => `${player + 1}P:${i}`), ['2P:3', '1P:2'], 'player 2\'s start, then one coin');
   // A controller's Select tapped for 30 ms (under the Select+Start wait) still inserts a coin.
   await page.evaluate(() => { window.__padOn = true; window.dispatchEvent(new Event('gamepadconnected')); });
   await page.waitForTimeout(150);
@@ -988,7 +1092,7 @@ const tvStub = () => {
     exit: () => { state.exited = true; }
   };
 };
-const tvPad = pressed => ({ index: 0, id: 'Test Pad', timestamp: Date.now(), axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, b) => [pressed.includes(b) ? 1 : 0, pressed.includes(b) ? 1 : 0]) });
+const tvPad = (pressed, index = 0, id = 'Test Pad') => ({ index, id, timestamp: Date.now(), axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, b) => [pressed.includes(b) ? 1 : 0, pressed.includes(b) ? 1 : 0]) });
 
 await scenario('TV app: files sent from a phone are imported, the remote moves the focus, Back goes back and opens the game menu, controllers come from the app', async (page, context) => {
   assert.equal(await page.evaluate(() => document.documentElement.classList.contains('tv') && document.documentElement.classList.contains('gp-nav')), true);
@@ -1040,6 +1144,13 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   await page.evaluate(pad => { window.__tv.pads = [pad]; window.__tv.version++; }, tvPad([]));
   await page.waitForTimeout(250);
   assert.equal(await heldInputs(page), '-');
+  // A second Bluetooth controller on the TV is player 2.
+  await page.evaluate(pads => { window.__tv.pads = pads; window.__tv.version++; }, [tvPad([]), tvPad([1], 1, 'Second Pad')]);
+  await page.waitForTimeout(250);
+  assert.deepEqual(await page.evaluate(() => window.__inputs.filter(([index, value]) => index === 8 && value).map(([, , player]) => player)), [0, 1], 'the second controller presses A on the second port');
+  await page.evaluate(pads => { window.__tv.pads = pads; window.__tv.version++; }, [tvPad([]), tvPad([], 1, 'Second Pad')]);
+  await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => window.__inputs.at(-1).join()), '8,0,1');
   assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
   await waitStatus(page, /^Duraklatıldı/);
   assert.equal(await page.evaluate(() => document.querySelector('#fullscreen-game')), null, 'no fullscreen item: the TV app is always full screen');

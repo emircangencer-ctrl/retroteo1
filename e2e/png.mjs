@@ -39,7 +39,11 @@ export function decodePng(buffer) {
       pixels[y * stride + x] = value & 0xff;
     }
   }
-  return { width, height, luminance: (x, y) => { const i = y * stride + x * channels; return (pixels[i] * 299 + pixels[i + 1] * 587 + pixels[i + 2] * 114) / 1000; } };
+  return {
+    width, height,
+    luminance: (x, y) => { const i = y * stride + x * channels; return (pixels[i] * 299 + pixels[i + 1] * 587 + pixels[i + 2] * 114) / 1000; },
+    rgb: (x, y) => { const i = y * stride + x * channels; return [pixels[i], pixels[i + 1], pixels[i + 2]]; }
+  };
 }
 
 /** Widths of the runs of light/dark pixels along one screen row (first and last run dropped). */

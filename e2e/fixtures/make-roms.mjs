@@ -88,3 +88,40 @@ export function checkerboardRom() {
   rom.set(chr, 16 + PRG_BANK);
   return rom;
 }
+
+/**
+ * two-players.nes — NROM: reads both controller ports every frame and fills the screen with one
+ * colour: red while player 1 holds A, green while player 2 holds A (green wins), black otherwise.
+ * Rendering stays off, so the backdrop colour ($3F00) is the whole picture.
+ */
+export function twoPlayerRom() {
+  const code = [
+    0x78, 0xd8, 0xa2, 0xff, 0x9a,                         // SEI, CLD, LDX #$FF, TXS
+    0xa9, 0x00, 0x8d, 0x00, 0x20, 0x8d, 0x01, 0x20,       // PPUCTRL = PPUMASK = 0 (rendering off)
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // wait for vblank
+    0x2c, 0x02, 0x20, 0x10, 0xfb                          // and once more
+  ];
+  const loop = 0xc000 + code.length;
+  code.push(
+    0xa9, 0x01, 0x8d, 0x16, 0x40, 0xa9, 0x00, 0x8d, 0x16, 0x40, // strobe both controllers
+    0xa2, 0x08,                                           // X = 8 buttons
+    0xad, 0x16, 0x40, 0x4a, 0x26, 0x00,                   // read: LDA $4016, LSR, ROL $00 (player 1)
+    0xad, 0x17, 0x40, 0x4a, 0x26, 0x01,                   //       LDA $4017, LSR, ROL $01 (player 2)
+    0xca, 0xd0, 0xf1,                                     //       DEX, BNE read  (A ends up in bit 7)
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // wait for vblank
+    0xa0, 0x0f,                                           // Y = black
+    0xa5, 0x00, 0x10, 0x02, 0xa0, 0x16,                   // player 1 A → red
+    0xa5, 0x01, 0x10, 0x02, 0xa0, 0x2a,                   // player 2 A → green
+    0xa9, 0x3f, 0x8d, 0x06, 0x20, 0xa9, 0x00, 0x8d, 0x06, 0x20, // PPUADDR = $3F00
+    0x8c, 0x07, 0x20,                                     // STY $2007 (backdrop colour)
+    0xa9, 0x00, 0x8d, 0x06, 0x20, 0x8d, 0x06, 0x20,       // PPUADDR = $0000 (the backdrop shows)
+    0x4c, loop & 0xff, loop >> 8                          // JMP loop
+  );
+  const rti = 0xc000 + code.length;
+  code.push(0x40);                                        // RTI
+  const vectors = { nmi: rti, reset: 0xc000, irq: rti };
+  const rom = new Uint8Array(16 + PRG_BANK + 8192);
+  rom.set([0x4e, 0x45, 0x53, 0x1a, 1, 1, 0x00, 0x00], 0); // iNES, 16 KiB PRG, 8 KiB CHR, mapper 0
+  rom.set(bank(code, vectors), 16);
+  return rom;
+}

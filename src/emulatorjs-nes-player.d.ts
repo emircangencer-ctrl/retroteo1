@@ -3,6 +3,8 @@ export function emulatorJsDataPath(base?: string): string;
 export const EMULATORJS_INPUT_INDEX: Readonly<Record<string, number>>;
 export const KEYBOARD_MAP: Readonly<Record<string, string>>;
 export const MIN_SYSTEM_PRESS_MS: number;
+export const ARCADE_PLAYER_KEYS: Readonly<Record<string, readonly [number, string]>>;
+export const EMULATORJS_PLAYERS: number;
 export function buildEmulatorDocument(gameUrl: string, gameName: string, systemId?: string, gameId?: number, coreId?: string, options?: Record<string, unknown>): string;
 export interface EmulatorJsPlayerOptions {
   onError?: (error: Error) => void;
@@ -40,9 +42,11 @@ export class EmulatorJsPlayer {
   setVolume(value: number): boolean;
   screenshot(options?: { timeout?: number }): Promise<Blob | null>;
   restartGame(): boolean;
-  pressButton(name: string, source?: string): void;
-  releaseButton(name: string, source?: string): void;
-  tapButton(name: string, ms?: number): boolean;
+  keyboardPlayer: number;
+  setKeyboardPlayer(player: number): void;
+  pressButton(name: string, source?: string, player?: number): void;
+  releaseButton(name: string, source?: string, player?: number): void;
+  tapButton(name: string, ms?: number, player?: number): boolean;
   releaseAllButtons(): void;
   destroy(): void;
 }

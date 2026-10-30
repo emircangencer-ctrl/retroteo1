@@ -18,6 +18,9 @@
   const display = $derived(settings.display);
   const scales = Object.entries(DISPLAY_SCALES) as Array<[DisplayScale, { label: string; hint: string }]>;
   const filters = Object.entries(DISPLAY_FILTERS) as Array<[DisplayFilter, { label: string; hint: string }]>;
+  // Local multiplayer: player numbers this game has, and the note under the choices.
+  const playerNumbers = $derived(Array.from({ length: player.players.count }, (_, i) => i));
+  const otherKeys = $derived([['2', '6'], ['3', '7'], ['4', '8']].slice(0, Math.max(0, player.players.count - 1)).map(([start, coin], i) => `${i + 2}. oyuncu başla ${start}, jeton ${coin}`).join(' · '));
   const fullscreenLabel = $derived(player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran');
 
   // Focus the first control of each view (controller and keyboard users land on it).
@@ -102,7 +105,7 @@
       <button type="button" class="item" id="quick-load" disabled={!player.canLoad || !player.running} onclick={async () => { await player.quickLoad(); await player.closeMenu(); }}><Icon name="load" size={18} /><span class="grow">Hızlı yükle</span>{#if quick}<span class="aside">{slotTime(quick.createdAt)}</span>{/if}</button>
       <button type="button" class="item" id="menu-slots" disabled={!player.running || !player.canSave} onclick={() => player.setPanel('slots')}><Icon name="slots" size={18} /><span class="grow">Kayıt yuvaları</span><Icon name="chevron" size={16} class="chev" /></button>
       <button type="button" class="item" id="menu-display" onclick={() => player.setPanel('display')}><Icon name="monitor" size={18} /><span class="grow">Ekran ve ses</span><span class="aside" id="display-mode">{displayLabel(display)}</span><Icon name="chevron" size={16} class="chev" /></button>
-      <button type="button" class="item" id="touch-settings-open" aria-haspopup="true" onclick={() => player.setPanel('controls')}><Icon name="gamepad" size={18} /><span class="grow">Kontroller</span><Icon name="chevron" size={16} class="chev" /></button>
+      <button type="button" class="item" id="touch-settings-open" aria-haspopup="true" onclick={() => player.setPanel('controls')}><Icon name="gamepad" size={18} /><span class="grow">Kontroller ve oyuncular</span><Icon name="chevron" size={16} class="chev" /></button>
       {#if !tv.active}<button type="button" class="item" id="fullscreen-game" aria-pressed={player.fullscreen || player.fullscreenFallback} onclick={() => player.toggleFullscreen()}><Icon name="fullscreen" size={18} /><span class="grow">{fullscreenLabel}</span></button>{/if}
       <button type="button" class="item" id="perf-test" disabled={!player.running || player.perfRunning} title="Bu cihazın bu oyunu ne kadar rahat çalıştırdığını ölç" onclick={() => player.runPerformanceTest()}><Icon name="gauge" size={18} /><span class="grow">Performansı ölç</span><span class="aside">~7 sn</span></button>
       <button type="button" class="item" id="menu-restart" disabled={!player.running} onclick={restart}><Icon name="restart" size={18} /><span class="grow">Yeniden başlat</span></button>
@@ -111,7 +114,7 @@
   {:else}
     <div class="sub-head">
       <button type="button" class="back" id="ts-back" onclick={() => player.menuBack()}><Icon name="back" size={18} />Menü</button>
-      <strong>{player.panel === 'slots' ? 'Kayıt yuvaları' : player.panel === 'display' ? 'Ekran ve ses' : 'Kontroller'}</strong>
+      <strong>{player.panel === 'slots' ? 'Kayıt yuvaları' : player.panel === 'display' ? 'Ekran ve ses' : 'Kontroller ve oyuncular'}</strong>
       <button type="button" class="btn btn-sm btn-primary" id="ts-done" onclick={() => player.closeMenu()}>Oyuna dön</button>
     </div>
 
@@ -164,6 +167,37 @@
       </div>
     {:else}
       <div class="panel-body controls">
+        <div class="field players" id="players" data-count={player.players.count}>
+          <span class="label">Oyuncular</span>
+          {#if player.players.count < 2}
+            <p class="note">Bu oyun tek oyunculu: bütün kontroller 1. oyuncuyu oynatır.</p>
+          {:else}
+            {#if player.touchPlay}
+              <div class="player-row" data-input="touch">
+                <span class="who">Dokunmatik</span>
+                <div class="seg" role="group" aria-label="Dokunmatik kontroller hangi oyuncu">
+                  {#each playerNumbers as n (n)}<button type="button" aria-label="Oyuncu {n + 1}" aria-pressed={player.players.touch === n} data-player={n + 1} onclick={() => player.setTouchPlayer(n)}>{n + 1}</button>{/each}
+                </div>
+              </div>
+            {:else if !tv.active}
+              <div class="player-row" data-input="keyboard">
+                <span class="who">Klavye</span>
+                <div class="seg" role="group" aria-label="Klavye hangi oyuncu">
+                  {#each playerNumbers as n (n)}<button type="button" aria-label="Oyuncu {n + 1}" aria-pressed={player.players.keyboard === n} data-player={n + 1} onclick={() => player.setKeyboardPlayer(n)}>{n + 1}</button>{/each}
+                </div>
+              </div>
+            {/if}
+            {#each player.players.pads as pad (pad.key)}
+              <div class="player-row" data-input="pad" data-pad={pad.index}>
+                <span class="who"><span class="name">{pad.name}</span>{#if pad.player === null}<small>bir tuşa basınca katılır</small>{/if}</span>
+                <div class="seg" role="group" aria-label="{pad.name} hangi oyuncu">
+                  {#each playerNumbers as n (n)}<button type="button" aria-label="Oyuncu {n + 1}" aria-pressed={pad.player === n} data-player={n + 1} onclick={() => player.setPadPlayer(pad, n)}>{n + 1}</button>{/each}
+                </div>
+              </div>
+            {/each}
+            <p class="note" id="players-note">{player.players.pads.length ? 'Kumandalar ilk tuşa basıldıkları sırayla 1., 2. … oyuncu olur; buradan değiştirebilirsin.' : `En çok ${player.players.count} oyuncu: başka oyuncular için kumanda bağla (USB ya da Bluetooth) ve bir tuşa bas.`}{player.isArcade ? ' Her oyuncu kendi kumandasında Select ile jeton atar, Start ile başlar.' : ''}{player.isArcade && !player.touchPlay && !tv.active && otherKeys ? ` Klavyede ${otherKeys}.` : ''}</p>
+          {/if}
+        </div>
         {#if player.touchPlay}
           <div class="touch-settings" id="touch-settings">
             <TouchSettings prefix="ts" compact arcade={player.platform === 'ARCADE'} fourWay={player.fourWay} />
