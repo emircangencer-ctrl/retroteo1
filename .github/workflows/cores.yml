@@ -51,7 +51,7 @@ jobs:
         # Measurement only: jitverify (every recompiled block checked against the interpreter),
         # spanverify (every SIMD span checked against the table path), jitstats / gpustats (counters),
         # cpuprof (the PSX CPU core without inlining, for profiles).
-        opt: [jitstats]
+        opt: [next, jitverify, jitstats]
     steps:
       - uses: actions/checkout@v5
         with:

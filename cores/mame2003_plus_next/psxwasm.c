@@ -526,6 +526,12 @@ static void jit_gte_mfc2( UINT32 op )
 	}
 }
 
+/* MFC2 of a register getcp2dr works out, as a value (a load in a delay slot stays pending) */
+static UINT32 jit_gte_getdr( UINT32 reg )
+{
+	return getcp2dr( reg );
+}
+
 static void jit_gte_mtc2( UINT32 op )
 {
 	setcp2dr( INS_RD( op ), mipscpu.r[ INS_RT( op ) ] );
@@ -639,6 +645,7 @@ static void jit_verify_log_store( UINT32 host, UINT32 size )
 #define WT_BLOCK		0		/* () -> i32 */
 #define WT_V1			1		/* (i32) -> () */
 #define WT_V2			2		/* (i32, i32) -> () */
+#define WT_I1			3		/* (i32) -> i32 */
 
 /* locals: the general registers a block uses, then these */
 enum
@@ -801,6 +808,10 @@ struct jit_ctx
 	UINT32		used;			/* general registers in locals */
 	UINT32		written;		/* general registers the block may write */
 	int			hilo;			/* HI/LO in locals */
+	UINT8		inline_ok[ JIT_MAX_BLOCK ];	/* branch n runs its target's first instruction in the block */
+	UINT32		inline_op[ JIT_MAX_BLOCK ];	/* that instruction */
+	const UINT8 *inline_host[ JIT_MAX_BLOCK ];	/* where that instruction is (for the code map) */
+	UINT32		extra;			/* 1 when a way through the block runs such an instruction */
 };
 
 static struct jit_ctx ctx;
@@ -884,7 +895,8 @@ static void jit_emit_exit_if( UINT32 index )
 #define W_ALU( rd, lhs, rhs, opcode ) do { if( rd ) { lhs; rhs; w_byte( opcode ); w_setr( rd ); } } while( 0 )
 
 /* ADD/ADDI/SUB: leave before the instruction on overflow, otherwise as ADDU/ADDIU/SUBU */
-static void jit_emit_overflow_check( int sub, int rs, int rt_or_minus1, INT32 imm, UINT32 index )
+/* pushes 1 when ADD/ADDI/SUB overflows, 0 otherwise */
+static void jit_emit_overflow_cond( int sub, int rs, int rt_or_minus1, INT32 imm )
 {
 	/* sum = a + b; overflow if ((a ^ sum) & (b ^ sum)) < 0; for a - b: ((a ^ b) & (a ^ diff)) < 0 */
 	w_getr( rs );
@@ -906,7 +918,21 @@ static void jit_emit_overflow_check( int sub, int rs, int rt_or_minus1, INT32 im
 	}
 	w_const( 0 );
 	w_byte( W_I32_LT_S );
+}
+
+static void jit_emit_overflow_check( int sub, int rs, int rt_or_minus1, INT32 imm, UINT32 index )
+{
+	jit_emit_overflow_cond( sub, rs, rt_or_minus1, imm );
 	jit_emit_exit_if( index );
+}
+
+/* the overflow condition of a simple instruction with a trap (ADD/ADDI/SUB) */
+static void jit_emit_trap_cond( UINT32 op )
+{
+	if( INS_OP( op ) == OP_ADDI )
+		jit_emit_overflow_cond( 0, INS_RS( op ), -1, MIPS_WORD_EXTEND( INS_IMMEDIATE( op ) ) );
+	else
+		jit_emit_overflow_cond( INS_FUNCT( op ) == FUNCT_SUB, INS_RS( op ), INS_RT( op ), 0 );
 }
 
 /* COP2 instructions raise an exception when COP2 is disabled: leave first */
@@ -1292,6 +1318,12 @@ static int jit_branch_is_conditional( UINT32 op )
 	return 0;
 }
 
+/* MFC2 / CFC2 */
+static int jit_is_cop2_load( UINT32 op )
+{
+	return INS_OP( op ) == OP_COP2 && ( INS_RS( op ) == RS_MFC || INS_RS( op ) == RS_CFC );
+}
+
 /* can 'slot' be translated as the delay slot of 'op'? (as psxjit.c) */
 static int jit_slot_ok( UINT32 op, UINT32 slot )
 {
@@ -1305,7 +1337,8 @@ static int jit_slot_ok( UINT32 op, UINT32 slot )
 	case JIT_MEM:
 		return !( s.reads & b.writes );
 	case JIT_HELPER:
-		return s.dload == 0;
+		/* MFC2/CFC2 load into a register like LW: pending after a taken branch */
+		return s.dload == 0 || jit_is_cop2_load( slot );
 	case JIT_HELPER_MEM:
 		return s.dload == 0 && !( s.reads & b.writes );
 	}
@@ -1355,7 +1388,7 @@ static void jit_emit_leave( UINT32 index, UINT32 target, int in_cond, int branch
 				w_memop( W_I32_STORE, 2, ICOUNT_ADDR );
 				w_end();
 			}
-			w_load_abs( ICOUNT_ADDR ); w_const( ctx.count - t ); w_byte( W_I32_GE_S );
+			w_load_abs( ICOUNT_ADDR ); w_const( ctx.count + ctx.extra - t ); w_byte( W_I32_GE_S );
 			w_open( W_IF );
 			w_const( ctx.seg[ t ] ); w_set( WL_STATE );
 			w_br( ctx.loop_level );
@@ -1437,6 +1470,26 @@ static void jit_emit_slot( UINT32 slot, const struct jit_op *s, int pending )
 		break;
 	case JIT_HELPER:
 	case JIT_HELPER_MEM:
+		if( pending && jit_is_cop2_load( slot ) )
+		{
+			/* the value into WL_DLOAD, the register is written later (as a load) */
+			int rd = INS_RD( slot );
+			if( INS_RS( slot ) == RS_CFC )
+			{
+				w_load_abs( CP2CR_ADDR( rd ) );
+			}
+			else if( jit_gte_dr_special_get( rd ) )
+			{
+				w_const( rd );
+				w_call( WT_I1, FN( jit_gte_getdr ) );
+			}
+			else
+			{
+				w_load_abs( CP2DR_ADDR( rd ) );
+			}
+			w_set( WL_DLOAD );
+			break;
+		}
 		jit_emit_helper_op( slot, s, WL_SHOST );
 		break;
 	default:
@@ -1453,6 +1506,46 @@ static void jit_emit_pending( int dload )
 	W_STORE_ABS( DELAYR_ADDR, w_const( dload ) );
 }
 
+/*
+	A taken branch whose delay slot loads a register: the interpreter
+	runs the target's first instruction with the old value, then the
+	load completes. When that instruction is a simple one, the block runs
+	it too and goes on to the next one, instead of leaving the load
+	pending for the interpreter. An overflow there leaves before it, with
+	the load still pending.
+*/
+static void jit_emit_inline_target( UINT32 index, UINT32 target, int dload )
+{
+	const UINT32 op = ctx.inline_op[ index ];
+	struct jit_op o;
+
+	jit_decode( op, &o );
+	if( o.trap )
+	{
+		jit_emit_trap_cond( op );
+		w_open( W_IF );
+		jit_emit_pending( dload );
+		w_cycles( index + 2 - ctx.acct );
+		w_const( target );
+		w_set( WL_PC );
+		w_br( ctx.out_level );
+		w_end();
+	}
+	jit_emit_simple( op );
+	w_get( WL_DLOAD );
+	w_setr( dload );
+	w_cycles( index + 3 - ctx.acct );
+	w_const( target + 4 );
+	w_set( WL_PC );
+	if( jit_tailcalls )
+	{
+		w_const( 1 );
+		w_set( WL_CHAIN );
+	}
+	w_br( ctx.out_level );
+}
+
+
 /* branch at instruction 'index' with its delay slot (as psxjit.c jit_emit_branch) */
 static void jit_emit_branch( UINT32 op, UINT32 slot, UINT32 index )
 {
@@ -1463,7 +1556,7 @@ static void jit_emit_branch( UINT32 op, UINT32 slot, UINT32 index )
 	int dload;
 
 	jit_decode( slot, &s );
-	dload = ( s.kind == JIT_MEM ) ? s.dload : 0;		/* r0 too: delayr = 0 then */
+	dload = ( s.kind == JIT_MEM || jit_is_cop2_load( slot ) ) ? s.dload : 0;		/* r0 too: delayr = 0 then */
 
 	jit_emit_slot_checks( slot, &s, index );
 
@@ -1506,7 +1599,11 @@ static void jit_emit_branch( UINT32 op, UINT32 slot, UINT32 index )
 	else if( !jit_branch_is_conditional( op ) )
 	{
 		jit_emit_slot( slot, &s, dload != 0 );
-		if( dload )
+		if( dload && ctx.inline_ok[ index ] )
+		{
+			jit_emit_inline_target( index, target, dload );
+		}
+		else if( dload )
 		{
 			jit_emit_pending( dload );
 			jit_emit_leave( index + 2, target, 0, JIT_LEAVE_OUT );
@@ -1521,7 +1618,12 @@ static void jit_emit_branch( UINT32 op, UINT32 slot, UINT32 index )
 		jit_emit_slot( slot, &s, dload != 0 );
 		w_get( WL_COND );
 		w_open( W_IF );
-		if( dload )
+		if( dload && ctx.inline_ok[ index ] )
+		{
+			/* taken: the target's first instruction, then the load completes */
+			jit_emit_inline_target( index, target, dload );
+		}
+		else if( dload )
 		{
 			/* taken: the load stays pending */
 			jit_emit_pending( dload );
@@ -1655,10 +1757,11 @@ static int jit_assemble( int nlocals32, UINT32 pc )
 {
 	static const UINT8 header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
 	static const UINT8 types[] = {
-		3,
+		4,
 		0x60, 0, 1, 0x7f,			/* () -> i32 */
 		0x60, 1, 0x7f, 0,			/* (i32) -> () */
-		0x60, 2, 0x7f, 0x7f, 0		/* (i32, i32) -> () */
+		0x60, 2, 0x7f, 0x7f, 0,		/* (i32, i32) -> () */
+		0x60, 1, 0x7f, 1, 0x7f		/* (i32) -> i32 */
 	};
 	static const UINT8 imports[] = {
 		2,
@@ -1885,6 +1988,51 @@ static UINT32 jit_build( UINT32 pc, const UINT32 *ops, UINT32 maxcount, UINT32 l
 		}
 	}
 
+	/*
+		Taken branches whose delay slot loads a register: the target's
+		first instruction runs in the block when it is a simple one in fast
+		RAM the block can answer for: read-only, or close enough after the
+		block start that a store there finds and drops this block
+		(jit_invalidate_host looks JIT_MAX_BLOCK words back).
+	*/
+	ctx.extra = 0;
+	for( i = 0; i < count; i++ )
+	{
+		ctx.inline_ok[ i ] = 0;
+		ctx.inline_host[ i ] = NULL;
+		if( kind[ i ] && INS_OP( ops[ i ] ) != OP_SPECIAL )
+		{
+			struct jit_op so;
+			jit_decode( ops[ i + 1 ], &so );
+			if( so.dload && ( so.kind == JIT_MEM || jit_is_cop2_load( ops[ i + 1 ] ) ) )
+			{
+				UINT32 target = jit_branch_target( ops[ i ], pc + i * 4 );
+				struct psx_fastram *region = find_fastram( target, 4 );
+				if( region && !( target & 3 ) && target != pc_hook_pc &&
+					( region->readonly || ( target >= pc && target - pc < JIT_MAX_BLOCK * 4 ) ) )
+				{
+					const UINT8 *host = region->base + ( target - region->start );
+					UINT32 top = *(const UINT32 *)(const void *)host;
+					struct jit_op to;
+					jit_decode( top, &to );
+					if( to.kind == JIT_SIMPLE )
+					{
+						ctx.inline_ok[ i ] = 1;
+						ctx.inline_op[ i ] = top;
+						ctx.inline_host[ i ] = region->readonly ? NULL : host;
+						ctx.extra = 1;
+						ctx.used |= to.reads | to.writes;
+						ctx.written |= to.writes;
+						if( to.hilo || ( INS_OP( top ) == OP_SPECIAL && ( INS_FUNCT( top ) == FUNCT_MFHI || INS_FUNCT( top ) == FUNCT_MFLO ) ) )
+						{
+							ctx.hilo = 1;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	/* registers: in locals if the block uses them; HI/LO if any instruction does */
 	for( i = 0; i < count; i++ )
 	{
@@ -1980,7 +2128,7 @@ static UINT32 jit_build( UINT32 pc, const UINT32 *ops, UINT32 maxcount, UINT32 l
 				w_const( pc + i * 4 );
 				w_call( WT_V1, FN( loop_skip_helper ) );
 				w_reload( 0xffffffff, 1 );
-				w_load_abs( ICOUNT_ADDR ); w_const( count - i ); w_byte( W_I32_LT_S );
+				w_load_abs( ICOUNT_ADDR ); w_const( count + ctx.extra - i ); w_byte( W_I32_LT_S );
 				jit_emit_exit_if( i );
 			}
 		}
@@ -2098,7 +2246,7 @@ static void jit_compile( struct jit_block *block, UINT32 pc )
 		return;
 	}
 	block->code = (void *)(size_t)index;
-	block->len = count;
+	block->len = count + ctx.extra;	/* (room for a branch target's instruction run in the block) */
 	jit_live++;
 
 	/* remember where translated code lives */
@@ -2109,6 +2257,14 @@ static void jit_compile( struct jit_block *block, UINT32 pc )
 			jit_codemap[ jit_codemap_index( host + i * 4 ) ] = 1;
 		}
 		jit_code_present = 1;
+	}
+	for( i = 0; i < count; i++ )
+	{
+		if( ctx.inline_host[ i ] )
+		{
+			jit_codemap[ jit_codemap_index( ctx.inline_host[ i ] ) ] = 1;
+			jit_code_present = 1;
+		}
 	}
 }
 
