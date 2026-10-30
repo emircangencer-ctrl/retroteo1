@@ -113,8 +113,13 @@ static UINT32 jit_stat[ JS_COUNT ];
 /* then: interpreted accesses outside fast RAM, timeslices, timeslice cycles / 1024 */
 enum { JSO_OP = 0, JSO_SPECIAL = 64, JSO_COP0 = 128, JSO_GTE = 160, JSO_SLOW = 224, JSO_SLICES, JSO_SLICE_KCYCLES, JSO_COUNT };
 static UINT32 jit_stat_ops[ JSO_COUNT ];
-static void jit_stat_interp( UINT32 op, int slow )
+static UINT32 jit_stat_pcs[ 4096 * 2 ];	/* interpreted pcs: pc, count (direct mapped, the busier one stays) */
+static void jit_stat_interp( UINT32 op, int slow, UINT32 pc )
 {
+	UINT32 *e = &jit_stat_pcs[ ( ( pc >> 2 ) & 4095 ) * 2 ];
+	if( e[ 0 ] == pc ) e[ 1 ]++;
+	else if( e[ 1 ] <= 1 ) { e[ 0 ] = pc; e[ 1 ] = 1; }
+	else e[ 1 ]--;
 	jit_stat_ops[ JSO_OP + ( op >> 26 ) ]++;
 	if( ( op >> 26 ) == 0 ) jit_stat_ops[ JSO_SPECIAL + ( op & 63 ) ]++;
 	if( ( op >> 26 ) == 0x10 ) jit_stat_ops[ JSO_COP0 + ( ( op >> 21 ) & 31 ) ]++;
@@ -169,11 +174,12 @@ EM_JS( int, psxwasm_tailcalls, (), {
 } );
 
 #ifdef PSXWASM_STATS
-EM_JS( void, psxwasm_counters, ( const UINT32 *c, int n, const UINT32 *ops, int nops ), {
+EM_JS( void, psxwasm_counters, ( const UINT32 *c, int n, const UINT32 *ops, int nops, const UINT32 *pcs, int npcs ), {
 	var names = [ 'calls', 'boundary', 'cold', 'untranslatable', 'nofit', 'exit0', 'ran', 'jitInstr', 'interpInstr', 'chained' ];
 	var o = {};
 	for( var i = 0; i < n; i++ ) o[ names[ i ] ] = HEAPU32[ ( c >> 2 ) + i ];
 	o[ 'ops' ] = Array.from( HEAPU32.subarray( ops >> 2, ( ops >> 2 ) + nops ) );
+	o[ 'pcs' ] = Array.from( HEAPU32.subarray( pcs >> 2, ( pcs >> 2 ) + npcs ) );
 	Module[ 'psxwasmCounters' ] = o;
 } );
 #endif
@@ -2316,7 +2322,7 @@ static INLINE int jit_run( void )
 #ifdef PSXWASM_STATS
 	if( ( jit_stat[ JS_RAN ] & 0xffff ) == 0 )
 	{
-		psxwasm_counters( jit_stat, JS_COUNT, jit_stat_ops, JSO_COUNT );
+		psxwasm_counters( jit_stat, JS_COUNT, jit_stat_ops, JSO_COUNT, jit_stat_pcs, 8192 );
 	}
 #endif
 	loop_pure_armed = 0;	/* the interpreter's loop tracking (psxloop.c) saw none of this */

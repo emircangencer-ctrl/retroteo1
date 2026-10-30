@@ -1,5 +1,5 @@
 diff --git a/src/cpu/mips/psx_cpu.c b/src/cpu/mips/psx_cpu.c
-index a7f811a3..cc00db85 100644
+index a7f811a3..89d7b8ab 100644
 --- a/src/cpu/mips/psx_cpu.c
 +++ b/src/cpu/mips/psx_cpu.c
 @@ -1793,6 +1793,9 @@ static INLINE void mips_step( void )
@@ -21,7 +21,7 @@ index a7f811a3..cc00db85 100644
 +				int slow = psx_slow_access;
 +				psx_slow_access = 0;
 +				mips_step();
-+				jit_stat_interp( mipscpu.op, psx_slow_access );
++				jit_stat_interp( mipscpu.op, psx_slow_access, from );
 +				psx_slow_access |= slow;
 +			}
 +#else
