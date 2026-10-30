@@ -84,3 +84,15 @@ test('arcade: a System 12 game starts with the current MAME 2003-Plus build unde
   assert.deepEqual(launch.extraFiles, [], 'a complete clone needs no parent zip on MAME');
   assert.deepEqual((await resolveLaunch(game, ARC, { coreOverride: 'mame2003_plus' }, deps())).cores.map(c => c.gameName), ['tekken3.zip']);
 });
+
+test('arcade: without WebAssembly SIMD the 2026 MAME build is left out; the 2025 build starts the game, or the player is told to update the browser', async () => {
+  const game = { id: 't3', title: 'Tekken 3', platform: 'ARCADE', blob: blob(), arcade: { core: 'mame2003_plus_next', set: 'tekken3je1', status: 'complete', parent: 'tekken3', missing: [], alternatives: [{ core: 'mame2003_plus', status: 'complete', set: 'tekken3' }] } };
+  const noSimd = id => id !== 'mame2003_plus_next';
+  const launch = await resolveLaunch(game, ARC, {}, deps({ coreSupported: noSimd }));
+  assert.deepEqual(launch.cores.map(c => [c.coreId, c.gameName]), [['mame2003_plus', 'tekken3.zip']]);
+  const only = { ...game, arcade: { ...game.arcade, alternatives: [] } };
+  const blocked = await resolveLaunch(only, ARC, {}, deps({ coreSupported: noSimd }));
+  assert.match(blocked.blocked.status, /tarayıcı güncel değil/);
+  assert.match(blocked.blocked.message, /MAME 2003-Plus \(2026\).*SIMD.*Safari 16\.4/);
+  assert.equal((await resolveLaunch(only, ARC, {}, deps({ coreSupported: () => true }))).cores[0].coreId, 'mame2003_plus_next');
+});

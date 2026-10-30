@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { identifyArcadeZip, validateSet, validateBios, biosOf, arcadeLayout, describeArcadeStatus, loadCatalog, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary } from '../src/arcade.js';
+import { identifyArcadeZip, validateSet, validateBios, biosOf, arcadeLayout, describeArcadeStatus, loadCatalog, onlyKeysMissing, isCps2KeyMissing, keyFindings, missingSummary, wasmSimdSupported, arcadeCoreSupported } from '../src/arcade.js';
 import { readZipDirectory } from '../src/zip-rom.js';
 import { placeholderWithCrc, writeZip, crc32, placeholderSet } from '../e2e/fixtures/zip-writer.mjs';
 
@@ -326,4 +326,17 @@ test("the shipped System 12 list runs the user's Tekken 3 set (TET1/VER.E, 2025 
   const zip = placeholderSet(m2p.games.tekken3[6]);
   const result = identifyArcadeZip('tekken3.zip', await readZipDirectory(new Blob([zip])), { fbneo: fb, mame2003_plus: m2p, mame2003_plus_next: next });
   assert.deepEqual([result.core, result.set, result.status], ['mame2003_plus_next', 'tekken3je1', 'complete']);
+});
+
+test('the 2026 MAME 2003-Plus build needs WebAssembly SIMD; the other arcade cores do not', () => {
+  assert.equal(wasmSimdSupported(), true, 'Node has WebAssembly SIMD');
+  assert.equal(wasmSimdSupported({ validate: () => false }), false);
+  assert.equal(wasmSimdSupported({ validate: () => { throw new Error('no'); } }), false);
+  let probe = null;
+  wasmSimdSupported({ validate: bytes => { probe = bytes; return true; } });
+  assert.equal(WebAssembly.validate(probe), true, 'the probe is a valid SIMD module');
+  assert.equal(WebAssembly.validate(probe.slice(0, -2)), false);
+  assert.equal(arcadeCoreSupported('mame2003_plus_next', { simd: false }), false);
+  assert.equal(arcadeCoreSupported('mame2003_plus_next', { simd: true }), true);
+  for (const id of ['fbneo', 'fbalpha2012_cps2', 'mame2003_plus']) assert.equal(arcadeCoreSupported(id, { simd: false }), true, id);
 });

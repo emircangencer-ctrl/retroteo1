@@ -46,11 +46,11 @@ export const CORES = Object.freeze(['nestopia', 'fceumm', 'snes9x', 'genesis_plu
 export const BUILT_CORES = Object.freeze({
   mame2003_plus_next: Object.freeze({
     source: 'https://github.com/libretro/mame2003-plus-libretro/tree/64b3c38ac6dae0fb513e6b881fb3bfc31fca54c4',
-    release: 'https://github.com/emircangencer-ctrl/retroteo1/releases/download/core-mame2003_plus_next-64b3c38a-r6/',
+    release: 'https://github.com/emircangencer-ctrl/retroteo1/releases/download/core-mame2003_plus_next-64b3c38a-r23/',
     files: Object.freeze({
-      'mame2003_plus_next-wasm.data': Object.freeze({ asset: 'release-mame2003_plus_next-wasm.data', integrity: 'sha512-D+FcPSMXxQ8UcIHPTAJH7Js5wK6Fz84RNwsbayXxHDuk9GFVBhw8+zdNTb2aOw9rch6EsTPgOfuDZzp3V2GPLQ==' }),
-      'mame2003_plus_next-legacy-wasm.data': Object.freeze({ asset: 'release-mame2003_plus_next-legacy-wasm.data', integrity: 'sha512-FreSB44ie/nYDAvrAZGC6LCqwdgFE4r2wnwI56YmSDo6Tv8HjMKbN+LEx8Geawyf3Xr+KEPDtdMoSSkoxqJDGA==' }),
-      'reports/mame2003_plus_next.json': Object.freeze({ asset: 'release-mame2003_plus_next.json', integrity: 'sha512-LqtMaB8DscV+lVB0wynk3DCP+x3C4jRNE0vCnBn8469SjFOHIe2tOaliV4J5FI5kKcn8fe8O4Zp+/uR05PdV8g==' })
+      'mame2003_plus_next-wasm.data': Object.freeze({ asset: 'next-mame2003_plus_next-wasm.data', integrity: 'sha512-oY1UdhIyTth2NI/fdiQZP0uywlsClSeDj3RZwSKU438f2KylUOkW1/GLOu/jxLB6wrsBGhKWl55lil21aaG2+g==' }),
+      'mame2003_plus_next-legacy-wasm.data': Object.freeze({ asset: 'next-mame2003_plus_next-legacy-wasm.data', integrity: 'sha512-eq/Sl7NQkdz+S9LtzfEsEZUt5P1t+eg5HG2GHcw1SMrVPVSc6U0101fMMrH1zAdCXymqUMDKcOgABJmkN7gKsw==' }),
+      'reports/mame2003_plus_next.json': Object.freeze({ asset: 'next-mame2003_plus_next.json', integrity: 'sha512-NcNICFmsaExSqYHVDewWxA/7uTnwQYt5AbBF19UIlNyQ+T6zrCZryuXQoL69KDt6ZqQpb5D0oxc544GWLTMqRQ==' })
     })
   })
 });

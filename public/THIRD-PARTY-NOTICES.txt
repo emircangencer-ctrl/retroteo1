@@ -28,7 +28,10 @@ EmulatorJS. RetroPlay is a personal, non-commercial project.
    - MAME 2003-Plus, current sources (arcade, Namco System 12) — MAME non-commercial license (see the
      license.txt in its .data archive) — built by RetroPlay, not part of the EmulatorJS packages:
      source https://github.com/libretro/mame2003-plus-libretro at commit 64b3c38ac6dae0fb513e6b881fb3bfc31fca54c4,
-     unmodified, compiled with EmulatorJS/RetroArch (commit 6dd4353937ef48b6ec0bfbdbb15d1c5992d86927) and
+     modified by RetroPlay for speed (a PSX CPU to WebAssembly recompiler, WebAssembly SIMD drawing,
+     interlaced field drawing; the changes are the files in cores/mame2003_plus_next/ of the RetroPlay
+     repository and fall under the same license), compiled with EmulatorJS/RetroArch (commit
+     6dd4353937ef48b6ec0bfbdbb15d1c5992d86927, its pixel conversions compiled with SIMD) and
      emsdk 3.1.74 by .github/workflows/cores.yml in the RetroPlay repository; files
      /emulatorjs/4.2.3/data/cores/mame2003_plus_next-*.
 

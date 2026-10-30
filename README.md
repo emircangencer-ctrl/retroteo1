@@ -73,7 +73,12 @@ Source layout:
   any device. `.github/workflows/cores.yml` builds the pinned source with the toolchain of the 4.2.3
   cores (emsdk 3.1.74, EmulatorJS/RetroArch `6dd43539`), so the runtime and RetroPlay's patches work
   with it unchanged; the result is published as a release of this repository and the build pins
-  its files by sha512 (`BUILT_CORES` in `scripts/emulatorjs-runtime.mjs`).
+  its files by sha512 (`BUILT_CORES` in `scripts/emulatorjs-runtime.mjs`). RetroPlay's patches in
+  `cores/mame2003_plus_next/` make it fast enough for phones: the PSX CPU is recompiled to
+  WebAssembly at run time (`psxwasm.c`, checked instruction by instruction against the interpreter in
+  the `jitverify` build), the GPU draws with WebAssembly SIMD and, in 480i, only the field on screen
+  (core option *PSX Interlaced Drawing*), and RetroArch's pixel conversion uses SIMD. The core needs
+  WebAssembly SIMD (Chrome 91, Firefox 89, Safari 16.4); without it the 2025 build starts instead.
 - `/emulatorjs/runtime-manifest.json` lists the files for the service worker.
 
 ## Offline and updates

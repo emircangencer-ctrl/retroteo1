@@ -14,11 +14,29 @@ export const ARCADE_CORES = Object.freeze({
   // RetroPlay's own build of the current MAME 2003-Plus (.github/workflows/cores.yml). Its list holds
   // only the drivers it runs better than the 2025 build (Namco System 12: full CPU clock, sound), and
   // a set it can run is started with it even when the older build also knows the zip.
-  mame2003_plus_next: Object.freeze({ id: 'mame2003_plus_next', label: 'MAME 2003-Plus (2026)', systemId: 'mame', catalog: '/assets/arcade-mame2003plus-next.json', supersedes: 'mame2003_plus' }),
+  // It needs WebAssembly SIMD (requiresSimd): without it the game goes to the next core that knows it.
+  mame2003_plus_next: Object.freeze({ id: 'mame2003_plus_next', label: 'MAME 2003-Plus (2026)', systemId: 'mame', catalog: '/assets/arcade-mame2003plus-next.json', supersedes: 'mame2003_plus', requiresSimd: true }),
   // Its loader opens every zip a clone names (clone and parent) before looking at files.
   fbalpha2012_cps2: Object.freeze({ id: 'fbalpha2012_cps2', label: 'FB Alpha 2012 CPS2', systemId: 'arcade', catalog: '/assets/arcade-fba2012-cps2.json', opensParentZip: true })
 });
 const CORE_ORDER = Object.freeze(['fbneo', 'fbalpha2012_cps2', 'mame2003_plus_next', 'mame2003_plus']);
+
+// (module (func (result v128) v128.const i32x4 0 0 0 0)): valid only where WebAssembly SIMD is.
+const SIMD_PROBE = [0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 22, 1, 20, 0, 253, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11];
+let simdSupported = null;
+
+/** WebAssembly SIMD (Chrome 91, Firefox 89, Safari 16.4 and later). `wasm` is injectable for tests. */
+export function wasmSimdSupported(wasm = globalThis.WebAssembly) {
+  const probe = () => { try { return Boolean(wasm?.validate(new Uint8Array(SIMD_PROBE))); } catch { return false; } };
+  if (wasm !== globalThis.WebAssembly) return probe();
+  if (simdSupported === null) simdSupported = probe();
+  return simdSupported;
+}
+
+/** Whether this browser can run an arcade core (RetroPlay's MAME 2003-Plus build needs SIMD). */
+export function arcadeCoreSupported(coreId, { simd = wasmSimdSupported() } = {}) {
+  return !ARCADE_CORES[coreId]?.requiresSimd || simd;
+}
 
 // Game tuple indexes (see compactDat in scripts/build-arcade-catalogs.mjs).
 const TITLE = 0, YEAR = 1, MAKER = 2, CLONE_OF = 3, ROM_OF = 4, FLAGS = 5, ROMS = 6;

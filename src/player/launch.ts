@@ -1,6 +1,6 @@
 // Which core(s) to try for a game, the file name the core must see and extra files (arcade BIOS
 // and parent sets) — or why the game cannot start. Kept apart from the player so it can be tested.
-import { ARCADE_CORES, onlyKeysMissing, isCps2KeyMissing, keyFindings } from '../arcade.js';
+import { ARCADE_CORES, onlyKeysMissing, isCps2KeyMissing, keyFindings, arcadeCoreSupported } from '../arcade.js';
 import { STAND_IN_PARENT_ZIP } from '../lib/arcade-records.ts';
 import type { BiosRecord, Game } from '../lib/types.ts';
 
@@ -20,11 +20,13 @@ export interface LaunchDeps {
   revokeUrl?: (url: string) => void;
   /** ?nescore=fceumm (compare FCEUmm with Nestopia). */
   forcedNesCore?: string | null;
+  /** Whether this browser can run an arcade core (default: arcadeCoreSupported). */
+  coreSupported?: (coreId: string) => boolean;
 }
 
 interface SystemInfo { shortLabel: string; emulatorJsCoreId: string; emulatorJsSystemId: string }
 
-const cores = ARCADE_CORES as Record<string, { label: string; systemId: string; opensParentZip?: boolean }>;
+const cores = ARCADE_CORES as Record<string, { label: string; systemId: string; opensParentZip?: boolean; requiresSimd?: boolean }>;
 
 export async function resolveLaunch(game: Game, system: SystemInfo, { coreOverride = '' }: { coreOverride?: string }, deps: LaunchDeps): Promise<Launch> {
   const makeUrl = deps.makeUrl || (blob => URL.createObjectURL(blob));
@@ -50,7 +52,14 @@ export async function resolveLaunch(game: Game, system: SystemInfo, { coreOverri
   const choices = [{ core: arcade.core, set: arcade.set }, ...(arcade.alternatives || []).filter(alt => alt.status !== 'incomplete')]
     .filter((choice, i, all) => cores[choice.core] && all.findIndex(other => other.core === choice.core) === i);
   if (onlyKeysMissing(arcade)) return { blocked: await keyBlock(game, deps) };
-  const list: CoreChoice[] = choices.map(choice => ({ coreId: choice.core, systemId: cores[choice.core].systemId, name: cores[choice.core].label, label: `Arcade · ${cores[choice.core].label}`, gameName: `${choice.set || arcade.set}.zip` }));
+  // A core this browser cannot run is left out; the game goes to the next core that knows its set.
+  const supported = deps.coreSupported || ((id: string) => arcadeCoreSupported(id));
+  const runnable = choices.filter(choice => supported(choice.core));
+  if (!runnable.length) {
+    const label = cores[choices[0]?.core]?.label || 'Bu çekirdek';
+    return { blocked: { status: 'Başlatılamadı · tarayıcı güncel değil', message: `${label} bu tarayıcıda çalışamıyor: tarayıcının WebAssembly SIMD desteği yok. Tarayıcını güncelle (Chrome 91, Firefox 89, Safari 16.4 ya da daha yenisi) ve oyunu yeniden aç.` } };
+  }
+  const list: CoreChoice[] = runnable.map(choice => ({ coreId: choice.core, systemId: cores[choice.core].systemId, name: cores[choice.core].label, label: `Arcade · ${cores[choice.core].label}`, gameName: `${choice.set || arcade.set}.zip` }));
   const extraFiles: ExtraFile[] = [];
   const parentGame = () => deps.games.find(g => g.platform === 'ARCADE' && g.arcade?.set === arcade.parent && g.blob instanceof Blob);
   if (arcade.bios) {

@@ -1,4 +1,4 @@
-export interface ArcadeCore { id: string; label: string; systemId: string; catalog: string; opensParentZip?: boolean; supersedes?: string }
+export interface ArcadeCore { id: string; label: string; systemId: string; catalog: string; opensParentZip?: boolean; supersedes?: string; requiresSimd?: boolean }
 export const ARCADE_CORES: Readonly<Record<string, ArcadeCore>>;
 export const KNOWN_BIOS_LABELS: Readonly<Record<string, string>>;
 export interface ArcadeCatalog { games: Record<string, any[]> }
@@ -15,3 +15,5 @@ export function arcadeLayout(arcade: { bios?: string } | null | undefined): 'neo
 export function describeArcadeStatus(arcade: any, options?: { biosInstalled?: boolean; parentInstalled?: boolean }): string;
 export function missingSummary(arcade: any): string;
 export function arcadeInputInfo(arcade: any, catalogs: unknown): { buttons: number; ways: number } | null;
+export function wasmSimdSupported(wasm?: { validate(bytes: Uint8Array): boolean }): boolean;
+export function arcadeCoreSupported(coreId: string, env?: { simd?: boolean }): boolean;
