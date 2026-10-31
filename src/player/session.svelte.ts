@@ -852,7 +852,7 @@ class PlayerSession {
       const result = this.#emulator === player ? await player.benchmark({ seconds: 4 }) : null;
       if (this.#emulator !== player) return;
       if (!result) { this.showNotice('Performans ölçülemedi'); return; }
-      const entry = { at: Date.now(), title: game.title, platform: game.platform, core: this.coreId || '', headroom: result.headroom, fps: result.fps, normalFps, ...deviceSummary() };
+      const entry = { at: Date.now(), title: game.title, platform: game.platform, core: this.coreId || '', headroom: result.headroom, fps: result.fps, normalFps, gpu: player.renderInfo?.().software ? 'software' : 'hardware', ...deviceSummary() };
       addToHistory(entry);
       const warning = paceWarning(normalFps);
       this.showNotice(warning ? `${describeResult(entry)} · ${warning}` : describeResult(entry), { timeout: 10000 });

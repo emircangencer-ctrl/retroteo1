@@ -250,7 +250,7 @@
   <div class="panel">
     <a class="row" href="#/help"><Icon name="help" size={20} /><span class="grow"><span class="label">Nasıl çalışır?</span><span class="hint">Oyun ekleme, kayıtlar, dokunmatik tuşlar, kontrolcü</span></span><Icon name="chevron" size={18} /></a>
     <div class="row">
-      <span class="grow"><span class="label">Emülatörler</span><span class="hint">NES: FCEUmm (açamadığında Nestopia önerilir) · SNES: Snes9x · Mega Drive: PicoDrive (gerekirse Genesis Plus GX) · daha önce kayıt noktası alınmış oyunlar o kaydın çekirdeğiyle açılır · Arcade: FinalBurn Neo, .key'siz eski CPS2 setleri için FB Alpha 2012 CPS2, gerekirse MAME 2003-Plus; Namco System 12 oyunları (Tekken 3, Tekken Tag, Soul Calibur…) için RetroPlay'in derlediği güncel MAME 2003-Plus. Hepsi EmulatorJS 4.2.3 ile bu siteden sunulur.</span></span>
+      <span class="grow"><span class="label">Emülatörler</span><span class="hint">NES: FCEUmm (açamadığında Nestopia önerilir) · SNES: Snes9x (zayıf cihazlar için Snes9x 2005) · Mega Drive: PicoDrive (gerekirse Genesis Plus GX) · emülatör oyun sayfasından oyun başına seçilebilir; seçim yoksa kayıt noktası alınmış oyunlar o kaydın çekirdeğiyle açılır · Arcade: FinalBurn Neo, .key'siz eski CPS2 setleri için FB Alpha 2012 CPS2, gerekirse MAME 2003-Plus; Namco System 12 oyunları (Tekken 3, Tekken Tag, Soul Calibur…) için RetroPlay'in derlediği güncel MAME 2003-Plus. Çekirdekler RetroPlay'in aynı kaynaklardan derlediği hızlı sürümler (Genesis Plus GX: EmulatorJS'inki); hepsi EmulatorJS 4.2.3 ile bu siteden sunulur.</span></span>
     </div>
   </div>
   <div class="about">

@@ -1,7 +1,7 @@
 // App-wide state: offline readiness (service worker and cached emulator cores), network, updates.
 import { watchServiceWorkerUpdates, activateUpdate, summarizeRuntimeCache } from '../sw-update.js';
 
-export const RUNTIME_CACHE_NAME = 'retroplay-emulatorjs-4.2.3-v1';
+export const RUNTIME_CACHE_NAME = 'retroplay-emulatorjs-4.2.3-v2';
 export const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-dev';
 
 class AppState {

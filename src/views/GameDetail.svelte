@@ -70,6 +70,10 @@
   const slotMap = $derived(new Map(slots.map(s => [s.slot, s])));
   const used = $derived(slots.length);
   const coreLabel = $derived(!game ? '' : CONSOLE_CORES[game.platform] ? (CONSOLE_CORES[game.platform].find(core => core.coreId === consoleCoreOrder(game)[0])?.name || '—') : game.platform === 'ARCADE' ? ((ARCADE_CORES as Record<string, { label: string }>)[game.arcade?.core || '']?.label || 'Arcade') : SYSTEM_CORE_LABELS[game.platform] || '—');
+  // Consoles with two cores: the player picks one per game (remembered like a core chosen after a failure).
+  const coreChoices = $derived(game && CONSOLE_CORES[game.platform]?.length > 1 ? CONSOLE_CORES[game.platform] : null);
+  const activeCore = $derived(game && coreChoices ? consoleCoreOrder(game)[0] : '');
+  const activeNote = $derived(coreChoices?.find(core => core.coreId === activeCore)?.note || '');
   const titleParts = $derived(splitTitle(game?.title || ''));
   const meta = $derived(!game || !look ? '' : [look.label, game.year, game.arcade?.manufacturer, game.arcade?.set ? `${game.arcade.set}.zip` : ''].filter(Boolean).join(' · '));
   const biosMissing = $derived(Boolean(game?.arcade?.bios && !library.biosIds.has(`${game.arcade.bios}.zip`)));
@@ -78,6 +82,12 @@
   const mapper = $derived(game?.romValidation && Number.isInteger(game.romValidation.mapper) ? ` · Mapper ${game.romValidation.mapper}` : '');
 
   function play(options: { fresh?: boolean; slot?: SlotId } = {}) { if (game) void player.start(game.id, options); }
+
+  function chooseCore(coreId: string) {
+    if (!game || coreId === activeCore) return;
+    void library.patch(game.id, game.platform === 'NES' ? { consoleCore: coreId, nesCore: coreId } : { consoleCore: coreId })
+      .catch(error => showToast(`Kaydedilemedi: ${(error as Error)?.message || error}`, 'error'));
+  }
 
   async function remove() {
     if (!game) return;
@@ -245,7 +255,16 @@
         </div>
         <div class="row stack">
           <span class="label">Emülatör</span>
-          <span class="hint">{coreLabel} · EmulatorJS 4.2.3{game.arcade ? ` · ${describeArcadeStatus(game.arcade, { biosInstalled: !biosMissing, parentInstalled: !parentMissing })}` : ''}</span>
+          {#if coreChoices}
+            <div class="seg" role="group" aria-label="Emülatör" id="core-choice">
+              {#each coreChoices as core (core.coreId)}
+                <button type="button" data-core={core.coreId} aria-pressed={core.coreId === activeCore} onclick={() => chooseCore(core.coreId)}>{core.name}</button>
+              {/each}
+            </div>
+            <span class="hint">{coreLabel}: {activeNote} · EmulatorJS 4.2.3 · kayıt noktaları alındıkları emülatörde yüklenir</span>
+          {:else}
+            <span class="hint">{coreLabel} · EmulatorJS 4.2.3{game.arcade ? ` · ${describeArcadeStatus(game.arcade, { biosInstalled: !biosMissing, parentInstalled: !parentMissing })}` : ''}</span>
+          {/if}
         </div>
       </div>
     </section>

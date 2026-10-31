@@ -40,7 +40,7 @@ function createServiceWorkerHarness({ failing = new Set() } = {}) {
       for (const name of stores.keys()) { const hit = await openStore(name).match(request); if (hit) return hit; }
       return undefined;
     },
-    async keys() { return [...stores.keys(), 'retroplay-shell-v12', 'retroplay-emulatorjs-runtime-v4']; },
+    async keys() { return [...stores.keys(), 'retroplay-shell-v12', 'retroplay-emulatorjs-runtime-v4', 'retroplay-emulatorjs-4.2.3-v1']; },
     async delete(name) { deleted.push(name); return true; }
   };
   let skipped = 0;
@@ -87,7 +87,7 @@ function createServiceWorkerHarness({ failing = new Set() } = {}) {
 test('installing stores the self-hosted runtime and default cores from the build manifest', async () => {
   const worker = createServiceWorkerHarness();
   await worker.install();
-  const runtime = worker.stores.get('retroplay-emulatorjs-4.2.3-v1');
+  const runtime = worker.stores.get('retroplay-emulatorjs-4.2.3-v2');
   assert.ok(runtime.has(`${ORIGIN}/emulatorjs/4.2.3/data/loader.js`));
   assert.ok(runtime.has(`${ORIGIN}/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data`));
   assert.ok(![...runtime.keys()].some(key => key.includes('evil.invalid')), 'only same-origin runtime paths from the manifest are cached');
@@ -98,7 +98,7 @@ test('a runtime file that fails to download does not block installing the app sh
   const worker = createServiceWorkerHarness({ failing: new Set(['/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data']) });
   await worker.install();
   assert.ok(worker.stores.get('retroplay-shell-v15').has(`${ORIGIN}/index.html`));
-  assert.ok(!worker.stores.get('retroplay-emulatorjs-4.2.3-v1').has(`${ORIGIN}/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data`));
+  assert.ok(!worker.stores.get('retroplay-emulatorjs-4.2.3-v2').has(`${ORIGIN}/emulatorjs/4.2.3/data/cores/nestopia-legacy-wasm.data`));
 });
 
 test('runtime files are served from the cache without touching the network, and cores are stored on first use', async () => {
@@ -128,7 +128,8 @@ test('activation removes old shell and CDN runtime caches; SKIP_WAITING is the o
   await worker.activate();
   assert.ok(worker.deleted.includes('retroplay-shell-v12'));
   assert.ok(worker.deleted.includes('retroplay-emulatorjs-runtime-v4'));
-  assert.ok(!worker.deleted.includes('retroplay-emulatorjs-4.2.3-v1'));
+  assert.ok(worker.deleted.includes('retroplay-emulatorjs-4.2.3-v1'), 'cores cached before the RetroPlay builds are dropped');
+  assert.ok(!worker.deleted.includes('retroplay-emulatorjs-4.2.3-v2'));
   await worker.message({ type: 'SKIP_WAITING' });
   assert.equal(worker.skipped, 1);
 });

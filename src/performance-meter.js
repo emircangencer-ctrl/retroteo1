@@ -23,7 +23,9 @@ export function describeResult(result) {
   if (!result || !Number.isFinite(result.headroom)) return 'Performans ölçülemedi';
   const verdict = classifyHeadroom(result.headroom).label;
   const pace = Number.isFinite(result.normalFps) && result.normalFps > 0 ? ` · normal oyun ${number(result.normalFps, 0)} kare/sn` : '';
-  return `Hız payı ${number(result.headroom)}× (${number(result.fps, 0)} kare/sn) · ${verdict}${pace}`;
+  // No usable GPU: the browser draws the picture on the processor (worth knowing on a TV box).
+  const gpu = result.gpu === 'software' ? ' · görüntü ekran kartı olmadan çiziliyor' : '';
+  return `Hız payı ${number(result.headroom)}× (${number(result.fps, 0)} kare/sn) · ${verdict}${pace}${gpu}`;
 }
 
 /**
