@@ -57,6 +57,13 @@
   status = 302
   force = true
 
+# The TV app built from an open pull request (opens that pull request's deploy preview; not live).
+[[redirects]]
+  from = "/tv-test"
+  to = "https://github.com/emircangencer-ctrl/retroteo1/releases/download/tv-test/RetroPlayTV.apk"
+  status = 302
+  force = true
+
 [[redirects]]
   from = "/tv.apk"
   to = "https://github.com/emircangencer-ctrl/retroteo1/releases/download/tv-latest/RetroPlayTV.apk"

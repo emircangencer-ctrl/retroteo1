@@ -108,6 +108,7 @@
   </main>
   <BottomNav />
 </div>
+{#if tv.preview}<div class="tv-preview-badge" id="tv-preview-badge" role="status">ÖNİZLEME #{tv.preview}</div>{/if}
 <Player />
 <Dialog />
 <Toast />
@@ -115,5 +116,7 @@
 
 <style>
   .app-content { min-height: 100vh; min-height: 100dvh; overflow-x: clip; }
+  /* A deploy preview on the TV never passes for the live site. */
+  .tv-preview-badge { position: fixed; top: 18px; right: 28px; z-index: 950; padding: 4px 10px; border-radius: 8px; background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-fg); font-family: var(--mono); font-size: 13px; font-weight: 700; pointer-events: none; }
   @media (min-width: 960px) { .app-content.with-sidebar { margin-left: var(--sidebar-w); } }
 </style>

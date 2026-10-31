@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readBridge, detectTv, createGamepadSource, padKeys, parseJson } from '../src/lib/tv.ts';
+import { readBridge, detectTv, createGamepadSource, padKeys, parseJson, refreshSlowdown, previewNumber } from '../src/lib/tv.ts';
 import { readGamepad } from '../src/gamepad-input.js';
 
 const pad = (index, pressed = [], axes = [0, 0, 0, 0]) => ({ index, id: `Pad ${index}`, timestamp: 5, axes, buttons: Array.from({ length: 17 }, (_, b) => [pressed.includes(b) ? 1 : 0, pressed.includes(b) ? 1 : 0]) });
@@ -47,4 +47,19 @@ test('a broken bridge answer never breaks the reader', () => {
   assert.deepEqual(failing(), [null, null, null, null]);
   assert.deepEqual(parseJson('', []), []);
   assert.deepEqual(parseJson('{"a":1}', null), { a: 1 });
+});
+
+test('a TV below 60 Hz plays every game slower by the same share; 59.94 Hz and above do not', () => {
+  assert.equal(Math.round(refreshSlowdown(50) * 100), 17);
+  assert.equal(Math.round(refreshSlowdown(30) * 100), 50);
+  assert.equal(refreshSlowdown(60), 0);
+  assert.equal(refreshSlowdown(59.94), 0);
+  assert.equal(refreshSlowdown(120), 0);
+  assert.equal(refreshSlowdown(Number.NaN), 0);
+});
+
+test('only a pull request number opens a deploy preview', () => {
+  assert.equal(previewNumber(' 9 '), '9');
+  assert.equal(previewNumber('123456'), '123456');
+  for (const bad of ['0', '07', '1234567', '9a', '-3', '', 'live', '9--evil.example']) assert.equal(previewNumber(bad), '', bad);
 });

@@ -20,6 +20,8 @@ export interface EmulatorJsPlayerOptions {
   retroarchConfig?: Record<string, string>;
   coreOptions?: Record<string, string>;
   shader?: string;
+  /** At most this many picture lines (0: no limit; software WebGL lowers it to 480). */
+  canvasCap?: number;
 }
 export class EmulatorJsPlayer {
   constructor(container: HTMLElement | null, options?: EmulatorJsPlayerOptions);
@@ -42,6 +44,8 @@ export class EmulatorJsPlayer {
   benchmark(options?: { seconds?: number; nominalFps?: number }): Promise<{ fps: number; headroom: number; frames: number; ms: number } | null>;
   setShader(name: string): boolean;
   setVolume(value: number): boolean;
+  resumeAudio(): void;
+  renderInfo(): { software: string; cap: number; width: number; height: number };
   screenshot(options?: { timeout?: number }): Promise<Blob | null>;
   restartGame(): boolean;
   fastForward: boolean;

@@ -60,13 +60,30 @@ Source layout:
   pull every core of every system, ~300 MB). They are cached in `node_modules/.cache/`.
 - The npm package has no minified runtime, so the build bundles the unmodified 4.2.3 sources into
   `emulator.min.<hash>.js` and appends a small RetroPlay addition: extra `retroarch.cfg` keys,
-  files written next to the game before it loads (arcade BIOS/parent zips), and a fix that makes
+  files written next to the game before it loads (arcade BIOS/parent zips), a fix that makes
   RetroArch size its canvas in device pixels when the browser reports the device-pixel box in CSS
-  pixels.
-- WebGL1 (`-legacy`) and WebGL2 builds of Nestopia, FCEUmm, Snes9x, Genesis Plus GX, FinalBurn Neo,
-  FB Alpha 2012 CPS2 and MAME 2003-Plus are shipped with their build reports (EmulatorJS needs the reports to cache
-  cores). Thread builds are not shipped; they need cross-origin isolation.
-- One core is built by RetroPlay itself: the current libretro MAME 2003-Plus (`mame2003_plus_next`,
+  pixels, and a picture size limit for software WebGL (no usable GPU: SwiftShader, llvmpipe …),
+  where the picture is drawn at most 480 lines high and scaled up by the browser
+  (`localStorage['retroplay-render'] = 'full'` turns it off).
+- WebGL1 (`-legacy`) and WebGL2 builds of Nestopia, FCEUmm, Snes9x, PicoDrive, Genesis Plus GX,
+  FinalBurn Neo, FB Alpha 2012 CPS2 and MAME 2003-Plus are shipped with their build reports
+  (EmulatorJS needs the reports to cache cores). Thread builds are not shipped; they need
+  cross-origin isolation.
+- **Fast cores.** Every one of those cores except Genesis Plus GX is served as RetroPlay's own build
+  (`FAST_CORES`): `.github/workflows/cores-fast.yml` compiles the source commits the 4.2.3 packages
+  were built from with the same toolchain (emsdk 3.1.74, EmulatorJS/RetroArch `6dd43539`) and links
+  them **without Asyncify**. EmulatorJS links every core with full Asyncify because its OpenAL audio
+  sleeps inside the frame; that costs a third to half of the speed. RetroPlay's builds use
+  RetroArch's own Web Audio driver with its "fake block" (a full audio buffer makes the main loop
+  wait through its timing instead of sleeping), with one gain node for the player's volume
+  (`Module.RWA.gain`). PicoDrive needs two changes for WebAssembly (`cores/picodrive/`). The
+  release (`cores-fast-r<n>`) is pinned by sha512 and served from `cores/cores-fast-r<n>/`;
+  EmulatorJS finds the files by name (`EJS_paths`, from `manifest.paths`), because the runtime
+  directory is cached as immutable and a rebuilt core must never reuse a URL. The stock files stay
+  at the stock names for copies of the app that are still open. Measurements: TEST-REPORT.md,
+  stage 52. The same release adds **Snes9x 2005 Plus** (`snes9x2005_plus`), a lighter SNES core the
+  game page offers next to Snes9x.
+- RetroPlay also builds the current libretro MAME 2003-Plus (`mame2003_plus_next`,
   commit `64b3c38a`) for Namco System 12 (Tekken 3, Tekken Tag Tournament, Soul Calibur …). The
   2025 build in the EmulatorJS packages runs that board's main CPU at 16.9 MHz instead of 25 MHz
   and without sound, so Tekken 3 drops to half its frame rate in a fight and plays in slow motion on
@@ -104,7 +121,7 @@ game) and reloads when the player taps it.
 | System | Starts with | Offered when it cannot open the game |
 |---|---|---|
 | NES | FCEUmm (common boards), Nestopia (unusual boards) | the other one |
-| Super Nintendo | Snes9x | — |
+| Super Nintendo | Snes9x | Snes9x 2005 Plus (lighter) |
 | Mega Drive | PicoDrive | Genesis Plus GX |
 | Arcade | FinalBurn Neo / FB Alpha 2012 CPS2 / MAME 2003-Plus (by set) | the next core that knows the set |
 
@@ -112,12 +129,14 @@ game) and reloads when the player taps it.
   slowed 8×, as on a TV box), which matters on TVs and older phones. Unusual NES boards keep
   Nestopia first because a core given a board it does not know can crash the page instead of
   failing (`FAST_NES_MAPPERS` in `src/player/launch.ts`).
-- In-game saves (battery RAM) are the same file for both cores of a system (checked both ways for
-  NES and Mega Drive); save states are not, so a game whose latest save state was made with the
-  other core starts with that core, and a core chosen with "… ile dene" is remembered.
+- The game page (**Emülatör**) picks the core per game; a core chosen there or with "… ile dene"
+  is remembered. In-game saves (battery RAM) are the same file for both cores of a system (checked
+  both ways for NES and Mega Drive); save states are not, so a game with no chosen core whose
+  latest save state was made with the other core starts with that core. SNES keeps the core id
+  `snes` (EmulatorJS's Snes9x) so save states made before Snes9x 2005 was added still load.
 - Rewind keeps a state every 2nd frame (every 6th on a TV: about a third of the work).
-- Measured and left out: RetroArch builds without Asyncify (about 20 % faster but the game froze
-  in about one start in six with the 4.2.3 audio driver), auto frameskip and PicoDrive's fast
+- Measured and left out: minimal Asyncify with the 4.2.3 OpenAL driver (the game froze in about
+  one start in six; RetroPlay's builds drop Asyncify entirely instead), auto frameskip and PicoDrive's fast
   renderer (small gains or less accurate pictures), Snes9x 2010 (crashed while loading with the
   4.2.3 toolchain), multi-core emulation (no gain). `.github/workflows/cores-speed.yml` rebuilds
   the measurement cores.
@@ -245,7 +264,11 @@ the app and polled by the page as standard gamepads. Games get onto the TV with 
 **Telefondan gönder**: a QR code, the TV's address and a 4-digit code for an upload page on the
 home network; the files then go through the usual review. The site's `/tv` address redirects to
 the latest APK (`tv-latest` release, built by `.github/workflows/tv.yml`, which also runs the app
-on Google TV and Android TV emulators).
+on Google TV and Android TV emulators); `/tv-test` to the build of an open pull request.
+The app (1.2) asks the TV for 60 Hz (games advance one frame per refresh; 50 Hz plays them a sixth
+slower), the picture is drawn at most 1080 lines high, and Settings can open a pull request's
+deploy preview to try a change on the TV first. A secret phrase (`TV_SIGNING_SEED`) gives every
+build the same signing key, so updates keep the TV's library.
 
 ## Arcade sets and BIOS files
 

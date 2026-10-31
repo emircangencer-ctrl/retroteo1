@@ -5,18 +5,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { RETROPLAY_PATCH, PACKAGES, CORES, ALL_CORES, BUILT_CORES, PRECACHED_CORES, DATA_PATH, EJS_VERSION, ensurePinnedFiles } from '../scripts/emulatorjs-runtime.mjs';
+import { RETROPLAY_PATCH, PACKAGES, CORES, ALL_CORES, BUILT_CORES, FAST_CORES, PRECACHED_CORES, DATA_PATH, EJS_VERSION, ensurePinnedFiles, coreFilePaths, servedCoreDir } from '../scripts/emulatorjs-runtime.mjs';
 
-function patchedRuntime({ cfg = 'video_vsync = true\naudio_latency = 64\n', extraCfg, extraFiles, fetchImpl } = {}) {
+function patchedRuntime({ cfg = 'video_vsync = true\naudio_latency = 64\n', extraCfg, extraFiles, fetchImpl, renderer = '', page = {} } = {}) {
   const written = [];
   class EJS_GameManager { getRetroArchCfg() { return cfg; } }
   class EmulatorJS {
     constructor() { this.gameManager = { FS: { writeFile: (name, data) => written.push([name, data.length]) } }; }
-    getCores() { return { arcade: ['fbneo'], mame: ['mame2003_plus', 'mame2003'], nes: ['fceumm'] }; }
+    getCores() { return { arcade: ['fbneo'], mame: ['mame2003_plus', 'mame2003'], nes: ['fceumm'], snes: ['snes9x'] }; }
     downloadRom() { written.push(['rom', 0]); return Promise.resolve('rom-loaded'); }
   }
-  const window = { EJS_GameManager, EmulatorJS, RETROPLAY_RETROARCH_CFG: extraCfg, RETROPLAY_EXTRA_FILES: extraFiles };
-  runInNewContext(RETROPLAY_PATCH, { window, fetch: fetchImpl || (async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })), Promise, Object, Array, String, Uint8Array, Error });
+  const window = { EJS_GameManager, EmulatorJS, RETROPLAY_RETROARCH_CFG: extraCfg, RETROPLAY_EXTRA_FILES: extraFiles, ...page };
+  // A WebGL context whose renderer name the patch reads (SwiftShader: software WebGL).
+  const gl = { getExtension: name => (name === 'WEBGL_debug_renderer_info' ? { UNMASKED_RENDERER_WEBGL: 1 } : null), getParameter: () => renderer, RENDERER: 2 };
+  const document = { createElement: () => ({ getContext: () => (renderer ? gl : null) }) };
+  runInNewContext(RETROPLAY_PATCH, { window, document, fetch: fetchImpl || (async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })), Promise, Object, Array, String, Uint8Array, Error, Math });
   return { window, written, EJS_GameManager, EmulatorJS };
 }
 
@@ -55,22 +58,41 @@ test('every shipped core and the runtime are pinned to 4.2.3 with sha512 integri
   assert.ok(CORES.includes('fbneo') && CORES.includes('mame2003_plus') && CORES.includes('fbalpha2012_cps2'));
 });
 
-test('RetroPlay\'s own MAME 2003-Plus build is a MAME core to EmulatorJS', () => {
+test('RetroPlay\'s own MAME 2003-Plus build is a MAME core to EmulatorJS, Snes9x 2005 Plus a SNES core', () => {
   const { EmulatorJS } = patchedRuntime();
   const cores = new EmulatorJS().getCores();
   assert.deepEqual(cores.mame, ['mame2003_plus', 'mame2003', 'mame2003_plus_next']);
   assert.deepEqual(cores.arcade, ['fbneo']);
   assert.deepEqual(new EmulatorJS().getCores().mame, ['mame2003_plus', 'mame2003', 'mame2003_plus_next'], 'added once per call, never twice');
+  assert.deepEqual(cores.snes, ['snes9x', 'snes9x2005_plus']);
 });
 
 test('cores RetroPlay builds are pinned to one release of this repository by sha512', () => {
-  assert.deepEqual(Object.keys(BUILT_CORES), ['mame2003_plus_next']);
-  assert.deepEqual(ALL_CORES, [...CORES, 'mame2003_plus_next']);
+  assert.deepEqual(Object.keys(BUILT_CORES), ['mame2003_plus_next', 'snes9x2005_plus']);
+  assert.deepEqual(ALL_CORES, [...CORES, 'mame2003_plus_next', 'snes9x2005_plus']);
   const core = BUILT_CORES.mame2003_plus_next;
   assert.match(core.release, /^https:\/\/github\.com\/emircangencer-ctrl\/retroteo1\/releases\/download\/core-mame2003_plus_next-64b3c38a-r\d+\/$/);
   assert.match(core.source, /libretro\/mame2003-plus-libretro\/tree\/64b3c38ac6dae0fb513e6b881fb3bfc31fca54c4$/);
   assert.deepEqual(Object.keys(core.files), ['mame2003_plus_next-wasm.data', 'mame2003_plus_next-legacy-wasm.data', 'reports/mame2003_plus_next.json']);
   for (const file of Object.values(core.files)) assert.match(file.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/, file.asset);
+  assert.equal(servedCoreDir(core), 'cores/', 'served as before');
+  assert.deepEqual(coreFilePaths(core), {});
+});
+
+test('the fast core builds replace every stock core but Genesis Plus GX, each from its release directory', () => {
+  assert.deepEqual(Object.keys(FAST_CORES).sort(), CORES.filter(core => core !== 'genesis_plus_gx').sort());
+  for (const [key, core] of [...Object.entries(FAST_CORES), ['snes9x2005_plus', BUILT_CORES.snes9x2005_plus]]) {
+    assert.match(core.release, /^https:\/\/github\.com\/emircangencer-ctrl\/retroteo1\/releases\/download\/cores-fast-r\d+\/$/, key);
+    assert.equal(core.release.split('/').at(-2), core.dir, `${key}: one directory per release`);
+    assert.match(core.source, /^https:\/\/github\.com\/(EmulatorJS|libretro)\/[\w.-]+\/tree\/[0-9a-f]{40}$/, key);
+    assert.deepEqual(Object.keys(core.files), [`${key}-wasm.data`, `${key}-legacy-wasm.data`, `reports/${key}.json`]);
+    for (const file of Object.values(core.files)) assert.match(file.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/, file.asset);
+    assert.deepEqual(coreFilePaths(core), {
+      [`${key}-wasm.data`]: `cores/${core.dir}/${key}-wasm.data`,
+      [`${key}-legacy-wasm.data`]: `cores/${core.dir}/${key}-legacy-wasm.data`,
+      [`${key}.json`]: `cores/${core.dir}/reports/${key}.json`
+    }, `${key}: EmulatorJS finds the files by name`);
+  }
 });
 
 test('pinned downloads: fetched once, reused from the cache, refused when the contents differ', () => {
@@ -90,4 +112,13 @@ test('pinned downloads: fetched once, reused from the cache, refused when the co
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('picture line limit: software WebGL draws at most 480 lines, a page limit (the TV: 1080) is kept with a GPU, "full" removes both', () => {
+  assert.equal(patchedRuntime({ renderer: 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))' }).window.RETROPLAY_CANVAS_CAP, 480);
+  assert.equal(patchedRuntime({ renderer: 'Mali-G31', page: { RETROPLAY_CANVAS_CAP: 1080 } }).window.RETROPLAY_CANVAS_CAP, 1080);
+  assert.equal(patchedRuntime({ renderer: 'SwiftShader', page: { RETROPLAY_CANVAS_CAP: 1080 } }).window.RETROPLAY_CANVAS_CAP, 480, 'the lower of the two');
+  assert.equal(patchedRuntime({ renderer: 'SwiftShader', page: { RETROPLAY_CANVAS_CAP: 0, RETROPLAY_RENDER: 'full' } }).window.RETROPLAY_CANVAS_CAP, 0);
+  assert.equal(patchedRuntime({ renderer: 'Mali-G31', page: { RETROPLAY_CANVAS_CAP: 1080, RETROPLAY_RENDER: 'full' } }).window.RETROPLAY_CANVAS_CAP, 0);
+  assert.equal(patchedRuntime({ renderer: 'Adreno (TM) 610', page: { RETROPLAY_CANVAS_CAP: 0 } }).window.RETROPLAY_CANVAS_CAP, 0, 'a phone with a GPU: no limit');
 });

@@ -33,6 +33,17 @@ test('Mega Drive: PicoDrive first, Genesis Plus GX offered next; a game keeps th
   assert.deepEqual((await resolveLaunch(game, MD, { stateCore: 'snes9x' }, deps())).cores.map(c => c.coreId), ['picodrive', 'genesis_plus_gx'], 'a state of another system is ignored');
 });
 
+test('SNES: Snes9x keeps the id existing save states carry; Snes9x 2005 is offered next and can be chosen per game', async () => {
+  const SNES = { shortLabel: 'SNES', emulatorJsCoreId: 'snes', emulatorJsSystemId: 'snes' };
+  const game = { id: 's', title: 'Game', platform: 'SNES', blob: blob() };
+  const launch = await resolveLaunch(game, SNES, {}, deps());
+  assert.deepEqual(launch.cores.map(c => [c.coreId, c.systemId, c.name]), [['snes', 'snes', 'Snes9x'], ['snes9x2005_plus', 'snes', 'Snes9x 2005']]);
+  assert.deepEqual((await resolveLaunch(game, SNES, { stateCore: 'snes' }, deps())).cores.map(c => c.coreId), ['snes', 'snes9x2005_plus'], 'states made before the second core keep Snes9x');
+  assert.deepEqual((await resolveLaunch(game, SNES, { stateCore: 'snes9x2005_plus' }, deps())).cores.map(c => c.coreId), ['snes9x2005_plus', 'snes']);
+  assert.deepEqual((await resolveLaunch({ ...game, consoleCore: 'snes9x2005_plus' }, SNES, { stateCore: 'snes' }, deps())).cores.map(c => c.coreId), ['snes9x2005_plus', 'snes'], 'a chosen core wins');
+  assert.deepEqual(rememberCore(game, 'snes9x2005_plus').consoleCore, 'snes9x2005_plus');
+});
+
 test('arcade: a missing BIOS blocks before any core loads and names the file', async () => {
   const game = { id: 'm', title: 'Metal Slug', platform: 'ARCADE', blob: blob(), arcade: { core: 'fbneo', set: 'mslug', status: 'complete', missing: [], bios: 'neogeo', parent: '' } };
   const blocked = await resolveLaunch(game, ARC, {}, deps());

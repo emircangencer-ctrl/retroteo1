@@ -211,3 +211,77 @@ export function megaDriveSramRom() {
   rom[0x18E] = sum >> 8; rom[0x18F] = sum & 255;
   return rom;
 }
+
+/**
+ * A self-authored Mega Drive cartridge that makes sound the way games do: the 68000 loads a Z80
+ * program into sound RAM and starts the Z80, which sets up an FM tone on the YM2612 (channel 1,
+ * algorithm 7, key on) and a square wave on the PSG (channel 0), then idles; before every YM2612
+ * write it reads the chip's busy flag, and it reads its data from the cartridge through the bank
+ * window, as sound drivers do. The screen is a
+ * plain backdrop.
+ */
+export function megaDriveSoundRom() {
+  const rom = new Uint8Array(128 * 1024);
+  const w16 = (o, v) => { rom[o] = (v >>> 8) & 255; rom[o + 1] = v & 255; };
+  const w32 = (o, v) => { w16(o, v >>> 16); w16(o + 2, v & 0xffff); };
+  w32(0, 0x00FFFE00); w32(4, 0x00000200);
+  for (let v = 2; v < 64; v++) w32(v * 4, 0x00000300);
+  const text = (o, s) => { for (let i = 0; i < s.length; i++) rom[o + i] = s.charCodeAt(i); };
+  text(0x100, 'SEGA GENESIS    '); text(0x150, 'RETROPLAY SOUND TEST'); text(0x180, 'GM 00000000-00');
+  w32(0x1A0, 0); w32(0x1A4, rom.length - 1); w32(0x1A8, 0x00FF0000); w32(0x1AC, 0x00FFFFFF); text(0x1F0, 'JUE');
+  // Z80 program (runs from address 0 of sound RAM).
+  const ym = [[0x22, 0x00], [0x27, 0x00], [0x28, 0x00], [0x2B, 0x00]];
+  for (const op of [0, 4, 8, 12]) ym.push([0x30 + op, 0x01], [0x40 + op, 0x10], [0x50 + op, 0x1F], [0x60 + op, 0x00], [0x70 + op, 0x00], [0x80 + op, 0x0F], [0x90 + op, 0x00]);
+  ym.push([0xB0, 0x07], [0xB4, 0xC0], [0xA4, 0x22], [0xA0, 0x69], [0x28, 0xF0]);
+  // Like a game's sound driver, it reads its data from the cartridge through the Z80's bank window
+  // ($8000-$FFFF; bank register at $6000, nine writes of one bit) and waits for the YM2612's busy
+  // flag (a status read) before every write.
+  const TABLE = 0x10000; // in the cartridge: bank 2, offset 0
+  const bank = TABLE >>> 15;
+  const bankBits = Array.from({ length: 9 }, (_, i) => [0x36, (bank >>> i) & 1]).flat(); // ld (hl),bit
+  const z80 = [
+    0xF3,                   // di
+    0x31, 0x00, 0x20,       // ld sp,$2000
+    0x21, 0x00, 0x60,       // ld hl,$6000        bank register
+    ...bankBits,
+    0x21, 0x00, 0x40,       // ld hl,$4000
+    0x11, 0x00, 0x80 | ((TABLE & 0x7FFF) >>> 8), // ld de,$8000+offset
+    0x06, ym.length,        // ld b,pairs
+    0xCB, 0x7E,             // loop: bit 7,(hl)   YM2612 status: busy?
+    0x20, 0xFC,             // jr nz,loop
+    0x1A,                   // ld a,(de)          from the cartridge
+    0x77,                   // ld (hl),a          register
+    0x13,                   // inc de
+    0x1A,                   // ld a,(de)
+    0x32, 0x01, 0x40,       // ld ($4001),a       data
+    0x13,                   // inc de
+    0x10, 0xF2,             // djnz loop
+    0x3E, 0x8F, 0x32, 0x11, 0x7F,  // PSG channel 0 tone, low bits
+    0x3E, 0x0A, 0x32, 0x11, 0x7F,  // high bits
+    0x3E, 0x90, 0x32, 0x11, 0x7F,  // channel 0 loudest
+    0x18, 0xFE];            // jr $
+  rom.set(ym.flat(), TABLE);
+  rom.set(z80, 0x400);
+  const code = [
+    0x33FC, 0x0100, 0x00A1, 0x1100,   // move.w #$100,($A11100)  ask for the Z80 bus
+    0x33FC, 0x0100, 0x00A1, 0x1200,   // move.w #$100,($A11200)  Z80 out of reset
+    0x0839, 0x0000, 0x00A1, 0x1100,   // wait: btst #0,($A11100)
+    0x66F6,                           // bne.s wait
+    0x41F9, 0x0000, 0x0400,           // lea $400,a0
+    0x43F9, 0x00A0, 0x0000,           // lea $A00000,a1
+    0x303C, z80.length - 1,           // move.w #len-1,d0
+    0x12D8,                           // copy: move.b (a0)+,(a1)+
+    0x51C8, 0xFFFC,                   // dbra d0,copy
+    0x33FC, 0x0000, 0x00A1, 0x1200,   // move.w #0,($A11200)     reset the Z80
+    0x4E71, 0x4E71, 0x4E71, 0x4E71,   // nop ×4
+    0x33FC, 0x0000, 0x00A1, 0x1100,   // move.w #0,($A11100)     give the bus back
+    0x33FC, 0x0100, 0x00A1, 0x1200,   // move.w #$100,($A11200)  Z80 runs
+    0x33FC, 0x8004, 0x00C0, 0x0004, 0x33FC, 0x8174, 0x00C0, 0x0004, 0x33FC, 0x8C81, 0x00C0, 0x0004,
+    0x23FC, 0xC000, 0x0000, 0x00C0, 0x0004, 0x33FC, 0x0E00, 0x00C0, 0x0000,
+    0x60FE];                          // bra.s *
+  code.forEach((word, i) => w16(0x200 + i * 2, word));
+  w16(0x300, 0x4E73); // rte
+  let sum = 0; for (let i = 0x200; i < rom.length; i += 2) sum = (sum + ((rom[i] << 8) | rom[i + 1])) & 0xffff;
+  w16(0x18E, sum);
+  return rom;
+}

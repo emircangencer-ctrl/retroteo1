@@ -23,7 +23,19 @@ export function describeResult(result) {
   if (!result || !Number.isFinite(result.headroom)) return 'Performans ölçülemedi';
   const verdict = classifyHeadroom(result.headroom).label;
   const pace = Number.isFinite(result.normalFps) && result.normalFps > 0 ? ` · normal oyun ${number(result.normalFps, 0)} kare/sn` : '';
-  return `Hız payı ${number(result.headroom)}× (${number(result.fps, 0)} kare/sn) · ${verdict}${pace}`;
+  // No usable GPU: the browser draws the picture on the processor (worth knowing on a TV box).
+  const gpu = result.gpu === 'software' ? ' · görüntü ekran kartı olmadan çiziliyor' : '';
+  return `Hız payı ${number(result.headroom)}× (${number(result.fps, 0)} kare/sn) · ${verdict}${pace}${gpu}${refreshNote(result.refresh)}`;
+}
+
+/**
+ * The TV's refresh rate (from the TV app). The emulator advances one frame per refresh, so below
+ * 60 Hz every game plays slower by the same share.
+ */
+export function refreshNote(refresh) {
+  if (!Number.isFinite(refresh) || refresh <= 0) return '';
+  const slower = Math.abs(refresh - 60) <= 0.5 ? 0 : Math.round((1 - refresh / 60) * 100);
+  return ` · TV ekranı ${number(refresh, 0)} Hz${slower > 0 ? `: oyunlar %${slower} yavaş oynar` : ''}`;
 }
 
 /**
@@ -64,6 +76,6 @@ export function addToHistory(entry, storage = globalThis.localStorage) {
 export function historyReport(history) {
   if (!history.length) return 'Henüz performans ölçümü yok.';
   const device = history[0].device || 'Cihaz bilinmiyor';
-  const lines = history.map(entry => `${new Date(entry.at).toLocaleString('tr-TR')} · ${entry.title} · ${entry.platform}/${entry.core} · ${number(entry.headroom)}× (${number(entry.fps, 0)} kare/sn)${Number.isFinite(entry.normalFps) ? ` · normal ${number(entry.normalFps, 0)}` : ''}`);
+  const lines = history.map(entry => `${new Date(entry.at).toLocaleString('tr-TR')} · ${entry.title} · ${entry.platform}/${entry.core} · ${number(entry.headroom)}× (${number(entry.fps, 0)} kare/sn)${Number.isFinite(entry.normalFps) ? ` · normal ${number(entry.normalFps, 0)}` : ''}${entry.picture ? ` · görüntü ${entry.picture}` : ''}${entry.gpu === 'software' ? ' · yazılım WebGL' : ''}${Number.isFinite(entry.refresh) ? ` · ekran ${number(entry.refresh, 0)} Hz` : ''}`);
   return [`RetroPlay performans ölçümleri · ${device}${history[0].cores ? ` · ${history[0].cores} çekirdek` : ''}${history[0].memory ? ` · ${history[0].memory} GB` : ''}`, ...lines].join('\n');
 }

@@ -200,6 +200,14 @@ test('NES supports the explicit Nestopia core without changing its NES control s
   assert.throws(() => buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Invalid', 'nes', 7, 'snes'), /Unsupported EmulatorJS core/);
 });
 
+test('SNES runs with Snes9x (as before) or Snes9x 2005 Plus, never with another system\'s core', () => {
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'snes', 3, 'snes').includes('window.EJS_core = "snes";'));
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'snes', 3, 'snes9x2005_plus');
+  assert.ok(html.includes('window.EJS_core = "snes9x2005_plus";'));
+  assert.ok(html.includes('window.EJS_controlScheme = "snes";'));
+  assert.throws(() => buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Invalid', 'snes', 3, 'picodrive'), /Unsupported EmulatorJS core/);
+});
+
 test('gamepad mapping remains accessible and uses the active console control scheme', () => {
   const systems = [
     ['nes', 'nes'],
@@ -634,4 +642,11 @@ test('Space held fast-forwards and Backspace held rewinds (as hotkeys, never gam
     try { player?.destroy(); } catch {}
     restore();
   }
+});
+
+test('the picture line limit reaches the emulator document: the TV sets 1080, anything odd is no limit', () => {
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: 1080 }).includes('window.RETROPLAY_CANVAS_CAP = 1080;'));
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm').includes('window.RETROPLAY_CANVAS_CAP = 0;'));
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: '1e9;alert(1)' }).includes('window.RETROPLAY_CANVAS_CAP = 0;'));
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: 100 }).includes('window.RETROPLAY_CANVAS_CAP = 0;'));
 });
