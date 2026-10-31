@@ -111,6 +111,8 @@ export class TouchController {
     this.dpadEl = root.querySelector('.tc-dpad');
     this.arms = [...root.querySelectorAll('.tc-arm')];
     this.buttonEls = [...root.querySelectorAll('.tc-btn')];
+    // A button Basılı tut holds stays lit on the new pad (rotation, new size).
+    this.paint();
   }
 
   /** Pointer position in pad coordinates. The pad's box is measured when a finger lands, not on
