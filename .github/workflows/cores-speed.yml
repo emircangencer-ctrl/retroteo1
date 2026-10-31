@@ -36,37 +36,44 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Round 5: no Asyncify at all (RetroArch's Web Audio driver with its own "fake block": when
-          # the audio buffer is full the main loop waits through its timing instead of sleeping),
-          # against the full-Asyncify build EmulatorJS 4.2.3 ships; and Snes9x 2005, a lighter SNES
-          # core. EmulatorJS's forks at the commits before the 4.2.3 core build (2025-06-14).
-          - core: snes9x
-            repo: https://github.com/EmulatorJS/snes9x.git
-            commit: 6ca2343e5f3b0acbea49ca958251e3a0af58a81d
-            makefile: Makefile
-            buildpath: libretro
-            license: LICENSE
+          # Round 6: the rest of the shipped cores with and without Asyncify, and PicoDrive fixed:
+          # round 5's PicoDrive (RetroArch without CHD, the core with its own libchdr) showed
+          # RetroArch's menu instead of the game. Now like the stock build: RetroArch keeps CHD,
+          # the core drops its own copy (cartridges never use it).
           - core: picodrive
             repo: https://github.com/EmulatorJS/picodrive.git
             commit: 7cbcd419b7acc2286b7a8bcd15776b5444ffff28
             makefile: Makefile.libretro
+            make_args: use_libchdr=0
+            keep_chd: true
             license: COPYING
-          - core: fceumm
-            repo: https://github.com/EmulatorJS/libretro-fceumm.git
-            commit: d9d7e141274d07186b6a871ca2919b6f13cfb2f9
+          - core: genesis_plus_gx
+            repo: https://github.com/EmulatorJS/Genesis-Plus-GX.git
+            commit: def3a7c0e413ef35a7d9d4430e5c9c9a5698b4fe
             makefile: Makefile.libretro
-            license: Copying
-          - core: snes9x2005
-            repo: https://github.com/libretro/snes9x2005.git
-            commit: a79dfe9047e7fec58808aefe48ad2bf499c7af11
+            license: LICENSE.txt
+          - core: nestopia
+            repo: https://github.com/EmulatorJS/nestopia.git
+            commit: 6b08ec9148bd4cedc893ed0c97bc64061d044399
             makefile: Makefile
-            license: copyright
-          - core: snes9x2005_plus
-            repo: https://github.com/libretro/snes9x2005.git
-            commit: a79dfe9047e7fec58808aefe48ad2bf499c7af11
+            buildpath: libretro
+            license: COPYING
+          - core: fbneo
+            repo: https://github.com/EmulatorJS/FBNeo.git
+            commit: 94fe878742901a5b9473dba94bad33a057f5d64c
             makefile: Makefile
-            make_args: USE_BLARGG_APU=1
-            license: copyright
+            buildpath: src/burner/libretro
+            license: src/license.txt
+          - core: fbalpha2012_cps2
+            repo: https://github.com/EmulatorJS/fbalpha2012_cps2.git
+            commit: 3fb5b89d2ab719e45e814e1ad0b5ff721bffdff2
+            makefile: makefile.libretro
+            license: README.md
+          - core: mame2003_plus
+            repo: https://github.com/EmulatorJS/mame2003-plus-libretro.git
+            commit: 09e84fe55799031e225b9da5e526d82ee85b9cd8
+            makefile: Makefile
+            license: LICENSE.md
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
@@ -113,7 +120,7 @@ jobs:
           # RetroArch's Web Audio driver is not wired into EmulatorJS builds at this commit
           printf '\nifeq ($(EMULATORJS), 1)\nifeq ($(HAVE_RWEBAUDIO), 1)\nOBJ += audio/drivers/rwebaudio.o\nendif\nendif\n' >> ../Makefile.common
           # PicoDrive brings its own libchdr: RetroArch's CHD support would clash with it
-          sed -i 's/^noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed")$/noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed" "picodrive")/' build-emulatorjs.sh
+          if [ "${{ matrix.keep_chd }}" != true ]; then sed -i 's/^noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed")$/noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed" "picodrive")/' build-emulatorjs.sh; fi
           grep -n '^noCHD' build-emulatorjs.sh
           # function names kept (a crash shows where it happened)
           # No Asyncify: RetroArch's Web Audio driver blocks through the main loop's timing ("fake
