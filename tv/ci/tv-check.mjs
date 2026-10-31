@@ -80,17 +80,6 @@ try {
     return `${screen.mode} · modes ${screen.modes.join(', ')}`;
   }, { critical: false });
 
-  await step('a deploy preview opens by its PR number, nothing else', async () => {
-    const refused = await page.evaluate(() => ['abc', '0', '9--evil.example', '1234567'].map(value => window.RetroPlayTV.openSite(value)));
-    if (refused.some(Boolean)) throw new Error(`accepted: ${refused}`);
-    const number = Number(/deploy-preview-(\d+)--/.exec(process.env.RETROPLAY_URL || '')?.[1] || 0);
-    if (!number) return 'refused bad values (live build: no preview to reopen)';
-    await page.evaluate(n => window.RetroPlayTV.openSite(String(n)), number);
-    await sleep(1500);
-    await page.waitForFunction(n => document.documentElement.classList.contains('tv') && Boolean(document.querySelector('#app-shell')) && JSON.parse(window.RetroPlayTV.info()).preview === n && Boolean(document.querySelector('#tv-preview-badge')), number, { timeout: 120_000 });
-    return `refused bad values; preview #${number} opened with its badge`;
-  }, { critical: false });
-  await snap('preview');
 
   await step('the remote moves the focus', async () => {
     const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');
@@ -206,6 +195,29 @@ try {
     return top.trim().slice(0, 100);
   }, { critical: false });
   await snap('left-app');
+  // Last: opening a site reloads the WebView, and Playwright's page can be replaced by a new one.
+  await step('a deploy preview opens by its PR number, nothing else', async () => {
+    // The step before sent the app to the background; bring it back (singleTask: the same WebView).
+    await device.shell(`am start -W -n ${PKG}/.MainActivity`);
+    await sleep(1500);
+    const refused = await page.evaluate(() => ['abc', '0', '9--evil.example', '1234567'].map(value => window.RetroPlayTV.openSite(value)));
+    if (refused.some(Boolean)) throw new Error(`accepted: ${refused}`);
+    const number = Number(/deploy-preview-(\d+)--/.exec(process.env.RETROPLAY_URL || '')?.[1] || 0);
+    if (!number) return 'refused bad values (live build: no preview to reopen)';
+    await page.evaluate(n => window.RetroPlayTV.openSite(String(n)), number).catch(() => {});
+    let opened = '';
+    for (let attempt = 0; attempt < 30 && !opened; attempt++) {
+      await sleep(2000);
+      try {
+        const view = await device.webView({ pkg: PKG }, { timeout: 10_000 });
+        page = await view.page();
+        opened = await page.evaluate(n => document.documentElement.classList.contains('tv') && Boolean(document.querySelector('#app-shell')) && JSON.parse(window.RetroPlayTV.info()).preview === n && Boolean(document.querySelector('#tv-preview-badge')) ? document.querySelector('#tv-preview-badge').textContent : '', number);
+      } catch {}
+    }
+    if (!opened) throw new Error('the preview did not open with its badge');
+    return `refused bad values; preview #${number} opened (${opened})`;
+  }, { critical: false });
+  await snap('preview');
 } catch (error) {
   console.log(`stopped: ${error?.message || error}`);
 } finally {
