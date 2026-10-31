@@ -226,8 +226,12 @@ try {
   if (results.some(r => !r.ok)) {
     try {
       const log = execFileSync('adb', ['logcat', '-d', '-v', 'brief'], { maxBuffer: 64 * 1024 * 1024 }).toString();
-      const lines = log.split('\n').filter(line => /renderer process|Renderer process|crash|FATAL|died|lowmemorykiller|lmkd|Killing|ANR in|WebView.*(gone|terminated)/i.test(line) && !/^\s*$/.test(line)).slice(-8);
-      for (const line of lines) console.log(`::warning title=TV logcat::${line.trim().slice(0, 300)}`);
+      const all = log.split('\n');
+      const app = all.filter(line => /FATAL EXCEPTION|AndroidRuntime.*(app\.retroplay|Exception|Caused by)|app\.retroplay\.tv.*(died|crash)|Process app\.retroplay\.tv.*(died|has died)/.test(line)).slice(0, 6);
+      const memory = all.filter(line => /lowmemorykiller|lmkd.*[Kk]ill|Low on memory|kill.*app\.retroplay|Renderer process (crashed|was killed)/.test(line)).slice(-4);
+      for (const line of [...app, ...memory]) console.log(`::warning title=TV logcat::${line.trim().slice(0, 300)}`);
+      const mem = execFileSync('adb', ['shell', 'cat', '/proc/meminfo']).toString().split('\n').filter(line => /MemTotal|MemAvailable/.test(line)).join(' · ').replace(/\s+/g, ' ');
+      console.log(`::warning title=TV memory::${mem}`);
     } catch {}
   }
   fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(results, null, 2));
