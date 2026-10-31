@@ -99,30 +99,61 @@ export const RETROPLAY_PATCH = `
     };
   }
   var Emulator = window.EmulatorJS;
-  // RetroPlay's own MAME 2003-Plus build is a MAME core to EmulatorJS (arcade zips are written as
-  // they are, MAME controls and settings), like the cores it knows by name.
-  var BUILT_MAME_CORES = ['mame2003_plus_next'];
+  // RetroPlay's own core builds belong to a system EmulatorJS knows: its MAME 2003-Plus build is a
+  // MAME core (arcade zips are written as they are, MAME controls and settings), Snes9x 2005 Plus
+  // a Super Nintendo core, like the cores it knows by name.
+  var BUILT_SYSTEM_CORES = { mame: ['mame2003_plus_next'], snes: ['snes9x2005_plus'] };
   if (Emulator && Emulator.prototype && typeof Emulator.prototype.getCores === 'function') {
     var baseGetCores = Emulator.prototype.getCores;
     Emulator.prototype.getCores = function () {
       var cores = baseGetCores.call(this);
-      if (cores && Array.isArray(cores.mame)) {
-        cores.mame = cores.mame.concat(BUILT_MAME_CORES.filter(function (core) { return cores.mame.indexOf(core) === -1; }));
-      }
+      Object.keys(BUILT_SYSTEM_CORES).forEach(function (system) {
+        if (cores && Array.isArray(cores[system])) {
+          cores[system] = cores[system].concat(BUILT_SYSTEM_CORES[system].filter(function (core) { return cores[system].indexOf(core) === -1; }));
+        }
+      });
       return cores;
     };
   }
   var CANVAS_SIZE_CODE = 'if(entry.devicePixelContentBoxSize){width=entry.devicePixelContentBoxSize[0].inlineSize;height=entry.devicePixelContentBoxSize[0].blockSize}';
   var CANVAS_SIZE_FIX = 'if(entry.devicePixelContentBoxSize&&Math.abs(entry.devicePixelContentBoxSize[0].inlineSize-entry.contentRect.width*window.devicePixelRatio)<1.5&&Math.abs(entry.devicePixelContentBoxSize[0].blockSize-entry.contentRect.height*window.devicePixelRatio)<1.5){width=entry.devicePixelContentBoxSize[0].inlineSize;height=entry.devicePixelContentBoxSize[0].blockSize}';
+  // Software WebGL (no usable GPU: SwiftShader, llvmpipe …) draws every pixel on the CPU, and a
+  // phone-sized picture then costs more than the game itself (measured: Mega Drive 37 → 59 frames
+  // a second on a 4× slowed CPU). There the picture is drawn at most RETROPLAY_CANVAS_CAP lines
+  // high (twice the consoles' 240) and the browser scales it up. RETROPLAY_RENDER = 'full' keeps
+  // the full resolution.
+  function softwareRenderer() {
+    try {
+      var canvas = document.createElement('canvas');
+      var gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+      if (!gl) return '';
+      var info = gl.getExtension('WEBGL_debug_renderer_info');
+      var name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+      var lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+      return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name) ? name : '';
+    } catch (error) {
+      return '';
+    }
+  }
+  window.RETROPLAY_SOFTWARE_GL = softwareRenderer();
+  if (window.RETROPLAY_SOFTWARE_GL && window.RETROPLAY_RENDER !== 'full' && !(window.RETROPLAY_CANVAS_CAP > 0)) window.RETROPLAY_CANVAS_CAP = 480;
+  var CANVAS_STORE_CODE = 'RPE.canvasWidth=width;RPE.canvasHeight=height;';
+  var CANVAS_STORE_CAP = 'if(window.RETROPLAY_CANVAS_CAP>0&&height>window.RETROPLAY_CANVAS_CAP){width=Math.round(width*window.RETROPLAY_CANVAS_CAP/height);height=window.RETROPLAY_CANVAS_CAP}' + CANVAS_STORE_CODE;
   if (Emulator && Emulator.prototype && typeof Emulator.prototype.initGameCore === 'function') {
     var baseInitGameCore = Emulator.prototype.initGameCore;
     Emulator.prototype.initGameCore = function (js, wasm, thread) {
       try {
         var text = typeof js === 'string' ? js : new TextDecoder().decode(js);
         if (text.indexOf(CANVAS_SIZE_CODE) !== -1) {
-          js = text.split(CANVAS_SIZE_CODE).join(CANVAS_SIZE_FIX);
+          text = text.split(CANVAS_SIZE_CODE).join(CANVAS_SIZE_FIX);
           window.RETROPLAY_CANVAS_FIX = true;
         }
+        if (text.indexOf(CANVAS_STORE_CODE) !== -1) {
+          text = text.split(CANVAS_STORE_CODE).join(CANVAS_STORE_CAP);
+          window.RETROPLAY_CANVAS_CAP_READY = true;
+        }
+        if (window.RETROPLAY_CANVAS_FIX || window.RETROPLAY_CANVAS_CAP_READY) js = text;
       } catch (error) {
         console.warn('RetroPlay: canvas size patch skipped', error);
       }

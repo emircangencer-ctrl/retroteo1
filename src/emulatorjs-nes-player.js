@@ -69,6 +69,21 @@ const inputSlot = (player, index) => player * 32 + index;
 export const MIN_SYSTEM_PRESS_MS = 100;
 const SYSTEM_INPUTS = new Set([EMULATORJS_INPUT_INDEX.BUTTON_SELECT, EMULATORJS_INPUT_INDEX.BUTTON_START]);
 const now = () => globalThis.performance?.now?.() ?? Date.now();
+/**
+ * Sets a game's volume. EmulatorJS turns OpenAL's sources up or down; RetroPlay's own core builds
+ * play through RetroArch's Web Audio driver, whose sources go through one gain node (Module.RWA).
+ * EmulatorJS re-applies emu.volume when the game resumes, so it is set too (unless `keep`).
+ */
+/** 'full' when the device keeps the full picture resolution under software WebGL (retroplay-render). */
+function renderPreference() {
+  try { return globalThis.localStorage?.getItem('retroplay-render') === 'full' ? 'full' : 'auto'; } catch { return 'auto'; }
+}
+function setCoreVolume(emu, volume, { keep = false } = {}) {
+  if (!keep) emu.volume = volume;
+  if (typeof emu.setVolume === 'function') emu.setVolume(volume);
+  const gain = emu.Module?.RWA?.gain;
+  if (gain?.gain) gain.gain.value = volume;
+}
 const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD', 'arcade', 'mame']);
 const CORES_BY_SYSTEM = Object.freeze({
   nes: new Set(['nes', 'fceumm', 'nestopia']),
@@ -145,6 +160,8 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     'window.EJS_paths = ' + literal(paths) + ';',
     'window.RETROPLAY_EXTRA_FILES = ' + literal(extraFiles) + ';',
     'window.RETROPLAY_RETROARCH_CFG = ' + literal(retroarchConfig) + ';',
+    // 'full': draw at the screen's full resolution even with software WebGL (see the runtime patch).
+    'window.RETROPLAY_RENDER = ' + literal(options.render === 'full' ? 'full' : 'auto') + ';',
     'window.EJS_defaultOptions = ' + literal(coreOptions) + ';',
     'window.EJS_shaders = ' + literal(RETROPLAY_SHADERS) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
@@ -152,7 +169,7 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     'window.EJS_gameID = ' + String(gameId) + ';',
     'window.EJS_volume = 0.7;',
     'window.EJS_Buttons = ' + literal(HIDDEN_BUTTONS) + ';',
-    "window.EJS_onGameStart = () => { const emu = window.EJS_emulator; const missing = []; if (typeof emu?.gameManager?.simulateInput !== 'function') missing.push('kontrol desteği'); if (typeof emu?.pause !== 'function') missing.push('duraklatma'); if (typeof emu?.play !== 'function') missing.push('devam etme'); if (missing.length) { notify('error', { message: 'EmulatorJS yüklendi ancak gerekli API eksik: ' + missing.join(', ') + '. Çalışma zamanı ile kontrol katmanı uyumsuz.' }); return; } try { if (emu.gamepad && typeof emu.gamepad.terminate === 'function') emu.gamepad.terminate(); } catch (error) {} const css = document.createElement('style'); css.textContent = " + literal(RUNTIME_CSS) + "; document.head.appendChild(css); if (typeof emu.enableShader === 'function') { try { emu.enableShader(" + literal(shader) + "); } catch (error) { notify('warning', { message: 'Görüntü modu uygulanamadı: ' + (error && error.message || error) }); } } gameStarted = true; notify('started'); };",
+    "window.EJS_onGameStart = () => { const emu = window.EJS_emulator; const missing = []; if (typeof emu?.gameManager?.simulateInput !== 'function') missing.push('kontrol desteği'); if (typeof emu?.pause !== 'function') missing.push('duraklatma'); if (typeof emu?.play !== 'function') missing.push('devam etme'); if (missing.length) { notify('error', { message: 'EmulatorJS yüklendi ancak gerekli API eksik: ' + missing.join(', ') + '. Çalışma zamanı ile kontrol katmanı uyumsuz.' }); return; } try { if (emu.gamepad && typeof emu.gamepad.terminate === 'function') emu.gamepad.terminate(); } catch (error) {} const css = document.createElement('style'); css.textContent = " + literal(RUNTIME_CSS) + "; document.head.appendChild(css); if (typeof emu.enableShader === 'function') { try { emu.enableShader(" + literal(shader) + "); } catch (error) { notify('warning', { message: 'Görüntü modu uygulanamadı: ' + (error && error.message || error) }); } } try { const rwa = emu.Module && emu.Module.RWA; if (rwa && rwa.gain) rwa.gain.gain.value = typeof emu.volume === 'number' ? emu.volume : 0.7; } catch (error) {} gameStarted = true; notify('started'); };",
     "window.EJS_onExit = () => notify('exit');",
     "window.addEventListener('message', event => { if (event.source !== parent || !event.data || event.data.source !== 'retroplay-app' || event.data.type !== 'immersive') return; document.documentElement.classList.toggle('retroplay-immersive', Boolean(event.data.active)); });",
     "const loader = document.createElement('script'); loader.src = " + literal(new URL('loader.js', dataPath).href) + "; loader.onerror = () => notify('error', { message: 'EmulatorJS yüklenemedi. Uygulamayı yenileyip tekrar dene; ilk açılışta internet bağlantısı gerekir.' }); document.head.appendChild(loader);",
@@ -167,8 +184,8 @@ export class EmulatorJsPlayer {
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
     this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.fastForward=false; this.rewinding=false; this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
-    this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
-    document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
+    this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.boundWake=()=>this.resumeAudio(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
+    document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur); document.addEventListener('pointerdown',this.boundWake,true); document.addEventListener('keydown',this.boundWake,true);
   }
   loadROM(bytes, gameName='RetroPlay game') {
     if(this.destroyed) return Promise.reject(new Error('Oynatıcı kapatıldı.'));
@@ -178,7 +195,7 @@ export class EmulatorJsPlayer {
     this.romUrl=URL.createObjectURL(blob);
     const frame=document.createElement('iframe'); frame.title=gameName+' — '+this.systemLabel+' emülatörü'; frame.setAttribute('allow','autoplay; fullscreen; gamepad; screen-wake-lock'); frame.referrerPolicy='no-referrer'; frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#000;';
     this.frame=frame; frame.addEventListener('load',this.boundFrameLoad); this.container.replaceChildren(frame); window.addEventListener('message',this.boundMessage);
-    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('Emülatör çekirdeği 75 saniye içinde başlamadı. İlk açılışta çekirdek indirilir; bağlantını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName,this.systemId,this.gameId,this.coreId,this.documentOptions); });
+    return new Promise((resolve,reject)=>{ this.resolveStart=resolve; this.rejectStart=reject; this.timer=window.setTimeout(()=>this.fail(new Error('Emülatör çekirdeği 75 saniye içinde başlamadı. İlk açılışta çekirdek indirilir; bağlantını kontrol edip yeniden dene.')),75000); frame.srcdoc=buildEmulatorDocument(this.romUrl,gameName,this.systemId,this.gameId,this.coreId,{ ...this.documentOptions, render: renderPreference() }); });
   }
   handleMessage(event) {
     if(!this.frame||event.source!==this.frame.contentWindow||!event.data||event.data.source!=='retroplay-emulatorjs')return;
@@ -311,7 +328,7 @@ export class EmulatorJsPlayer {
     const volume = typeof emu.volume === 'number' ? emu.volume : 0.7;
     this.releaseAllButtons();
     try {
-      try { emu.setVolume?.(0); } catch {}
+      try { setCoreVolume(emu, 0, { keep: true }); } catch {}
       try { gm.functions?.setVSync?.(0); } catch {}
       gm.setFastForwardRatio?.(0);
       gm.toggleFastForward(1);
@@ -331,7 +348,7 @@ export class EmulatorJsPlayer {
       // The player's own fast forward (if it was on) carries on after the measurement.
       try { gm.toggleFastForward(this.fastForward ? 1 : 0); } catch {}
       try { gm.functions?.setVSync?.(1); } catch {}
-      try { emu.setVolume?.(volume); } catch {}
+      try { setCoreVolume(emu, volume); } catch {}
     }
   }
   /** Switches the shader of the running game (display mode); returns false if it is not possible. */
@@ -341,13 +358,28 @@ export class EmulatorJsPlayer {
     try { emu.enableShader(safeShader(name)); return true; }
     catch (error) { try { this.onWarning(`Görüntü modu uygulanamadı: ${error?.message || error}`); } catch {} return false; }
   }
+  /** The software WebGL renderer the game is drawn with ('' with a GPU) and the line cap in use. */
+  renderInfo() {
+    const win = this.frame?.contentWindow;
+    return { software: String(win?.RETROPLAY_SOFTWARE_GL || ''), cap: Number(win?.RETROPLAY_CANVAS_CAP) || 0 };
+  }
   /** Sound volume 0–1 of the running game. */
   setVolume(value) {
     const emu = this.frame?.contentWindow?.EJS_emulator;
     const volume = Math.min(1, Math.max(0, Number(value)));
     if (!this.started || this.destroyed || typeof emu?.setVolume !== 'function' || !Number.isFinite(volume)) return false;
-    // EmulatorJS re-applies emu.volume when the game resumes, so both are set.
-    try { emu.volume = volume; emu.setVolume(volume); return true; } catch { return false; }
+    try { setCoreVolume(emu, volume); return true; } catch { return false; }
+  }
+  /**
+   * Starts the game's sound if the browser held it back (an audio context may only start after a
+   * tap or key press; the player's taps land on the page, not in the emulator frame).
+   */
+  resumeAudio() {
+    const emu = this.frame?.contentWindow?.EJS_emulator;
+    if (!this.started || this.destroyed || !emu?.Module) return;
+    for (const context of [emu.Module.RWA?.context, emu.Module.AL?.currentCtx?.audioCtx]) {
+      try { if (context && context.state === 'suspended') context.resume().catch(() => {}); } catch {}
+    }
   }
   /**
    * A PNG of the current frame as the core drew it (RetroArch screenshot, game resolution), or
@@ -511,6 +543,8 @@ export class EmulatorJsPlayer {
     document.removeEventListener('keydown', this.boundKeyDown);
     document.removeEventListener('keyup', this.boundKeyUp);
     window.removeEventListener('blur', this.boundBlur);
+    document.removeEventListener('pointerdown', this.boundWake, true);
+    document.removeEventListener('keydown', this.boundWake, true);
     this.frame?.removeEventListener('load', this.boundFrameLoad);
     this.frameWindow?.removeEventListener('keydown', this.boundKeyDown, true);
     this.frameWindow?.removeEventListener('keyup', this.boundKeyUp, true);

@@ -42,6 +42,8 @@ export class EmulatorJsPlayer {
   benchmark(options?: { seconds?: number; nominalFps?: number }): Promise<{ fps: number; headroom: number; frames: number; ms: number } | null>;
   setShader(name: string): boolean;
   setVolume(value: number): boolean;
+  resumeAudio(): void;
+  renderInfo(): { software: string; cap: number };
   screenshot(options?: { timeout?: number }): Promise<Blob | null>;
   restartGame(): boolean;
   fastForward: boolean;
