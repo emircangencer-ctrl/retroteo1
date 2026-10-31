@@ -40,13 +40,15 @@ jobs:
           # (their fork, 51f7667, Nov 2025): wasm function pointers are table indexes, often odd,
           # which PicoDrive's memory map stored shifted by one bit ("xmap_set: ptr is not
           # aligned", black screen); and libretro-common's mmap without address hints.
+          # Round 9 adds ym2612_read_local_z80's missing address parameter: wasm traps an
+          # indirect call whose signature differs ("function signature mismatch" in Cz80_Exec).
           - core: picodrive
             repo: https://github.com/EmulatorJS/picodrive.git
             commit: 09d3cb634c337aa3a1ed6575267d37bc1fdf064e
             makefile: Makefile.libretro
             make_args: use_libchdr=0 NO_ALIGN_FUNCTIONS=1
             keep_chd: true
-            patch: cores/picodrive/emscripten-function-pointers.patch
+            patch: cores/picodrive/emscripten-function-pointers.patch cores/picodrive/z80-handler-signatures.patch
             patch_exclude: Makefile.libretro
             license: COPYING
     steps:
@@ -78,10 +80,10 @@ jobs:
           fetch RetroArch "$RETROARCH_REPO" "$RETROARCH_COMMIT"
           fetch core "${{ matrix.repo }}" "${{ matrix.commit }}"
           git -C core submodule update -q --init --depth 1 || git -C core submodule update -q --init
-          if [ -n "${{ matrix.patch }}" ]; then
-            git -C core apply ${{ matrix.patch_exclude && format('--exclude={0}', matrix.patch_exclude) || '' }} "$GITHUB_WORKSPACE/retroplay/${{ matrix.patch }}"
-            echo "patched with ${{ matrix.patch }}"
-          fi
+          for p in ${{ matrix.patch }}; do
+            git -C core apply ${{ matrix.patch_exclude && format('--exclude={0}', matrix.patch_exclude) || '' }} "$GITHUB_WORKSPACE/retroplay/$p"
+            echo "patched with $p"
+          done
       - name: Build the core
         working-directory: core/${{ matrix.buildpath || '.' }}
         run: |

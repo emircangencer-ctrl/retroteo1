@@ -1,0 +1,15 @@
+diff --git a/pico/memory.c b/pico/memory.c
+index 19e613b..bece3b2 100644
+--- a/pico/memory.c
++++ b/pico/memory.c
+@@ -1282,7 +1282,9 @@ static int ym2612_write_local(u32 a, u32 d, int is_from_z80)
+ }
+ 
+ 
+-static u32 ym2612_read_local_z80(void)
++// wasm call_indirect checks the exact signature: this handler is reached
++// through z80_read_map as z80_read_f, so it must take the address argument.
++static u32 ym2612_read_local_z80(unsigned short a)
+ {
+   int xcycles = z80_cyclesDone() << 8;
+ 
