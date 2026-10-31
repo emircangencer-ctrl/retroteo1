@@ -405,7 +405,8 @@ await scenario('the performance meter measures the speed factor and normal play 
   await page.waitForTimeout(1000);
   await click(page, '#perf-test');
   const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 20000, interval: 300 });
-  assert.match(text || '', /Hız payı \d+,\d× \(\d+ kare\/sn\)/);
+  // (more than 999 frames a second are written with a thousands dot: "2.230 kare/sn")
+  assert.match(text || '', /Hız payı \d+,\d× \(\d{1,3}(?:\.\d{3})* kare\/sn\)/);
   const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
   assert.equal(history.length, 1);
   assert.ok(history[0].headroom > 1, `headroom ${history[0].headroom}`);
