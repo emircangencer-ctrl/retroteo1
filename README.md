@@ -189,6 +189,23 @@ settings brings the full panel back.
   all fingers. Each new press vibrates briefly (8 ms directions, 14 ms buttons; Android).
 - Menu, app switch and rotation lift every finger. The menu pauses the game and resumes it on
   close; the Android back button closes the menu first.
+- A tap is never lost (`src/input-latch.js`): a core reads its buttons once per frame, so a tap
+  whose press and release both fall between two frames (a quick tap while the phone draws a slow
+  frame) used to vanish — 20 of 20 in the E2E test before the change. Each button now changes at
+  most once every 2 core frames (the frame counter comes from the core); a quicker change waits,
+  in order, for the next frames. This covers every input (touch, controller, keyboard).
+- **Düğmeler** (menu → Kontroller ve oyuncular): a picture of the console's pad; one tap on a
+  button goes Normal → **Seri ateş** (turbo: held, it presses 2 frames down / 2 frames up, about
+  15 times a second, counted on the core's frames) → **Basılı tut** (one press holds it down, the
+  next lets go: running, accelerating) → Normal. Stored per game (`buttonModes` on the game
+  record), shown on the pad (SERİ / BASILI, a held button stays lit) and valid for every input.
+- **Tuşları yerleştir** (same menu, touch only): the menu steps aside over the paused game; one
+  finger drags the d-pad, the buttons or the Select/Start row, a second finger resizes the one
+  being dragged (70–150 %, or the size slider), Sıfırla restores RetroPlay's placement. Kept per pad
+  and orientation (`layouts` in the touch settings, offsets as a share of the screen) and always
+  inside the screen; in portrait never over the picture, in landscape a group over the picture
+  turns the Saydamlık setting on. A finger right on a drawn button presses it even where the
+  buttons were moved into the d-pad's reach.
 
 Controllers (`src/gamepad-input.js`): RetroPlay polls the Gamepad API once per frame and maps a
 standard controller by position like RetroArch (bottom = RetroPad B, right = A, left = Y, top = X,

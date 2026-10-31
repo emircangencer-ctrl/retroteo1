@@ -110,3 +110,57 @@ test('releaseAll lifts every finger (menu, app switch, rotation)', () => {
   ev('pointermove', 1, layout.dpad.cx, layout.dpad.cy + 50);
   assert.equal(held(), '-', 'a finger from before releaseAll is ignored until it touches again');
 });
+
+test('button modes are drawn on the pad; a held Basılı tut button stays lit', () => {
+  const root = fakeRoot();
+  let html = '';
+  Object.defineProperty(root, 'innerHTML', { set(value) { html = value; } });
+  const pad = new TouchController(root, {});
+  pad.setModes({ BUTTON_A: 'turbo', BUTTON_B: 'hold' });
+  pad.render(computeTouchLayout({ width: 393, height: 873, spec: PAD_SPECS.nes }));
+  assert.match(html, /data-input="BUTTON_A"[^>]*data-mode="turbo"/);
+  assert.match(html, /data-input="BUTTON_B"[^>]*data-mode="hold"/);
+  const el = { dataset: { input: 'BUTTON_B' }, classes: new Set(), classList: { toggle(name, on) { if (on) el.classes.add(name); else el.classes.delete(name); } } };
+  pad.buttonEls = [el];
+  pad.setLocked(['BUTTON_B']);
+  assert.deepEqual([...el.classes].sort(), ['is-locked', 'is-on']);
+  pad.setLocked([]);
+  assert.deepEqual([...el.classes], []);
+});
+
+test('a finger right on a face button presses it even inside the d-pad\'s reach (buttons moved next to it)', () => {
+  const { pad, ev, held } = setup();
+  const layout = pad.layout;
+  const B = layout.face[0];
+  // Move B into the d-pad's zone (as a placement could).
+  layout.face[0] = { ...B, cx: layout.dpad.cx + layout.dpad.r * 1.4, cy: layout.dpad.cy };
+  ev('pointerdown', 1, layout.face[0].cx, layout.face[0].cy);
+  assert.equal(held(), 'BUTTON_B');
+  ev('pointerup', 1, 0, 0);
+  ev('pointerdown', 2, layout.dpad.cx + layout.dpad.r * 0.7, layout.dpad.cy);
+  assert.equal(held(), 'BUTTON_RIGHT');
+});
+
+test('Tuşları yerleştir: a finger drags a group, a second finger pinches it; nothing reaches the game', () => {
+  const { pad, layout, ev, log } = setup();
+  const seen = [];
+  pad.startEdit({ begin: g => seen.push(`begin ${g}`), move: (g, c) => seen.push(`${g} ${Math.round(c.dx)},${Math.round(c.dy)} ×${c.scale.toFixed(2)}`), end: g => seen.push(`end ${g}`) });
+  const d = layout.dpad;
+  ev('pointerdown', 1, d.cx, d.cy);
+  ev('pointermove', 1, d.cx + 30, d.cy - 20);
+  ev('pointerup', 1, d.cx + 30, d.cy - 20);
+  const [B, A] = layout.face;
+  const mid = { x: (A.cx + B.cx) / 2, y: (A.cy + B.cy) / 2 };
+  ev('pointerdown', 2, mid.x, mid.y);
+  ev('pointerdown', 3, mid.x - 50, mid.y);
+  ev('pointermove', 3, mid.x - 75, mid.y);
+  ev('pointerup', 3, 0, 0);
+  ev('pointerup', 2, 0, 0);
+  ev('pointerdown', 4, 196, 120); // on the picture: nothing to take
+  ev('pointerup', 4, 196, 120);
+  assert.deepEqual(seen, ['begin dpad', 'dpad 30,-20 ×1.00', 'end dpad', 'begin face', 'face 0,0 ×1.50', 'end face']);
+  assert.deepEqual(log, [], 'no presses while editing');
+  pad.stopEdit();
+  ev('pointerdown', 5, d.cx, d.cy - d.r * 0.7);
+  assert.deepEqual(log, ['+BUTTON_UP'], 'back to playing');
+});

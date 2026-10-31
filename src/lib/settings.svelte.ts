@@ -66,8 +66,9 @@ class Settings {
     store(TOUCH_SETTINGS_KEY, this.touch);
   }
 
+  /** Default pad settings; the player's own button placement ("Tuşları yerleştir") stays. */
   resetTouch() {
-    this.touch = normalizeTouchSettings({});
+    this.touch = normalizeTouchSettings({ layouts: this.touch.layouts });
     store(TOUCH_SETTINGS_KEY, this.touch);
   }
 }

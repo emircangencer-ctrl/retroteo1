@@ -1,4 +1,5 @@
 import { RETROPLAY_SHADERS, DISPLAY_MODES, DISPLAY_SCALES, DISPLAY_FILTERS } from './display-modes.js';
+import { InputLatch } from './input-latch.js';
 // The runtime is served from RetroPlay's own origin (see scripts/emulatorjs-runtime.mjs). The build
 // injects the hashed bundle names; tests and unbundled use fall back to the fixed data path.
 /* global __EJS_RUNTIME__ */
@@ -68,6 +69,18 @@ const inputSlot = (player, index) => player * 32 + index;
  */
 export const MIN_SYSTEM_PRESS_MS = 100;
 const SYSTEM_INPUTS = new Set([EMULATORJS_INPUT_INDEX.BUTTON_SELECT, EMULATORJS_INPUT_INDEX.BUTTON_START]);
+/**
+ * Buttons that may get a mode of their own for a game: "turbo" (Seri ateş: fires repeatedly while
+ * held) or "hold" (Basılı tut: one press holds it down, the next lets go). Directions, Select and
+ * Start always act as pressed.
+ */
+export const MODE_BUTTONS = Object.freeze(['BUTTON_B', 'BUTTON_A', 'BUTTON_Y', 'BUTTON_X', 'BUTTON_L', 'BUTTON_R']);
+export function normalizeButtonModes(value) {
+  const out = {};
+  if (!value || typeof value !== 'object') return out;
+  for (const name of MODE_BUTTONS) if (value[name] === 'turbo' || value[name] === 'hold') out[name] = value[name];
+  return out;
+}
 const now = () => globalThis.performance?.now?.() ?? Date.now();
 const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD', 'arcade', 'mame']);
 const CORES_BY_SYSTEM = Object.freeze({
@@ -161,12 +174,12 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay EmulatorJS runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsPlayer {
-  constructor(container, { onError = () => {}, onWarning = () => {}, onHotkey = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled' } = {}) {
+  constructor(container, { onError = () => {}, onWarning = () => {}, onHotkey = () => {}, onLocks = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled' } = {}) {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
     this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
-    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.fastForward=false; this.rewinding=false; this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
+    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.onLocks=onLocks; this.holdIndexes=new Set(); this.locked=new Set(); this.latch=new InputLatch({ send: (slot, value) => this.frame?.contentWindow?.EJS_emulator?.gameManager?.simulateInput(Math.floor(slot / 32), slot % 32, value), frame: () => { const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager; return typeof gm?.getFrameNum === 'function' ? gm.getFrameNum() : null; }, schedule: fn => (typeof globalThis.requestAnimationFrame === 'function' ? globalThis.requestAnimationFrame(fn) : globalThis.setTimeout(fn, 16)) }); this.fastForward=false; this.rewinding=false; this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
   }
@@ -454,13 +467,48 @@ export class EmulatorJsPlayer {
     let sources = this.held.get(slot);
     if (!sources) {
       sources = new Set(); this.held.set(slot, sources);
-      const pending = this.releaseTimers.get(slot);
-      // Pressed again before a short press was let go: it simply stays down.
-      if (pending) { globalThis.clearTimeout(pending); this.releaseTimers.delete(slot); }
-      else { gm.simulateInput(port, index, 1); this.pressedAt.set(slot, now()); }
+      if (this.holdIndexes.has(index)) {
+        // Basılı tut: each new press switches the button between held and let go.
+        if (this.locked.has(slot)) { this.locked.delete(slot); this.latch.set(slot, 0); }
+        else { this.locked.add(slot); this.latch.set(slot, 1); }
+        this.#reportLocks();
+      } else {
+        const pending = this.releaseTimers.get(slot);
+        // Pressed again before a short press was let go: it simply stays down.
+        if (pending) { globalThis.clearTimeout(pending); this.releaseTimers.delete(slot); }
+        else { this.latch.set(slot, 1); this.pressedAt.set(slot, now()); }
+      }
     }
     sources.add(source);
   }
+  /**
+   * Button modes for this game: { BUTTON_A: 'turbo', BUTTON_B: 'hold' } (see MODE_BUTTONS). They
+   * act on every player and every input (touch, controller, keyboard).
+   */
+  setButtonModes(modes) {
+    const clean = normalizeButtonModes(modes);
+    const turbo = [], hold = new Set();
+    for (const [name, mode] of Object.entries(clean)) {
+      const index = INPUT_INDEX[name];
+      if (mode === 'hold') hold.add(index);
+      else for (let port = 0; port < EMULATORJS_PLAYERS; port++) turbo.push(inputSlot(port, index));
+    }
+    // A held button whose mode is no longer "hold" is let go (unless a finger is still on it).
+    for (const slot of [...this.locked]) {
+      if (hold.has(slot % 32)) continue;
+      this.locked.delete(slot);
+      if (!this.held.has(slot)) this.latch.set(slot, 0);
+    }
+    this.holdIndexes = hold;
+    this.latch.setTurbo(turbo);
+    this.buttonModes = clean;
+    this.#reportLocks();
+  }
+  /** Buttons Basılı tut holds down right now (player 1), as RetroPad names. */
+  lockedButtons() {
+    return Object.keys(INPUT_INDEX).filter(name => this.locked.has(inputSlot(0, INPUT_INDEX[name])));
+  }
+  #reportLocks() { try { this.onLocks(this.lockedButtons()); } catch {} }
   releaseButton(name, source = 'pointer', player = 0) {
     const index = INPUT_INDEX[name];
     if (index === undefined) return;
@@ -469,6 +517,8 @@ export class EmulatorJsPlayer {
     sources.delete(source);
     if (sources.size) return;
     this.held.delete(slot);
+    // Basılı tut: letting go of the button leaves it held; the next press lets go.
+    if (this.holdIndexes.has(index)) return;
     const left = SYSTEM_INPUTS.has(index) ? MIN_SYSTEM_PRESS_MS - (now() - (this.pressedAt.get(slot) ?? -Infinity)) : 0;
     if (left > 0) {
       this.releaseTimers.set(slot, globalThis.setTimeout(() => { this.releaseTimers.delete(slot); if (!this.held.has(slot)) this.#sendRelease(slot); }, left));
@@ -478,8 +528,7 @@ export class EmulatorJsPlayer {
   }
   #sendRelease(slot) {
     this.pressedAt.delete(slot);
-    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
-    if (gm) gm.simulateInput(Math.floor(slot / 32), slot % 32, 0);
+    this.latch.set(slot, 0);
   }
   /** A short press from an on-screen button (Jeton, Başla): down now, up after `ms`. */
   tapButton(name, ms = 140, player = 0) {
@@ -494,13 +543,14 @@ export class EmulatorJsPlayer {
     const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
     for (const timer of this.tapTimers) globalThis.clearTimeout(timer);
     this.tapTimers.clear();
-    const slots = new Set([...this.held.keys(), ...this.releaseTimers.keys()]);
+    const slots = new Set([...this.held.keys(), ...this.releaseTimers.keys(), ...this.locked, ...this.latch.reset()]);
     for (const timer of this.releaseTimers.values()) globalThis.clearTimeout(timer);
     this.releaseTimers.clear();
     if (gm) for (const slot of slots) gm.simulateInput(Math.floor(slot / 32), slot % 32, 0);
     this.held.clear();
     this.pressedAt.clear();
     this.keysDown.clear();
+    if (this.locked.size) { this.locked.clear(); this.#reportLocks(); }
   }
   destroy() {
     if (this.destroyed) return;

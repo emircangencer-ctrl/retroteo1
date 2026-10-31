@@ -53,6 +53,8 @@ export interface Game {
   nesCore?: string;
   /** NES / Mega Drive: the core chosen for this game ("… ile dene"), when it is not the default. */
   consoleCore?: string;
+  /** Button modes chosen for this game: Seri ateş ("turbo") or Basılı tut ("hold"), by RetroPad button. */
+  buttonModes?: Partial<Record<string, 'turbo' | 'hold'>>;
   unverifiedDumpAccepted?: boolean;
   restoredMetadataOnly?: boolean;
   // Faz 2

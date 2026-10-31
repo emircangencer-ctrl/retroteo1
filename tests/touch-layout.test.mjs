@@ -175,3 +175,70 @@ test('arcade pads follow the cabinet: FinalBurn Neo games get only their buttons
     assert.ok(big.face.every(b => b.r * 2 >= 60), `${buttons}-button cabinets get big buttons`);
   }
 });
+
+import { adjustLayout, normalizeAdjust, layoutGroups, layoutKey, LAYOUT_SCALE } from '../src/touch-layout.js';
+
+const inside = (box, b) => box.x >= b.x - 0.6 && box.y >= b.y - 0.6 && box.x + box.w <= b.x + b.w + 0.6 && box.y + box.h <= b.y + b.h + 0.6;
+
+test('Tuşları yerleştir: groups move and resize, and stay on screen, in portrait never over the picture', () => {
+  const sizes = [[393, 873], [360, 780], [412, 915], [768, 1024], [873, 393], [780, 360], [1024, 768]];
+  for (const [width, height] of sizes) {
+    for (const spec of [PAD_SPECS.nes, PAD_SPECS.snes, PAD_SPECS.md, PAD_SPECS.arcade6, PAD_SPECS.neogeo]) {
+      const base = computeTouchLayout({ width, height, spec, safe: { top: 24, bottom: 20 } });
+      // Pushed far in every direction and to the size limits: everything is clamped inside the bounds.
+      for (const push of [-1, 1]) {
+        const layout = adjustLayout(base, { dpad: { x: push, y: push, s: 9 }, face: { x: -push, y: push, s: 0.1 }, system: { x: push, y: -push } });
+        for (const { group, box } of layoutGroups(layout)) {
+          assert.ok(inside(box, base.bounds), `${spec.id} ${width}×${height} ${group} inside the bounds`);
+          if (base.orientation === 'portrait') assert.ok(box.y >= base.screen.y + base.screen.h, `${spec.id} ${group} below the picture`);
+        }
+        assert.equal(layout.adjust.dpad.s, LAYOUT_SCALE.max);
+        assert.equal(layout.adjust.face.s, LAYOUT_SCALE.min);
+        // Applying the placement that was actually used gives the same layout again (no drift).
+        const again = adjustLayout(base, layout.adjust);
+        const drift = Math.max(Math.abs(again.dpad.cx - layout.dpad.cx), Math.abs(again.dpad.cy - layout.dpad.cy), Math.abs(again.face[0].cx - layout.face[0].cx), Math.abs(again.face[0].cy - layout.face[0].cy));
+        assert.ok(drift <= 0.5, `${spec.id} ${width}×${height}: stored placement drifts ${drift} px`);
+      }
+    }
+  }
+});
+
+test('Tuşları yerleştir: a placement moves the d-pad zone and the buttons\' reach with them', () => {
+  const base = computeTouchLayout({ width: 393, height: 873, spec: PAD_SPECS.snes });
+  const layout = adjustLayout(base, { dpad: { x: 0.05, y: -0.04, s: 1.2 }, face: { x: -0.1, y: 0.02, s: 1.25 } });
+  assert.equal(layout.dpad.r, Math.round(base.dpad.r * 1.2 * 10) / 10);
+  assert.deepEqual([layout.dpad.zone.cx, layout.dpad.zone.cy], [layout.dpad.cx, layout.dpad.cy]);
+  assert.ok(Math.abs(layout.dpad.cx - base.dpad.cx - 0.05 * 393) < 0.6);
+  assert.ok(layout.face.every((b, i) => Math.abs(b.r - base.face[i].r * 1.25) < 0.6), 'buttons resized');
+  for (const b of layout.face) assert.ok(b.cx - b.r >= layout.faceArea.x && b.cx + b.r <= layout.faceArea.x + layout.faceArea.w, 'a touch on a moved button starts as a button touch');
+  // No placement: the layout is RetroPlay's own.
+  const plain = adjustLayout(base, null);
+  assert.deepEqual([plain.dpad.cx, plain.face[0].cx, plain.system[0].x], [base.dpad.cx, base.face[0].cx, base.system[0].x]);
+});
+
+test('Tuşları yerleştir: placements are kept per pad and orientation, cleaned when read back', () => {
+  assert.equal(layoutKey('snes', 'landscape'), 'snes:landscape');
+  const s = normalizeTouchSettings({ layouts: {
+    'nes:portrait': { dpad: { x: 0.1, y: '-0.2', s: 1.2 }, face: { s: 5 }, junk: 1 },
+    'nes:landscape': { dpad: { x: 0, y: 0, s: 1 } }, // no change: not stored
+    '<script>:portrait': { dpad: { x: 0.1 } },
+    'snes:sideways': { dpad: { x: 0.1 } }
+  } });
+  assert.deepEqual(Object.keys(s.layouts), ['nes:portrait']);
+  assert.deepEqual(s.layouts['nes:portrait'], { dpad: { x: 0.1, y: -0.2, s: 1.2 }, face: { x: 0, y: 0, s: LAYOUT_SCALE.max }, system: { x: 0, y: 0, s: 1 } });
+  assert.deepEqual(normalizeAdjust({ system: { s: 2 } }).system, { x: 0, y: 0, s: 1 }, 'the Select/Start row only moves');
+  assert.deepEqual(normalizeTouchSettings({}).layouts, {});
+});
+
+test('landscape: a group moved over the picture makes the pad see-through there', () => {
+  const base = computeTouchLayout({ width: 873, height: 393, spec: PAD_SPECS.nes });
+  assert.equal(base.overlay, false);
+  const layout = adjustLayout(base, { face: { x: -0.2, y: 0, s: 1 } });
+  assert.equal(layout.overlay, true);
+  // Select and Start sit on both sides of the picture: a small move elsewhere keeps the pad solid,
+  // and the editor frames the pair button by button (not across the picture).
+  assert.equal(adjustLayout(base, { dpad: { x: 0.01, y: -0.05, s: 1 }, system: { y: -0.05 } }).overlay, false);
+  const system = layoutGroups(base).find(g => g.group === 'system');
+  assert.equal(system.parts.length, 2);
+  assert.ok(system.parts.every(p => !(p.x < base.screen.x + base.screen.w && base.screen.x < p.x + p.w)), 'no frame over the picture');
+});
