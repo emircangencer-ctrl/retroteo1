@@ -47,6 +47,17 @@ jobs:
             commit: 7cbcd419b7acc2286b7a8bcd15776b5444ffff28
             makefile: Makefile.libretro
             license: COPYING
+          - core: snes9x
+            repo: https://github.com/EmulatorJS/snes9x.git
+            commit: 6ca2343e5f3b0acbea49ca958251e3a0af58a81d
+            makefile: Makefile
+            buildpath: libretro
+            license: LICENSE
+          - core: fceumm
+            repo: https://github.com/EmulatorJS/libretro-fceumm.git
+            commit: d9d7e141274d07186b6a871ca2919b6f13cfb2f9
+            makefile: Makefile.libretro
+            license: Copying
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
@@ -73,12 +84,13 @@ jobs:
           fetch core "${{ matrix.repo }}" "${{ matrix.commit }}"
           git -C core submodule update -q --init --depth 1 || git -C core submodule update -q --init
       - name: Build the core
-        working-directory: core
+        working-directory: core/${{ matrix.buildpath || '.' }}
         run: |
-          source ../emsdk/emsdk_env.sh >/dev/null
+          source "$GITHUB_WORKSPACE/emsdk/emsdk_env.sh" >/dev/null
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
           emmake make -f ${{ matrix.makefile }} -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 10 | sed 's/^/::error::/'; tail -n 40 build.log; exit 1; }
           ls -la *.bc
+          cp *_emscripten.bc "$GITHUB_WORKSPACE/core.bc.d/" 2>/dev/null || { mkdir -p "$GITHUB_WORKSPACE/core.bc.d" && cp *_emscripten.bc "$GITHUB_WORKSPACE/core.bc.d/"; }
       - name: Link three ways (WebGL 2 and WebGL 1 each)
         working-directory: RetroArch/emulatorjs
         run: |
@@ -89,13 +101,18 @@ jobs:
           sed -i 's/^  async=1$/  async=${RP_ASYNC:-1}/' build-emulatorjs.sh
           sed -i 's/-f Makefile.emulatorjs HAVE_CHD=/-f Makefile.emulatorjs MIN_ASYNC=${RP_MIN_ASYNC:-0} HAVE_AL=${RP_AL:-1} HAVE_RWEBAUDIO=${RP_RWEB:-0} HAVE_CHD=/' build-emulatorjs.sh
           sed -i 's/^   override ASYNC = 1$/   # (RetroPlay experiment) OpenAL without forcing full Asyncify/' ../Makefile.emulatorjs
+          # RetroArch's Web Audio driver is not wired into EmulatorJS builds at this commit
+          printf '\nifeq ($(EMULATORJS), 1)\nifeq ($(HAVE_RWEBAUDIO), 1)\nOBJ += audio/drivers/rwebaudio.o\nendif\nendif\n' >> ../Makefile.common
+          # PicoDrive brings its own libchdr: RetroArch's CHD support would clash with it
+          sed -i 's/^noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed")$/noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed" "picodrive")/' build-emulatorjs.sh
+          grep -n '^noCHD' build-emulatorjs.sh
           grep -n 'RP_ASYNC\|RP_MIN_ASYNC' build-emulatorjs.sh | head -n 3
           grep -c 'RetroPlay experiment' ../Makefile.emulatorjs
           set -o pipefail
           OUT="$GITHUB_WORKSPACE/out"; mkdir -p "$OUT"
           link() {
             local variant="$1"; shift
-            cp ../../core/*_emscripten.bc .
+            cp "$GITHUB_WORKSPACE"/core.bc.d/*_emscripten.bc .
             emmake ./build-emulatorjs.sh --clean "$@" > "link-$variant.log" 2>&1 || { grep -iE "error" "link-$variant.log" | head -n 10 | sed 's/^/::error::/'; tail -n 30 "link-$variant.log"; return 1; }
             grep -E "^ASYNC|BUILD COMMAND" "link-$variant.log" | head -n 2
             local legacy=""; for a in "$@"; do [ "$a" = --legacy ] && legacy="-legacy"; done
@@ -113,7 +130,7 @@ jobs:
           cd out
           printf '{"name":"%s","options":{},"save":"srm","repo":"%s","commit":"%s"}' "${{ matrix.core }}" "${{ matrix.repo }}" "${{ matrix.commit }}" > core.json
           printf '{\n    "minimumEJSVersion": "4.2.2",\n    "version": "2.0.2"\n}\n' > build.json
-          cp "../core/${{ matrix.license }}" license.txt
+          cp "../core/${{ matrix.license }}" license.txt 2>/dev/null || echo "see ${{ matrix.repo }}" > license.txt
           for f in *-wasm.data; do 7z a -t7z "$f" core.json license.txt build.json >/dev/null; done
           rm core.json build.json license.txt
           sha256sum * | tee SHA256SUMS
