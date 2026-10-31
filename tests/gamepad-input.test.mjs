@@ -124,3 +124,13 @@ test('buttons already held when polling starts (the one that closed the menu) wa
   assert.deepEqual(p.changes, ['+BUTTON_A -'], 'a new press works');
   p.poller.stop();
 });
+
+test('controller speed shortcuts: R2 fast forward, L2 rewind on consoles; arcade boards keep L2/R2', async () => {
+  const { speedShortcut } = await import('../src/gamepad-input.js');
+  assert.equal(speedShortcut('BUTTON_R2'), 'fastForward');
+  assert.equal(speedShortcut('BUTTON_L2'), 'rewind');
+  assert.equal(speedShortcut('BUTTON_A'), null);
+  assert.equal(speedShortcut('BUTTON_R'), null);
+  assert.equal(speedShortcut('BUTTON_R2', { arcade: true }), null);
+  assert.equal(speedShortcut('BUTTON_L2', { arcade: true }), null);
+});

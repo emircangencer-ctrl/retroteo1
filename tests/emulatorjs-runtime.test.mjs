@@ -51,7 +51,7 @@ test('every shipped core and the runtime are pinned to 4.2.3 with sha512 integri
   assert.equal(EJS_VERSION, '4.2.3');
   assert.equal(DATA_PATH, '/emulatorjs/4.2.3/data/');
   for (const key of ['emulatorjs', ...CORES]) assert.match(PACKAGES[key]?.integrity || '', /^sha512-[A-Za-z0-9+/]{86}==$/, key);
-  assert.deepEqual([...PRECACHED_CORES].sort(), ['genesis_plus_gx', 'nestopia', 'snes9x']);
+  assert.deepEqual([...PRECACHED_CORES].sort(), ['fceumm', 'picodrive', 'snes9x']);
   assert.ok(CORES.includes('fbneo') && CORES.includes('mame2003_plus') && CORES.includes('fbalpha2012_cps2'));
 });
 

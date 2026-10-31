@@ -99,6 +99,29 @@ The build stamps a build ID into the service worker, so every release installs a
 never takes over on its own: the app shows **Yeni sürüm hazır · Yenile** (never over a running
 game) and reloads when the player taps it.
 
+## Cores and speed
+
+| System | Starts with | Offered when it cannot open the game |
+|---|---|---|
+| NES | FCEUmm (common boards), Nestopia (unusual boards) | the other one |
+| Super Nintendo | Snes9x | — |
+| Mega Drive | PicoDrive | Genesis Plus GX |
+| Arcade | FinalBurn Neo / FB Alpha 2012 CPS2 / MAME 2003-Plus (by set) | the next core that knows the set |
+
+- FCEUmm and PicoDrive run about twice as fast as Nestopia and Genesis Plus GX (measured on a CPU
+  slowed 8×, as on a TV box), which matters on TVs and older phones. Unusual NES boards keep
+  Nestopia first because a core given a board it does not know can crash the page instead of
+  failing (`FAST_NES_MAPPERS` in `src/player/launch.ts`).
+- In-game saves (battery RAM) are the same file for both cores of a system (checked both ways for
+  NES and Mega Drive); save states are not, so a game whose latest save state was made with the
+  other core starts with that core, and a core chosen with "… ile dene" is remembered.
+- Rewind keeps a state every 2nd frame (every 6th on a TV: about a third of the work).
+- Measured and left out: RetroArch builds without Asyncify (about 20 % faster but the game froze
+  in about one start in six with the 4.2.3 audio driver), auto frameskip and PicoDrive's fast
+  renderer (small gains or less accurate pictures), Snes9x 2010 (crashed while loading with the
+  4.2.3 toolchain), multi-core emulation (no gain). `.github/workflows/cores-speed.yml` rebuilds
+  the measurement cores.
+
 ## Playing
 
 1. **Oyun ekle**: choose files, a ZIP of console ROMs, an arcade set zip or a whole folder

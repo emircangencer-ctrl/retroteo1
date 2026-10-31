@@ -3,7 +3,8 @@
 // offline and are never fetched twice. The bucket is separate from the app's IndexedDB: the library
 // database is not touched, older app versions simply do not see it, and the service worker does not
 // clear it on updates. A game with no picture is remembered for this version of the lists; a newer
-// list looks again. Network problems are not remembered: the next start tries again.
+// list looks again. Network problems (and answers that are not pictures) are not remembered: the
+// next start tries again.
 import { matchCover, romChecksums, coverSets } from './covers.ts';
 import { settings } from './settings.svelte.ts';
 import type { Game } from './types.ts';
@@ -11,8 +12,12 @@ import type { Game } from './types.ts';
 export const COVER_CACHE = 'retroplay-covers-v1';
 /** Pictures are kept this wide (cards are at most ~200 CSS px; 2× for sharp screens). */
 export const COVER_WIDTH = 320;
-/** Changes whenever the lists in /assets/covers change (vite.config.js). */
-export const COVER_LISTS = typeof __COVER_LISTS__ === 'string' ? __COVER_LISTS__ : 'dev';
+/**
+ * Changes whenever the lists in /assets/covers change (vite.config.js). The suffix makes every game
+ * remembered without a cover be looked up once more: "2" after the TV app before 1.1, whose blocked
+ * requests were taken for "no cover".
+ */
+export const COVER_LISTS = `${typeof __COVER_LISTS__ === 'string' ? __COVER_LISTS__ : 'dev'}:2`;
 const CHECKSUM_LIMIT = 16 * 1024 * 1024;
 const PARALLEL = 2;
 const keyOf = (id: string) => `/__covers/${encodeURIComponent(id)}`;
@@ -175,9 +180,15 @@ class CoverArt {
     try { response = await fetch(match.url, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer' }); }
     catch { return; } // offline or blocked: next start
     if (response.status === 404) { await this.#noPicture(game.id); return; }
-    if (!response.ok) return; // server trouble: next start
+    // Server trouble, or an answer that is not a picture (a blocked request — the TV app before 1.1 —
+    // a captive portal): nothing is remembered, the next start tries again.
+    if (!response.ok || response.status === 204) return;
+    const type = response.headers.get('content-type') || '';
+    let download: Blob;
+    try { download = await response.blob(); } catch { return; }
+    if (!download.size || (type && !type.startsWith('image/'))) return;
     try {
-      const { blob, tone } = await shrinkCover(await response.blob());
+      const { blob, tone } = await shrinkCover(download);
       if (this.#dropped.has(game.id)) return;
       await this.#store(game.id, blob, { 'content-type': blob.type, 'x-retroplay-cover': match.url, 'x-retroplay-tone': tone });
       this.#show(game.id, blob, tone);

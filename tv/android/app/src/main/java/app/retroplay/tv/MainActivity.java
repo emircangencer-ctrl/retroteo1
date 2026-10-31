@@ -247,14 +247,23 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
     }
 
     /** https://<site>/__tv/inbox/<id> → the uploaded file (read by the page with fetch). */
+    /** Box art and title screens from libretro-thumbnails on GitHub (src/lib/covers.ts in the web app). */
+    static boolean isCoverPicture(Uri url) {
+        String path = url.getPath();
+        return "https".equals(url.getScheme()) && "raw.githubusercontent.com".equals(url.getHost())
+            && path != null && path.startsWith("/libretro-thumbnails/") && !path.contains("..");
+    }
+
     WebResourceResponse intercept(Uri url) {
         if (url == null) return null;
         Map<String, String> headers = new HashMap<>();
         headers.put("Cache-Control", "no-store");
         String scheme = url.getScheme();
         if (!origin.equals(originOf(url))) {
-            // RetroPlay needs nothing from other sites on the TV; this also keeps out the toolbar
-            // Netlify adds to deploy previews, which would cover the bottom of the screen.
+            // Cover pictures: the page fetches a game's box art once from libretro-thumbnails.
+            if (isCoverPicture(url)) return null;
+            // Nothing else from other sites on the TV; this also keeps out the toolbar Netlify adds
+            // to deploy previews, which would cover the bottom of the screen.
             if ("http".equals(scheme) || "https".equals(scheme)) return new WebResourceResponse("text/plain", "utf-8", 204, "No Content", headers, new ByteArrayInputStream(new byte[0]));
             return null;
         }

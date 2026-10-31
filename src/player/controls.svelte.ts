@@ -3,7 +3,7 @@
 // (session.svelte.ts) owns the emulator; it hands this part what it needs through ControlsHost.
 import { TouchController } from '../touch-controller.js';
 import { computeTouchLayout, padSpecFor } from '../touch-layout.js';
-import { GamepadPoller } from '../gamepad-input.js';
+import { GamepadPoller, speedShortcut } from '../gamepad-input.js';
 import { PadPlayers, playerCount, padName, type PadPlayer } from '../players.js';
 import { inspectGamepads, describeGamepads } from '../gamepad-status.js';
 import { arcadeLayout } from '../arcade.js';
@@ -24,6 +24,9 @@ export interface ControlsHost {
   fitPicture(): void;
   toggleMenu(): void;
   showNotice(text: string, options?: { timeout?: number }): void;
+  /** Controller speed shortcuts (R2, L2 held) on consoles. */
+  toggleFastForward(): void;
+  setRewinding(active: boolean): void;
 }
 
 export class PlayerControls {
@@ -171,8 +174,16 @@ export class PlayerControls {
         // Each controller is a player, in the order they are connected (players.js).
         playerFor: (pad, active) => this.#pads.playerFor(pad, { active, count: this.#playerCount }),
         onChange: (pressed: string[], released: string[], player: number) => {
-          for (const name of released) this.#host.releaseButton(name, 'gamepad', player);
-          for (const name of pressed) this.#host.pressButton(name, 'gamepad', player);
+          for (const name of released) {
+            if (speedShortcut(name, { arcade: this.isArcade }) === 'rewind') this.#host.setRewinding(false);
+            else if (!speedShortcut(name, { arcade: this.isArcade })) this.#host.releaseButton(name, 'gamepad', player);
+          }
+          for (const name of pressed) {
+            const shortcut = speedShortcut(name, { arcade: this.isArcade });
+            if (shortcut === 'fastForward') this.#host.toggleFastForward();
+            else if (shortcut === 'rewind') this.#host.setRewinding(true);
+            else this.#host.pressButton(name, 'gamepad', player);
+          }
         },
         // Player 1's controller takes over from the touch pad; another player's does not.
         onActivity: (player: number) => { if (player === 0) this.#setPadInUse(true); },

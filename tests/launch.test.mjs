@@ -10,14 +10,27 @@ const deps = (extra = {}) => {
   return { urls, games: [], getBios: async () => null, arcadeSetCatalog: async () => null, readZipDirectory: async () => [], makeUrl: b => { urls.push(b); return `blob:${urls.length}`; }, revokeUrl: () => {}, ...extra };
 };
 
-test('NES: Nestopia first, FCEUmm offered next; a remembered FCEUmm or ?nescore=fceumm goes first', async () => {
-  const game = { id: 'g', title: 'Game', platform: 'NES', blob: blob() };
-  assert.deepEqual((await resolveLaunch(game, NES, {}, deps())).cores.map(c => c.coreId), ['nestopia', 'fceumm']);
-  assert.deepEqual((await resolveLaunch({ ...game, nesCore: 'fceumm' }, NES, {}, deps())).cores.map(c => c.coreId), ['fceumm', 'nestopia']);
-  const forced = await resolveLaunch(game, NES, {}, deps({ forcedNesCore: 'fceumm' }));
-  assert.deepEqual(forced.cores.map(c => c.coreId), ['fceumm']);
+test('NES: the faster FCEUmm first on the common boards, Nestopia offered next; unusual boards keep Nestopia first', async () => {
+  const game = { id: 'g', title: 'Game', platform: 'NES', blob: blob(), romValidation: { valid: true, mapper: 4 } };
+  assert.deepEqual((await resolveLaunch(game, NES, {}, deps())).cores.map(c => c.coreId), ['fceumm', 'nestopia']);
+  assert.deepEqual((await resolveLaunch({ ...game, romValidation: { valid: true, mapper: 220 } }, NES, {}, deps())).cores.map(c => c.coreId), ['nestopia', 'fceumm'], 'a board FCEUmm may crash on');
+  assert.deepEqual((await resolveLaunch({ ...game, romValidation: null }, NES, {}, deps())).cores.map(c => c.coreId), ['nestopia', 'fceumm'], 'board unknown');
+  assert.deepEqual((await resolveLaunch({ ...game, nesCore: 'nestopia' }, NES, {}, deps())).cores.map(c => c.coreId), ['nestopia', 'fceumm'], 'chosen for the game');
+  assert.deepEqual((await resolveLaunch(game, NES, { stateCore: 'nestopia' }, deps())).cores.map(c => c.coreId), ['nestopia', 'fceumm'], 'its save states were made with Nestopia');
+  const forced = await resolveLaunch(game, NES, {}, deps({ forcedNesCore: 'nestopia' }));
+  assert.deepEqual(forced.cores.map(c => c.coreId), ['nestopia']);
   assert.match(forced.cores[0].label, /karşılaştırma/);
-  assert.deepEqual((await resolveLaunch(game, NES, { coreOverride: 'fceumm' }, deps())).cores.map(c => c.coreId), ['fceumm'], '"FCEUmm ile dene" starts only FCEUmm');
+  assert.deepEqual((await resolveLaunch(game, NES, { coreOverride: 'nestopia' }, deps())).cores.map(c => c.coreId), ['nestopia'], '"Nestopia ile dene" starts only Nestopia');
+});
+
+test('Mega Drive: PicoDrive first, Genesis Plus GX offered next; a game keeps the core of its save states', async () => {
+  const MD = { shortLabel: 'Mega Drive', emulatorJsCoreId: 'segaMD', emulatorJsSystemId: 'segaMD' };
+  const game = { id: 'm', title: 'Game', platform: 'MD', blob: blob() };
+  const launch = await resolveLaunch(game, MD, {}, deps());
+  assert.deepEqual(launch.cores.map(c => [c.coreId, c.systemId, c.name]), [['picodrive', 'segaMD', 'PicoDrive'], ['genesis_plus_gx', 'segaMD', 'Genesis Plus GX']]);
+  assert.deepEqual((await resolveLaunch(game, MD, { stateCore: 'genesis_plus_gx' }, deps())).cores.map(c => c.coreId), ['genesis_plus_gx', 'picodrive']);
+  assert.deepEqual((await resolveLaunch({ ...game, consoleCore: 'genesis_plus_gx' }, MD, { stateCore: 'picodrive' }, deps())).cores.map(c => c.coreId), ['genesis_plus_gx', 'picodrive'], 'a chosen core wins');
+  assert.deepEqual((await resolveLaunch(game, MD, { stateCore: 'snes9x' }, deps())).cores.map(c => c.coreId), ['picodrive', 'genesis_plus_gx'], 'a state of another system is ignored');
 });
 
 test('arcade: a missing BIOS blocks before any core loads and names the file', async () => {
@@ -60,7 +73,8 @@ test('a set missing only its CPS2 key is explained, not started', async () => {
 });
 
 test('the core that opened a game is remembered with it', () => {
-  assert.equal(rememberCore({ id: 'n', title: 'N', platform: 'NES' }, 'fceumm').nesCore, 'fceumm');
+  assert.equal(rememberCore({ id: 'n', title: 'N', platform: 'NES' }, 'nestopia').nesCore, 'nestopia');
+  assert.equal(rememberCore({ id: 'm', title: 'M', platform: 'MD' }, 'genesis_plus_gx').consoleCore, 'genesis_plus_gx');
   const arcade = rememberCore({ id: 'a', title: 'A', platform: 'ARCADE', arcade: { core: 'fbneo', set: 'a', status: 'complete', missing: [], alternatives: [{ core: 'mame2003_plus', set: 'am', status: 'complete' }] } }, 'mame2003_plus');
   assert.deepEqual([arcade.arcade.core, arcade.arcade.set, arcade.arcade.alternatives[0].core], ['mame2003_plus', 'am', 'fbneo']);
 });

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, coverRequests, recordInputs, heldInputs, touchScreen, padGeometry, gameId } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
 
@@ -27,6 +27,8 @@ const twoPlayersRom = path.join(tmp, 'two players.nes');
 fs.writeFileSync(twoPlayersRom, twoPlayerRom());
 const colourRom = path.join(tmp, 'colour cycle.nes');
 fs.writeFileSync(colourRom, colourCycleRom());
+const mdSramRom = path.join(tmp, 'md battery.md');
+fs.writeFileSync(mdSramRom, megaDriveSramRom());
 // Cover art: a self-made cartridge that carries the No-Intro checksum of Super Mario Bros. (World)
 // under a meaningless file name, one named like a No-Intro release, and one nothing matches.
 const coverDir = path.join(tmp, 'covers');
@@ -114,6 +116,8 @@ async function scenario(name, fn, options = {}) {
   } catch (error) {
     results.push({ name, ok: false, error });
     console.log(`FAIL ${name}\n     ${error?.stack || error}\n     ${logs.slice(-5).join('\n     ')}`);
+    // On GitHub the failure is also an annotation, readable on the pull request without the log.
+    if (process.env.GITHUB_ACTIONS) console.log(`::error title=E2E FAIL::${name} — ${String(error?.message || error).replace(/\s+/g, ' ').slice(0, 600)}`);
   } finally {
     await context.close();
   }
@@ -401,17 +405,18 @@ await scenario('the performance meter measures the speed factor and normal play 
   await page.waitForTimeout(1000);
   await click(page, '#perf-test');
   const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 20000, interval: 300 });
-  assert.match(text || '', /Hız payı \d+,\d× \(\d+ kare\/sn\)/);
+  // (more than 999 frames a second are written with a thousands dot: "2.230 kare/sn")
+  assert.match(text || '', /Hız payı \d+,\d× \(\d{1,3}(?:\.\d{3})* kare\/sn\)/);
   const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
   assert.equal(history.length, 1);
   assert.ok(history[0].headroom > 1, `headroom ${history[0].headroom}`);
-  assert.equal(history[0].core, 'nestopia');
+  assert.equal(history[0].core, 'fceumm', 'the faster NES core');
   const fastForward = await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.isFastForward);
   assert.equal(Boolean(fastForward), false, 'fast-forward is off again');
   await closeGame(page);
   await page.evaluate(() => { location.hash = '#/settings'; });
   await page.waitForSelector('#perf-history');
-  assert.match(await page.evaluate(() => document.querySelector('#perf-history').textContent), /checkerboard · NES\/nestopia/);
+  assert.match(await page.evaluate(() => document.querySelector('#perf-history').textContent), /checkerboard · NES\/fceumm/);
 // Headless Chromium draws WebGL in software (SwiftShader), where the speed depends on the canvas size
 // far more than on any device: a ~800×600 picture keeps this a test of the meter, not of the machine.
 }, { viewport: { width: 1060, height: 680 } });
@@ -897,6 +902,74 @@ await scenario('cover art: found by ROM checksum or name, fetched once, kept on 
   await waitFor(async () => (await page.evaluate(async () => (await (await caches.open('retroplay-covers-v1')).keys()).length)) === 3);
 });
 
+await scenario('faster cores: a new Mega Drive game runs on PicoDrive, a new NES game on FCEUmm; an in-game save carries over to the other core', async page => {
+  const core = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.getCore());
+  const counter = async () => { const save = await waitFor(async () => (await appBatterySaves(page)).find(s => s.byteLength >= 2) || null); return save.bytes[1]; };
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  assert.equal(await core(), 'fceumm');
+  await closeGame(page);
+  await importFile(page, mdSramRom);
+  let state = await play(page, 'md battery');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Mega Drive/, state.error);
+  assert.equal(await core(), 'picodrive');
+  await page.waitForTimeout(1500);
+  await closeGame(page);
+  const first = await counter();
+  // Started with Genesis Plus GX ("… ile dene" remembers it): the app's copy of the save goes in, the cartridge counts on.
+  const id = await gameId(page, 'md battery');
+  await page.evaluate(id => new Promise((resolve, reject) => { const r = indexedDB.open('retroplay-local-v1'); r.onsuccess = () => { const tx = r.result.transaction('games', 'readwrite'); const store = tx.objectStore('games'); const get = store.get(id); get.onsuccess = () => { store.put({ ...get.result, consoleCore: 'genesis_plus_gx' }); }; tx.oncomplete = () => { r.result.close(); resolve(); }; tx.onerror = () => reject(tx.error); }; }), id);
+  await page.reload({ waitUntil: 'networkidle' });
+  state = await play(page, 'md battery');
+  assert.equal(await core(), 'genesis_plus_gx');
+  await page.waitForTimeout(1500);
+  await closeGame(page);
+  const second = await waitFor(async () => { const value = await counter(); return value === ((first + 1) & 255) ? value : null; });
+  assert.equal(second, (first + 1) & 255, `Genesis Plus GX continued PicoDrive's save (${first} → ${second})`);
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('a blocked cover request (the old TV app) or a page instead of a picture is tried again later, not remembered as "no cover"', async page => {
+  let answered = 0;
+  const pictures = () => page.evaluate(() => document.querySelectorAll('#library-games [data-cover="picture"] img').length);
+  const stored = () => page.evaluate(async () => (await (await caches.open('retroplay-covers-v1')).keys()).length);
+  await page.route('https://raw.githubusercontent.com/**', route => { answered++; return route.fulfill({ status: 204, body: '' }); });
+  await importFile(page, byNameRom);
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(() => answered > 0, { timeout: 10000 });
+  await page.waitForTimeout(600);
+  assert.deepEqual([await pictures(), await stored()], [0, 0], 'an empty answer stores nothing');
+  await page.unroute('https://raw.githubusercontent.com/**');
+  await page.route('https://raw.githubusercontent.com/**', route => { answered++; return route.fulfill({ status: 200, headers: { 'content-type': 'text/html' }, body: '<html>Wi-Fi giriş sayfası</html>' }); });
+  const first = answered;
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(() => answered > first, { timeout: 10000 });
+  await page.waitForTimeout(600);
+  assert.deepEqual([await pictures(), await stored()], [0, 0], 'a page instead of a picture stores nothing');
+  // Next start with a working connection: the cover comes.
+  await page.unroute('https://raw.githubusercontent.com/**');
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(async () => (await pictures()) === 1, { timeout: 15000 });
+  assert.equal(await stored(), 1);
+});
+
+await scenario('controller R2 / L2 on an arcade board go to the game, not to fast forward or rewind', async page => {
+  await importFile(page, puckmanZip);
+  await play(page, 'Puck Man');
+  await recordInputs(page);
+  await page.evaluate(() => { window.__padOn = true; window.__pad.timestamp++; });
+  await page.waitForTimeout(500);
+  const set = (i, on) => page.evaluate(([i, on]) => { window.__pad.buttons[i] = { pressed: on, touched: on, value: on ? 1 : 0 }; window.__pad.timestamp++; }, [i, on]);
+  await set(7, true);
+  await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(() => document.querySelector('#play-ff').getAttribute('aria-pressed')), 'false');
+  assert.ok(await page.evaluate(() => window.__inputs.some(([index, value]) => index === 13 && value)), 'R2 reaches the arcade core');
+  await set(7, false);
+  await page.waitForTimeout(300);
+  assert.ok(await page.evaluate(() => window.__inputs.some(([index, value]) => index === 13 && !value)), 'and is released there');
+}, { init: fakePad });
+
 await scenario('fast forward and rewind on the real core: ⏩ and Space speed it up (up to 3×), ⏪ and Backspace held run time backwards', async page => {
   await importFile(page, colourRom);
   const state = await play(page, 'colour cycle');
@@ -1351,6 +1424,20 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   await page.evaluate(pads => { window.__tv.pads = pads; window.__tv.version++; }, [tvPad([]), tvPad([], 1, 'Second Pad')]);
   await page.waitForTimeout(250);
   assert.equal(await page.evaluate(() => window.__inputs.at(-1).join()), '8,0,1');
+  // Speed on the TV (the bar is out of the remote's reach): R2 switches fast forward, L2 held rewinds.
+  const ff = () => page.evaluate(() => document.querySelector('#play-ff').getAttribute('aria-pressed'));
+  const rw = () => page.evaluate(() => document.querySelector('#play-rewind').getAttribute('aria-pressed'));
+  const tvPress = async buttons => { await page.evaluate(pad => { window.__tv.pads = [pad]; window.__tv.version++; }, tvPad(buttons)); await page.waitForTimeout(250); };
+  await tvPress([7]);
+  assert.equal(await ff(), 'true', 'R2 switches fast forward on');
+  await tvPress([]);
+  await tvPress([7]);
+  assert.equal(await ff(), 'false', 'and R2 again off');
+  await tvPress([6]);
+  assert.equal(await rw(), 'true', 'L2 held rewinds');
+  await tvPress([]);
+  assert.equal(await rw(), 'false', 'released: forward again');
+  assert.ok(!(await page.evaluate(() => window.__inputs.some(([index]) => index === 12 || index === 13))), 'L2/R2 do not reach the console core');
   assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
   await waitStatus(page, /^Duraklatıldı/);
   assert.equal(await page.evaluate(() => document.querySelector('#fullscreen-game')), null, 'no fullscreen item: the TV app is always full screen');
@@ -1363,7 +1450,7 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
     return notice.left >= menu.right && notice.right <= innerWidth - 48;
   }), 'the notice does not cover the menu and stays inside the TV safe area');
   await page.keyboard.press('ArrowDown');
-  assert.equal(await page.evaluate(() => document.activeElement?.id), 'quick-save', 'the remote moves in the menu');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'menu-ff', 'the remote moves in the menu (Hızlı ileri, TV only)');
   // The last menu item, reached with the remote, ends inside the TV safe area (27 px at the bottom).
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(400);
@@ -1371,8 +1458,10 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowDown');
   assert.ok(await page.evaluate(() => window.__tv.keepOn.at(-1) === false), 'the screen may sleep while paused');
-  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  // Hızlı ileri in the menu: the menu closes, the game runs on fast.
+  await click(page, '#menu-ff');
   await waitStatus(page, /^Çalışıyor/);
+  await waitFor(async () => (await ff()) === 'true');
 }, { init: tvStub, viewport: { width: 960, height: 540 } });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {

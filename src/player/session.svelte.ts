@@ -33,8 +33,13 @@ import { PlayerControls } from './controls.svelte.ts';
 import { BatterySaves } from './battery.ts';
 import type { Game, SaveStateRecord, SlotId, SlotInfo } from '../lib/types.ts';
 
-/** RetroArch rewind for the consoles: a state every 2nd frame (Super Nintendo: ~15 % more work per frame). */
+/**
+ * RetroArch rewind for the consoles: a state every 2nd frame (Super Nintendo: ~15 % more work per
+ * frame, measured). On a TV, whose processor is the slowest RetroPlay runs on, every 6th frame
+ * (about a third of that work); rewinding is a little coarser there.
+ */
 export const REWIND_CONFIG = Object.freeze({ rewind_enable: 'true', rewind_granularity: '2' });
+export const REWIND_CONFIG_TV = Object.freeze({ rewind_enable: 'true', rewind_granularity: '6' });
 export type MenuPanel = 'main' | 'slots' | 'display' | 'controls';
 export interface PlayerAction { label: string; run: () => void }
 interface StartOptions { coreOverride?: string; fresh?: boolean; slot?: SlotId }
@@ -83,7 +88,9 @@ class PlayerSession {
       releaseButton: (name, source, index) => session.#emulator?.releaseButton?.(name, source, index),
       fitPicture: () => { try { session.#emulator?.fitInParent?.(); } catch {} },
       toggleMenu: () => session.toggleMenu(),
-      showNotice: (text, options) => session.showNotice(text, options)
+      showNotice: (text, options) => session.showNotice(text, options),
+      toggleFastForward: () => session.toggleFastForward(),
+      setRewinding: active => session.setRewinding(active)
     });
   })();
   #battery = new BatterySaves({ onFailure: message => { if (this.open) this.error = message; } });
@@ -245,7 +252,11 @@ class PlayerSession {
         unverifiedDump = true;
       }
 
-      const launch = await resolveLaunch(game, system, options, {
+      // The core of the game's latest save state goes first (states only load in the core that made them).
+      let stateCore = '';
+      try { stateCore = (await db.listSlots(game.id)).sort((a, b) => b.createdAt - a.createdAt).find(slot => slot.coreId)?.coreId || ''; } catch {}
+      if (session !== this.#session) return;
+      const launch = await resolveLaunch(game, system, { ...options, stateCore }, {
         games: library.games,
         getBios: db.getBios,
         arcadeSetCatalog,
@@ -292,7 +303,7 @@ class PlayerSession {
         shader: start.shader,
         // Consoles keep RetroArch's rewind buffer (a state every 2nd frame: about 15 % more work per
         // frame on Super Nintendo, measured); arcade boards' states are too large for it.
-        retroarchConfig: { ...start.retroarchConfig, ...(game.platform === 'ARCADE' ? {} : REWIND_CONFIG) },
+        retroarchConfig: { ...start.retroarchConfig, ...(game.platform === 'ARCADE' ? {} : tv.active ? REWIND_CONFIG_TV : REWIND_CONFIG) },
         extraFiles: launch.extraFiles,
         // Non-fatal runtime messages (for example a denied screen wake lock) are logged only.
         onWarning: (message: string) => console.warn('[RetroPlay] EmulatorJS uyarısı:', message),
@@ -772,14 +783,21 @@ class PlayerSession {
   }
 
   // ---- speed: fast forward and rewind --------------------------------------------------------------
-  /** ⏩ in the bar or Space: fast forward on or off. */
+  /** ⏩ in the bar, Space or a controller's R2: fast forward on or off. */
   toggleFastForward() {
     if (!this.running || this.paused || !this.#emulator) return;
     const next = !this.fastForward;
     if (this.#emulator.setFastForward?.(next)) this.fastForward = next;
   }
 
-  /** ⏪ held in the bar or Backspace held: the game runs backwards. */
+  /** Hızlı ileri from the pause menu (the TV, where the bar is out of the remote's reach). */
+  async toggleFastForwardFromMenu() {
+    await this.closeMenu();
+    // The emulator needs a frame or two after resuming.
+    setTimeout(() => this.toggleFastForward(), 120);
+  }
+
+  /** ⏪ held in the bar, Backspace or a controller's L2 held: the game runs backwards. */
   setRewinding(active: boolean) {
     if (active && (!this.running || this.paused || !this.canRewind)) return;
     if (!active && !this.rewinding) return;

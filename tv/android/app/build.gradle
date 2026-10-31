@@ -4,7 +4,7 @@ plugins {
     id 'com.android.application'
 }
 
-def retroplayUrl = (project.findProperty('retroplayUrl') ?: 'https://deploy-preview-2--retroteo1.netlify.app/').toString()
+def retroplayUrl = (project.findProperty('retroplayUrl') ?: 'https://retroteo1.netlify.app/').toString()
 def buildNumber = (project.findProperty('versionCode') ?: '1').toString().toInteger()
 
 android {
@@ -16,7 +16,7 @@ android {
         minSdk 24
         targetSdk 35
         versionCode buildNumber
-        versionName "1.0.${buildNumber}"
+        versionName "1.1.${buildNumber}"
         buildConfigField 'String', 'START_URL', "\"${retroplayUrl}\""
     }
 

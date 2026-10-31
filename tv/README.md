@@ -6,10 +6,12 @@ with Google TV or Android TV built in.
 
 ## What it does
 
-- Opens the RetroPlay site in a WebView (the address is set at build time:
-  `https://deploy-preview-2--retroteo1.netlify.app/` for this branch, `https://retroteo1.netlify.app/`
-  on `main`). Updates of the site reach the TV on their own; after the first start games open
-  without internet, like the web app.
+- Opens the RetroPlay site in a WebView: `https://retroteo1.netlify.app/` (the APK published from
+  `main`); a branch build opens its pull request's deploy preview, for the emulator check only.
+  Updates of the site reach the TV on their own; after the first start games open without
+  internet, like the web app.
+- Nothing from other sites is loaded, except the cover pictures (box art from
+  `raw.githubusercontent.com/libretro-thumbnails/…`), which the page fetches once per game.
 - The web app sees `RetroPlayTV/<version>` in the user agent and `window.RetroPlayTV`, and switches
   to its TV layout: content inside the TV safe area, focus always shown, the remote's d-pad moves
   the focus to the nearest item, OK selects, Back goes back (in a game Back opens the game menu;
@@ -18,7 +20,8 @@ with Google TV or Android TV built in.
   standard gamepads (`navigator.getGamepads()` is replaced in the page). Controller buttons never
   arrive as arrow keys or Back, so nothing is pressed twice. Buttons by position (bottom = B,
   right = A, left = Y, top = X), stick and d-pad, Select = coin on arcade games, guide button or
-  Select+Start = menu.
+  Select+Start = menu. Each controller is a player, in the order they are first used. On consoles
+  R2 switches fast forward on and off and L2 held rewinds; the game menu has **Hızlı ileri** too.
 - **Getting games onto the TV**: Oyun ekle → *Telefondan gönder* shows a QR code, an address
   (`http://<tv>:8686`) and a 4-digit code. On a phone or computer in the same network, open it,
   enter the code and pick files; they wait in the app's inbox (`files/inbox`) and are added
@@ -36,8 +39,7 @@ with Google TV or Android TV built in.
 1. On the TV, install **Downloader** (by AFTVnews) from Google Play.
 2. Settings → System → About → click *Android TV OS build* 7 times (developer options), then
    Settings → Apps → Security & restrictions → Unknown sources → allow **Downloader**.
-3. In Downloader, enter the site address followed by `/tv`, e.g.
-   `deploy-preview-2--retroteo1.netlify.app/tv`. It redirects to
+3. In Downloader, enter `retroteo1.netlify.app/tv`. It redirects to
    `https://github.com/emircangencer-ctrl/retroteo1/releases/download/tv-latest/RetroPlayTV.apk`.
 4. Install, open *RetroPlay* from the apps row.
 
@@ -62,7 +64,7 @@ To set the secrets once: create a keystore (`keytool -genkeypair -keystore tv.p1
 pkcs12 -alias retroplay-tv -keyalg RSA -keysize 3072 -validity 36500`), then in GitHub →
 Settings → Secrets and variables → Actions add `TV_KEYSTORE_BASE64` (`base64 -w0 tv.p12`) and
 `TV_KEYSTORE_PASSWORD`. Keep the keystore file somewhere safe. Then run the workflow once
-(Actions → RetroPlay TV → Run workflow, on this branch): an APK signed for a single run is replaced
+(Actions → RetroPlay TV → Run workflow, on `main`): an APK signed for a single run is replaced
 by the permanently signed one even without app changes, and a permanently signed APK is never
 replaced by a per-run one. Best before the first install on the TV; otherwise the switch needs one
 uninstall (which deletes the app's data on the TV).
@@ -70,11 +72,12 @@ uninstall (which deletes the app's data on the TV).
 ## Building
 
 GitHub Actions (`.github/workflows/tv.yml`) builds it with Gradle 8.11 / AGP 8.7 (JDK 17), checks
-the APK (signature, `leanback-launchable-activity`), publishes it as the `tv-latest` release and
-runs it on Android TV emulators (Google TV API 34 and Android TV API 33): install, the TV layout,
-the remote, a controller key event, a real HTTP upload into the inbox, the import, a game started
-in the WebView, Back opening the game menu, Back on the home screen. Screenshots and results are
-attached to the release as `ci-*` files.
+the APK (signature, `leanback-launchable-activity`), publishes it as the `tv-latest` release (from
+`main` only) and runs it on Android TV emulators (Google TV API 34 and Android TV API 33) against
+the deploy of the same commit: install, the TV layout, the remote, a controller key event, a real
+HTTP upload into the inbox, the import, the game's cover from GitHub, a game started in the
+WebView, R2 switching fast forward, Back opening the game menu, Back on the home screen.
+Screenshots and results of `main` runs are attached to the release as `ci-*` files.
 
 Locally: `gradle -p tv/android assembleRelease -PretroplayUrl=https://…/` with the Android SDK.
 

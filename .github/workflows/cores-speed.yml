@@ -1,0 +1,154 @@
+name: RetroPlay core speed experiment
+
+# Measurement build (not used by the app): the same core linked three ways with the toolchain the
+# EmulatorJS 4.2.3 cores were built with (emsdk 3.1.74, EmulatorJS/RetroArch 6dd4353), to measure
+# what Asyncify costs. Each variant is published as a release; RetroPlay's runtime does not use it.
+#   async     as EmulatorJS 4.2.3 builds them (OpenAL audio, full Asyncify)
+#   minasync  OpenAL audio, minimal Asyncify (main loop only, indirect calls not instrumented)
+#   noasync   no Asyncify, RetroArch's Web Audio driver (rwebaudio)
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - ".github/workflows/cores-speed.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cores-speed-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EMSDK_VERSION: "3.1.74"
+  RETROARCH_REPO: https://github.com/EmulatorJS/RetroArch.git
+  RETROARCH_COMMIT: 6dd4353937ef48b6ec0bfbdbb15d1c5992d86927
+
+jobs:
+  core:
+    name: ${{ matrix.core }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Round 3: Snes9x 2010 (libretro), a lighter SNES core than Snes9x, built as EmulatorJS
+          # 4.2.3 builds its cores (full Asyncify). Rounds 1-2 measured Asyncify (see TEST-REPORT).
+          - core: snes9x2010
+            repo: https://github.com/libretro/snes9x2010.git
+            commit: fe690dd321fa5a46b5234a2bde089d2518c62b0e
+            makefile: Makefile.libretro
+            license: LICENSE.txt
+            variants: async
+            profiling: true
+    steps:
+      - name: Tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
+      - name: Cache compiler output
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: ccache-speed-${{ matrix.core }}-${{ github.run_id }}
+          restore-keys: ccache-speed-${{ matrix.core }}-
+      - name: Cache emsdk
+        uses: actions/cache@v5
+        with:
+          path: emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}
+      - name: emsdk ${{ env.EMSDK_VERSION }}
+        run: |
+          if [ ! -x emsdk/emsdk ]; then git clone -q --depth 1 https://github.com/emscripten-core/emsdk.git emsdk; fi
+          ./emsdk/emsdk install "$EMSDK_VERSION" >/dev/null
+          ./emsdk/emsdk activate "$EMSDK_VERSION" >/dev/null
+      - name: Sources
+        run: |
+          fetch() { mkdir -p "$1" && git -C "$1" init -q && git -C "$1" fetch -q --depth 1 "$2" "$3" && git -C "$1" checkout -q FETCH_HEAD; echo "$1 $(git -C "$1" rev-parse HEAD)"; }
+          fetch RetroArch "$RETROARCH_REPO" "$RETROARCH_COMMIT"
+          fetch core "${{ matrix.repo }}" "${{ matrix.commit }}"
+          git -C core submodule update -q --init --depth 1 || git -C core submodule update -q --init
+      - name: Build the core
+        working-directory: core/${{ matrix.buildpath || '.' }}
+        run: |
+          source "$GITHUB_WORKSPACE/emsdk/emsdk_env.sh" >/dev/null
+          export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
+          emmake make -f ${{ matrix.makefile }} -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 10 | sed 's/^/::error::/'; tail -n 40 build.log; exit 1; }
+          ls -la *.bc
+          cp *_emscripten.bc "$GITHUB_WORKSPACE/core.bc.d/" 2>/dev/null || { mkdir -p "$GITHUB_WORKSPACE/core.bc.d" && cp *_emscripten.bc "$GITHUB_WORKSPACE/core.bc.d/"; }
+      - name: Link three ways (WebGL 2 and WebGL 1 each)
+        working-directory: RetroArch/emulatorjs
+        run: |
+          source ../../emsdk/emsdk_env.sh >/dev/null
+          export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
+          # Variant switches: async=1 fixed in the script becomes a variable; OpenAL no longer forces
+          # full Asyncify (minasync keeps OpenAL with the main loop alone instrumented).
+          sed -i 's/^  async=1$/  async=${RP_ASYNC:-1}/' build-emulatorjs.sh
+          sed -i 's/-f Makefile.emulatorjs HAVE_CHD=/-f Makefile.emulatorjs MIN_ASYNC=${RP_MIN_ASYNC:-0} HAVE_AL=${RP_AL:-1} HAVE_RWEBAUDIO=${RP_RWEB:-0} HAVE_CHD=/' build-emulatorjs.sh
+          sed -i 's/^   override ASYNC = 1$/   # (RetroPlay experiment) OpenAL without forcing full Asyncify/' ../Makefile.emulatorjs
+          # RetroArch's Web Audio driver is not wired into EmulatorJS builds at this commit
+          printf '\nifeq ($(EMULATORJS), 1)\nifeq ($(HAVE_RWEBAUDIO), 1)\nOBJ += audio/drivers/rwebaudio.o\nendif\nendif\n' >> ../Makefile.common
+          # PicoDrive brings its own libchdr: RetroArch's CHD support would clash with it
+          sed -i 's/^noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed")$/noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed" "picodrive")/' build-emulatorjs.sh
+          grep -n '^noCHD' build-emulatorjs.sh
+          # function names kept (a crash shows where it happened)
+          if [ "${{ matrix.profiling }}" = true ]; then sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -c profiling-funcs ../Makefile.emulatorjs; fi
+          grep -n 'RP_ASYNC\|RP_MIN_ASYNC' build-emulatorjs.sh | head -n 3
+          grep -c 'RetroPlay experiment' ../Makefile.emulatorjs
+          set -o pipefail
+          OUT="$GITHUB_WORKSPACE/out"; mkdir -p "$OUT"
+          link() {
+            local variant="$1"; shift
+            cp "$GITHUB_WORKSPACE"/core.bc.d/*_emscripten.bc .
+            emmake ./build-emulatorjs.sh --clean "$@" > "link-$variant.log" 2>&1 || { grep -iE "error" "link-$variant.log" | head -n 10 | sed 's/^/::error::/'; tail -n 30 "link-$variant.log"; return 1; }
+            grep -E "^ASYNC|BUILD COMMAND" "link-$variant.log" | head -n 2
+            local legacy=""; for a in "$@"; do [ "$a" = --legacy ] && legacy="-legacy"; done
+            cp "../../EmulatorJS/data/cores/${{ matrix.core }}${legacy}-wasm.data" "$OUT/${{ matrix.core }}-${variant}${legacy}-wasm.data"
+            rm -f *_emscripten.bc
+          }
+          VARIANTS="${{ matrix.variants || 'async minasync noasync' }}"
+          for flags in "" "--legacy"; do
+            for v in $VARIANTS; do
+              case "$v" in
+                async) RP_ASYNC=1 link async $flags;;
+                minasync) RP_ASYNC=0 RP_MIN_ASYNC=1 link minasync $flags || echo "::warning title=${{ matrix.core }}::minasync did not link";;
+                noasync) RP_ASYNC=0 RP_AL=0 RP_RWEB=1 link noasync $flags || echo "::warning title=${{ matrix.core }}::noasync did not link";;
+              esac
+            done
+          done
+          ls -la "$OUT"
+      - name: Pack
+        run: |
+          cd out
+          printf '{"name":"%s","options":{},"save":"srm","repo":"%s","commit":"%s"}' "${{ matrix.core }}" "${{ matrix.repo }}" "${{ matrix.commit }}" > core.json
+          printf '{\n    "minimumEJSVersion": "4.2.2",\n    "version": "2.0.2"\n}\n' > build.json
+          cp "../core/${{ matrix.license }}" license.txt 2>/dev/null || echo "see ${{ matrix.repo }}" > license.txt
+          for f in *-wasm.data; do 7z a -t7z "$f" core.json license.txt build.json >/dev/null; done
+          rm core.json build.json license.txt
+          sha256sum * | tee SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        with:
+          name: speed-${{ matrix.core }}
+          path: out
+
+  publish:
+    name: Publish
+    needs: core
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: built
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="speed-experiment-r${GITHUB_RUN_NUMBER}"
+          mkdir assets; find built -type f -name '*.data' -exec cp {} assets/ \;
+          ls -la assets
+          gh release create "$TAG" --prerelease --title "Core speed experiment · run ${GITHUB_RUN_NUMBER}" --notes "Measurement builds (Asyncify variants), not used by the app. ${GITHUB_SHA::7}" --target "$GITHUB_SHA" assets/*
+          echo "::notice title=release::$TAG"

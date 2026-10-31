@@ -73,7 +73,7 @@ const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD', 'arcade', 'mame']);
 const CORES_BY_SYSTEM = Object.freeze({
   nes: new Set(['nes', 'fceumm', 'nestopia']),
   snes: new Set(['snes']),
-  segaMD: new Set(['segaMD']),
+  segaMD: new Set(['segaMD', 'picodrive', 'genesis_plus_gx']),
   arcade: new Set(['fbneo', 'fbalpha2012_cps2']),
   mame: new Set(['mame2003_plus', 'mame2003_plus_next'])
 });
