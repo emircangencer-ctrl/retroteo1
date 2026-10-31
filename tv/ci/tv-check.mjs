@@ -222,6 +222,14 @@ try {
   console.log(`stopped: ${error?.message || error}`);
 } finally {
   try { execFileSync('adb', ['logcat', '-d', '-s', 'RetroPlayTV:I', 'chromium:I'], { stdio: ['ignore', fs.openSync(path.join(out, 'logcat.txt'), 'w'), 'ignore'] }); } catch {}
+  // A failure where the WebView page went away: say why on the run (renderer crash, low memory).
+  if (results.some(r => !r.ok)) {
+    try {
+      const log = execFileSync('adb', ['logcat', '-d', '-v', 'brief'], { maxBuffer: 64 * 1024 * 1024 }).toString();
+      const lines = log.split('\n').filter(line => /renderer process|Renderer process|crash|FATAL|died|lowmemorykiller|lmkd|Killing|ANR in|WebView.*(gone|terminated)/i.test(line) && !/^\s*$/.test(line)).slice(-8);
+      for (const line of lines) console.log(`::warning title=TV logcat::${line.trim().slice(0, 300)}`);
+    } catch {}
+  }
   fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(results, null, 2));
   for (const r of results) console.log(`${r.ok ? '::notice' : '::error'} title=TV ${r.ok ? 'ok' : 'FAIL'}::${r.label}${r.detail ? ` — ${r.detail}` : ''}`);
   try { await device?.close(); } catch {}
