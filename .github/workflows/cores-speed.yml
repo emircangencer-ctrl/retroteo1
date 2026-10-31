@@ -36,28 +36,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # EmulatorJS's forks at the commits before the 4.2.3 core build (2025-06-14)
-          - core: genesis_plus_gx
-            repo: https://github.com/EmulatorJS/Genesis-Plus-GX.git
-            commit: def3a7c0e413ef35a7d9d4430e5c9c9a5698b4fe
+          # Round 3: Snes9x 2010 (libretro), a lighter SNES core than Snes9x, built as EmulatorJS
+          # 4.2.3 builds its cores (full Asyncify). Rounds 1-2 measured Asyncify (see TEST-REPORT).
+          - core: snes9x2010
+            repo: https://github.com/libretro/snes9x2010.git
+            commit: fe690dd321fa5a46b5234a2bde089d2518c62b0e
             makefile: Makefile.libretro
             license: LICENSE.txt
-          - core: picodrive
-            repo: https://github.com/EmulatorJS/picodrive.git
-            commit: 7cbcd419b7acc2286b7a8bcd15776b5444ffff28
-            makefile: Makefile.libretro
-            license: COPYING
-          - core: snes9x
-            repo: https://github.com/EmulatorJS/snes9x.git
-            commit: 6ca2343e5f3b0acbea49ca958251e3a0af58a81d
-            makefile: Makefile
-            buildpath: libretro
-            license: LICENSE
-          - core: fceumm
-            repo: https://github.com/EmulatorJS/libretro-fceumm.git
-            commit: d9d7e141274d07186b6a871ca2919b6f13cfb2f9
-            makefile: Makefile.libretro
-            license: Copying
+            variants: async
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
@@ -119,10 +105,15 @@ jobs:
             cp "../../EmulatorJS/data/cores/${{ matrix.core }}${legacy}-wasm.data" "$OUT/${{ matrix.core }}-${variant}${legacy}-wasm.data"
             rm -f *_emscripten.bc
           }
+          VARIANTS="${{ matrix.variants || 'async minasync noasync' }}"
           for flags in "" "--legacy"; do
-            RP_ASYNC=1 link async $flags
-            RP_ASYNC=0 RP_MIN_ASYNC=1 link minasync $flags || echo "::warning title=${{ matrix.core }}::minasync did not link"
-            RP_ASYNC=0 RP_AL=0 RP_RWEB=1 link noasync $flags || echo "::warning title=${{ matrix.core }}::noasync did not link"
+            for v in $VARIANTS; do
+              case "$v" in
+                async) RP_ASYNC=1 link async $flags;;
+                minasync) RP_ASYNC=0 RP_MIN_ASYNC=1 link minasync $flags || echo "::warning title=${{ matrix.core }}::minasync did not link";;
+                noasync) RP_ASYNC=0 RP_AL=0 RP_RWEB=1 link noasync $flags || echo "::warning title=${{ matrix.core }}::noasync did not link";;
+              esac
+            done
           done
           ls -la "$OUT"
       - name: Pack
