@@ -36,15 +36,37 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Round 3: Snes9x 2010 (libretro), a lighter SNES core than Snes9x, built as EmulatorJS
-          # 4.2.3 builds its cores (full Asyncify). Rounds 1-2 measured Asyncify (see TEST-REPORT).
-          - core: snes9x2010
-            repo: https://github.com/libretro/snes9x2010.git
-            commit: fe690dd321fa5a46b5234a2bde089d2518c62b0e
+          # Round 5: no Asyncify at all (RetroArch's Web Audio driver with its own "fake block": when
+          # the audio buffer is full the main loop waits through its timing instead of sleeping),
+          # against the full-Asyncify build EmulatorJS 4.2.3 ships; and Snes9x 2005, a lighter SNES
+          # core. EmulatorJS's forks at the commits before the 4.2.3 core build (2025-06-14).
+          - core: snes9x
+            repo: https://github.com/EmulatorJS/snes9x.git
+            commit: 6ca2343e5f3b0acbea49ca958251e3a0af58a81d
+            makefile: Makefile
+            buildpath: libretro
+            license: LICENSE
+          - core: picodrive
+            repo: https://github.com/EmulatorJS/picodrive.git
+            commit: 7cbcd419b7acc2286b7a8bcd15776b5444ffff28
             makefile: Makefile.libretro
-            license: LICENSE.txt
-            variants: async
-            profiling: true
+            license: COPYING
+          - core: fceumm
+            repo: https://github.com/EmulatorJS/libretro-fceumm.git
+            commit: d9d7e141274d07186b6a871ca2919b6f13cfb2f9
+            makefile: Makefile.libretro
+            license: Copying
+          - core: snes9x2005
+            repo: https://github.com/libretro/snes9x2005.git
+            commit: a79dfe9047e7fec58808aefe48ad2bf499c7af11
+            makefile: Makefile
+            license: copyright
+          - core: snes9x2005_plus
+            repo: https://github.com/libretro/snes9x2005.git
+            commit: a79dfe9047e7fec58808aefe48ad2bf499c7af11
+            makefile: Makefile
+            make_args: USE_BLARGG_APU=1
+            license: copyright
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
@@ -75,7 +97,7 @@ jobs:
         run: |
           source "$GITHUB_WORKSPACE/emsdk/emsdk_env.sh" >/dev/null
           export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
-          emmake make -f ${{ matrix.makefile }} -j"$(nproc)" platform=emscripten > build.log 2>&1 || { grep -E "error" build.log | head -n 10 | sed 's/^/::error::/'; tail -n 40 build.log; exit 1; }
+          emmake make -f ${{ matrix.makefile }} -j"$(nproc)" platform=emscripten ${{ matrix.make_args }} > build.log 2>&1 || { grep -E "error" build.log | head -n 10 | sed 's/^/::error::/'; tail -n 40 build.log; exit 1; }
           ls -la *.bc
           cp *_emscripten.bc "$GITHUB_WORKSPACE/core.bc.d/" 2>/dev/null || { mkdir -p "$GITHUB_WORKSPACE/core.bc.d" && cp *_emscripten.bc "$GITHUB_WORKSPACE/core.bc.d/"; }
       - name: Link three ways (WebGL 2 and WebGL 1 each)
@@ -94,7 +116,26 @@ jobs:
           sed -i 's/^noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed")$/noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed" "picodrive")/' build-emulatorjs.sh
           grep -n '^noCHD' build-emulatorjs.sh
           # function names kept (a crash shows where it happened)
-          if [ "${{ matrix.profiling }}" = true ]; then sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -c profiling-funcs ../Makefile.emulatorjs; fi
+          # No Asyncify: RetroArch's Web Audio driver blocks through the main loop's timing ("fake
+          # block", wired in retroarch.c) — the Makefile only switches it on for AudioWorklet builds.
+          printf '\nifeq ($(HAVE_RWEBAUDIO), 1)\nifneq ($(ASYNC), 1)\nifneq ($(MIN_ASYNC), 1)\nDEFINES += -DEMSCRIPTEN_AUDIO_EXTERNAL_BLOCK -DEMSCRIPTEN_AUDIO_FAKE_BLOCK -DEMSCRIPTEN_AUDIO_EXTERNAL_WRITE_BLOCK\nendif\nendif\nendif\n' >> ../Makefile.emulatorjs
+          # The Web Audio library asks platform_emscripten.c (not part of EmulatorJS builds) which
+          # browser it runs in; ask the browser. Its sources go through a gain node, so the player's
+          # volume can reach them (Module.RWA.gain).
+          python3 - <<'PY'
+          import re
+          p = '../emscripten/library_rwebaudio.js'
+          s = open(p).read()
+          s = s.replace(', "platform_emscripten_get_browser"]', ']')
+          s = s.replace('(_platform_emscripten_get_browser() == RWA.PLATFORM_EMSCRIPTEN_BROWSER_CHROMIUM)', '(/Chrome\\//.test(navigator.userAgent))')
+          s = s.replace('RWA.context = new ac();', 'RWA.context = new ac(); RWA.gain = RWA.context.createGain(); RWA.gain.connect(RWA.context.destination); Module.RWA = RWA;')
+          s = s.replace('bufferSource.connect(RWA.context.destination);', 'bufferSource.connect(RWA.gain);')
+          assert 'platform_emscripten_get_browser' not in s and 'Module.RWA = RWA' in s and 'connect(RWA.gain)' in s, 'rwebaudio patch'
+          open(p, 'w').write(s)
+          print('library_rwebaudio.js patched')
+          PY
+          tail -n 8 ../Makefile.emulatorjs
+          if [ "${{ matrix.profiling || true }}" = true ]; then sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -c profiling-funcs ../Makefile.emulatorjs; fi
           grep -n 'RP_ASYNC\|RP_MIN_ASYNC' build-emulatorjs.sh | head -n 3
           grep -c 'RetroPlay experiment' ../Makefile.emulatorjs
           set -o pipefail
@@ -108,13 +149,13 @@ jobs:
             cp "../../EmulatorJS/data/cores/${{ matrix.core }}${legacy}-wasm.data" "$OUT/${{ matrix.core }}-${variant}${legacy}-wasm.data"
             rm -f *_emscripten.bc
           }
-          VARIANTS="${{ matrix.variants || 'async minasync noasync' }}"
+          VARIANTS="${{ matrix.variants || 'async noasync' }}"
           for flags in "" "--legacy"; do
             for v in $VARIANTS; do
               case "$v" in
                 async) RP_ASYNC=1 link async $flags;;
                 minasync) RP_ASYNC=0 RP_MIN_ASYNC=1 link minasync $flags || echo "::warning title=${{ matrix.core }}::minasync did not link";;
-                noasync) RP_ASYNC=0 RP_AL=0 RP_RWEB=1 link noasync $flags || echo "::warning title=${{ matrix.core }}::noasync did not link";;
+                noasync) RP_ASYNC=0 RP_AL=0 RP_RWEB=1 link noasync $flags || { echo "::error title=${{ matrix.core }}::noasync did not link"; grep -iE "error|undefined" link-noasync.log | head -n 20; };;
               esac
             done
           done
