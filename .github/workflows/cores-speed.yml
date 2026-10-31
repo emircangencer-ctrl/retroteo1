@@ -44,6 +44,7 @@ jobs:
             makefile: Makefile.libretro
             license: LICENSE.txt
             variants: async
+            profiling: true
     steps:
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
@@ -92,6 +93,8 @@ jobs:
           # PicoDrive brings its own libchdr: RetroArch's CHD support would clash with it
           sed -i 's/^noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed")$/noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed" "picodrive")/' build-emulatorjs.sh
           grep -n '^noCHD' build-emulatorjs.sh
+          # function names kept (a crash shows where it happened)
+          if [ "${{ matrix.profiling }}" = true ]; then sed -i 's/^   LDFLAGS += -O3$/   LDFLAGS += -O3 --profiling-funcs/' ../Makefile.emulatorjs; grep -c profiling-funcs ../Makefile.emulatorjs; fi
           grep -n 'RP_ASYNC\|RP_MIN_ASYNC' build-emulatorjs.sh | head -n 3
           grep -c 'RetroPlay experiment' ../Makefile.emulatorjs
           set -o pipefail
