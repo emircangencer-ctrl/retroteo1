@@ -1112,8 +1112,12 @@ await scenario('fast forward and rewind on the real core: ⏩ and Space speed it
   assert.equal(await pressed('#play-rewind'), 'false');
   const order = forward.slice(1, -1);
   const steps = back.map(v => order.indexOf(v)).filter(i => i >= 0);
-  assert.ok(steps.length >= 3, `rewind went through ${steps.length} known colours (${back.join(',')} / forward ${forward.join(',')})`);
-  assert.ok(steps.every((v, i) => i === 0 || v < steps[i - 1]), `colours in reverse order: ${steps.join(',')}`);
+  // A fast machine can rewind past the start of the recorded window; the hues then repeat from the
+  // cycle before, so the order is checked up to that point (which must be the window's start).
+  const cut = steps.findIndex((v, i) => i > 0 && v >= steps[i - 1]);
+  const reversed = cut < 0 ? steps : steps.slice(0, cut);
+  assert.ok(reversed.length >= 3, `rewind went through ${reversed.length} known colours in reverse (${back.join(',')} / forward ${forward.join(',')})`);
+  assert.ok(cut < 0 || reversed.at(-1) <= 1, `colours in reverse order: ${steps.join(',')}`);
   // Backspace held does the same.
   at = await mark();
   await page.keyboard.down('Backspace');
