@@ -36,20 +36,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Round 6: the rest of the shipped cores with and without Asyncify, and PicoDrive fixed:
-          # round 5's PicoDrive (RetroArch without CHD, the core with its own libchdr) showed
-          # RetroArch's menu instead of the game. Now like the stock build: RetroArch keeps CHD,
-          # the core drops its own copy (cartridges never use it).
+          # Round 6: the rest of the shipped cores with and without Asyncify, at the commits the
+          # 4.2.3 cores were built from (the stock cores carry them: Genesis Plus GX 594cdf3,
+          # FinalBurn Neo dedd04f, MAME 2003-Plus 3a72dae; PicoDrive 2.01 = fork commit 09d3cb6 —
+          # round 5's 2.05 showed RetroArch's menu instead of the game). RetroArch keeps CHD for
+          # PicoDrive; the core drops its own copy (cartridges never use it).
           - core: picodrive
             repo: https://github.com/EmulatorJS/picodrive.git
-            commit: 7cbcd419b7acc2286b7a8bcd15776b5444ffff28
+            commit: 09d3cb634c337aa3a1ed6575267d37bc1fdf064e
             makefile: Makefile.libretro
             make_args: use_libchdr=0
             keep_chd: true
             license: COPYING
           - core: genesis_plus_gx
             repo: https://github.com/EmulatorJS/Genesis-Plus-GX.git
-            commit: def3a7c0e413ef35a7d9d4430e5c9c9a5698b4fe
+            commit: 594cdf3a666546f65f46391c3615ac5e9550bfc1
             makefile: Makefile.libretro
             license: LICENSE.txt
           - core: nestopia
@@ -60,7 +61,7 @@ jobs:
             license: COPYING
           - core: fbneo
             repo: https://github.com/EmulatorJS/FBNeo.git
-            commit: 94fe878742901a5b9473dba94bad33a057f5d64c
+            commit: dedd04f2de6423970e18a586991f87812034dc4f
             makefile: Makefile
             buildpath: src/burner/libretro
             license: src/license.txt
@@ -71,7 +72,7 @@ jobs:
             license: README.md
           - core: mame2003_plus
             repo: https://github.com/EmulatorJS/mame2003-plus-libretro.git
-            commit: 09e84fe55799031e225b9da5e526d82ee85b9cd8
+            commit: 3a72dae33dfae65871158f03dbc1e849d74b4060
             makefile: Makefile
             license: LICENSE.md
     steps:
