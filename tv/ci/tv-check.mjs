@@ -252,7 +252,10 @@ try {
     try {
       const log = execFileSync('adb', ['logcat', '-d', '-v', 'brief'], { maxBuffer: 64 * 1024 * 1024 }).toString();
       const all = log.split('\n');
-      const app = all.filter(line => /FATAL EXCEPTION|Fatal signal|SIGSEGV|SIGABRT|AndroidRuntime.*(app\.retroplay|Exception|Caused by)|DEBUG.*(pid|#0[0-4] pc|Abort message|Cmdline)|app\.retroplay\.tv.*(died|crash)|Process app\.retroplay\.tv.*(died|has died)|system_server.*(died|crash)|Watchdog/.test(line)).slice(0, 9);
+      const app = all.filter(line => !/Watchdog|SystemServerTiming/.test(line) && /FATAL EXCEPTION|Fatal signal|SIGSEGV|SIGABRT|AndroidRuntime.*(app\.retroplay|Exception|Caused by)|app\.retroplay\.tv.*(died|crash)|has died|app died/.test(line)).slice(0, 5);
+      // The crash buffer holds native and Java crash reports (the first lines say what and where).
+      const crash = execFileSync('adb', ['logcat', '-d', '-b', 'crash'], { maxBuffer: 16 * 1024 * 1024 }).toString().split('\n').filter(line => /Fatal signal|Cmdline|Abort message|signal \d+|#0[0-5] pc|FATAL EXCEPTION|Process:|Exception|Caused by|at app\.retroplay/.test(line)).slice(0, 12);
+      for (const line of crash) console.log(`::warning title=TV crash::${line.trim().slice(0, 300)}`);
       const memory = all.filter(line => /lowmemorykiller|lmkd.*[Kk]ill|Low on memory|kill.*app\.retroplay|Renderer process (crashed|was killed)/.test(line)).slice(-4);
       for (const line of [...app, ...memory]) console.log(`::warning title=TV logcat::${line.trim().slice(0, 300)}`);
       const mem = execFileSync('adb', ['shell', 'cat', '/proc/meminfo']).toString().split('\n').filter(line => /MemTotal|MemAvailable/.test(line)).join(' · ').replace(/\s+/g, ' ');
