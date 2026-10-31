@@ -24,9 +24,34 @@ const note = (ok, label, detail = '') => {
   results.push({ ok, label, detail });
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${detail ? ` — ${detail}` : ''}`);
 };
+// Playwright's handle on the app's WebView can be dropped by the emulator (seen on Google TV API 34:
+// "Target page, context or browser has been closed" at random steps while the app kept running).
+// A step that hits that finds the WebView again and runs once more; a dead app still fails.
+const closed = error => /Target page, context or browser has been closed|Target closed|has been closed/.test(String(error?.message || error));
+async function reattach() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const view = await device.webView({ pkg: PKG }, { timeout: 15_000 });
+      page = await view.page();
+      page.setDefaultTimeout(90_000);
+      await page.waitForFunction(() => Boolean(document.querySelector('#app-shell')), null, { timeout: 30_000 });
+      return true;
+    } catch { await sleep(2000); }
+  }
+  return false;
+}
 const step = async (label, fn, { critical = true } = {}) => {
   try {
-    const detail = await fn();
+    let detail;
+    try {
+      if (page && page.isClosed()) await reattach();
+      detail = await fn();
+    } catch (error) {
+      if (!closed(error) || !(await reattach())) throw error;
+      console.log(`(WebView handle dropped during "${label}"; found it again, running the step once more)`);
+      detail = await fn();
+      detail = `${typeof detail === 'string' ? detail : ''} (after the WebView handle was found again)`.trim();
+    }
     note(true, label, typeof detail === 'string' ? detail : '');
     return true;
   } catch (error) {
