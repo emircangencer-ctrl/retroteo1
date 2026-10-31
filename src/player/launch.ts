@@ -11,9 +11,12 @@ export const SYSTEM_CORE_LABELS: Readonly<Record<string, string>> = Object.freez
  * PicoDrive run about twice as fast as Nestopia and Genesis Plus GX). In-game saves are the same
  * file for both; save states are not, so a game keeps the core its states were made with.
  */
-export const CONSOLE_CORES: Readonly<Record<string, ReadonlyArray<{ coreId: string; name: string }>>> = Object.freeze({
-  NES: Object.freeze([{ coreId: 'fceumm', name: 'FCEUmm' }, { coreId: 'nestopia', name: 'Nestopia' }]),
-  MD: Object.freeze([{ coreId: 'picodrive', name: 'PicoDrive' }, { coreId: 'genesis_plus_gx', name: 'Genesis Plus GX' }])
+export const CONSOLE_CORES: Readonly<Record<string, ReadonlyArray<{ coreId: string; name: string; note: string }>>> = Object.freeze({
+  NES: Object.freeze([{ coreId: 'fceumm', name: 'FCEUmm', note: 'hızlı' }, { coreId: 'nestopia', name: 'Nestopia', note: 'en uyumlu' }]),
+  // Snes9x keeps the id the SNES player always used ('snes', EmulatorJS's Snes9x), so existing save
+  // states still load; Snes9x 2005 is the lighter core for weak devices.
+  SNES: Object.freeze([{ coreId: 'snes', name: 'Snes9x', note: 'en uyumlu' }, { coreId: 'snes9x2005_plus', name: 'Snes9x 2005', note: 'daha hafif, zayıf cihazlar için' }]),
+  MD: Object.freeze([{ coreId: 'picodrive', name: 'PicoDrive', note: 'hızlı' }, { coreId: 'genesis_plus_gx', name: 'Genesis Plus GX', note: 'en uyumlu' }])
 });
 
 /**

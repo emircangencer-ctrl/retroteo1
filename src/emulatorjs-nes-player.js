@@ -69,15 +69,15 @@ const inputSlot = (player, index) => player * 32 + index;
 export const MIN_SYSTEM_PRESS_MS = 100;
 const SYSTEM_INPUTS = new Set([EMULATORJS_INPUT_INDEX.BUTTON_SELECT, EMULATORJS_INPUT_INDEX.BUTTON_START]);
 const now = () => globalThis.performance?.now?.() ?? Date.now();
+/** 'full' when the device keeps the full picture resolution under software WebGL (retroplay-render). */
+function renderPreference() {
+  try { return globalThis.localStorage?.getItem('retroplay-render') === 'full' ? 'full' : 'auto'; } catch { return 'auto'; }
+}
 /**
  * Sets a game's volume. EmulatorJS turns OpenAL's sources up or down; RetroPlay's own core builds
  * play through RetroArch's Web Audio driver, whose sources go through one gain node (Module.RWA).
  * EmulatorJS re-applies emu.volume when the game resumes, so it is set too (unless `keep`).
  */
-/** 'full' when the device keeps the full picture resolution under software WebGL (retroplay-render). */
-function renderPreference() {
-  try { return globalThis.localStorage?.getItem('retroplay-render') === 'full' ? 'full' : 'auto'; } catch { return 'auto'; }
-}
 function setCoreVolume(emu, volume, { keep = false } = {}) {
   if (!keep) emu.volume = volume;
   if (typeof emu.setVolume === 'function') emu.setVolume(volume);
@@ -87,12 +87,14 @@ function setCoreVolume(emu, volume, { keep = false } = {}) {
 const ALLOWED_SYSTEM_IDS = new Set(['nes', 'snes', 'segaMD', 'arcade', 'mame']);
 const CORES_BY_SYSTEM = Object.freeze({
   nes: new Set(['nes', 'fceumm', 'nestopia']),
-  snes: new Set(['snes']),
+  snes: new Set(['snes', 'snes9x', 'snes9x2005_plus']),
   segaMD: new Set(['segaMD', 'picodrive', 'genesis_plus_gx']),
   arcade: new Set(['fbneo', 'fbalpha2012_cps2']),
   mame: new Set(['mame2003_plus', 'mame2003_plus_next'])
 });
 const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+const CORE_FILE = /^[a-z0-9_]+(-legacy)?(-wasm\.data|\.json)$/;
+const SERVED_CORE_PATH = /^cores\/[A-Za-z0-9_.-]+\/(reports\/)?[a-z0-9_]+(-legacy)?(-wasm\.data|\.json)$/;
 const ALLOWED_SHADERS = new Set([...Object.values(DISPLAY_MODES), ...Object.values(DISPLAY_SCALES), ...Object.values(DISPLAY_FILTERS)].map(mode => mode.shader).filter(Boolean));
 const safeShader = name => (ALLOWED_SHADERS.has(name) ? name : 'disabled');
 const SAFE_CFG_KEY = /^[a-z0-9_]{1,64}$/;
@@ -137,6 +139,10 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   const paths = {};
   if (RUNTIME.script) paths['emulator.min.js'] = new URL(RUNTIME.script, dataPath).href;
   if (RUNTIME.style) paths['emulator.min.css'] = new URL(RUNTIME.style, dataPath).href;
+  // RetroPlay's own core builds live in a directory per release (see scripts/emulatorjs-runtime.mjs).
+  for (const [file, served] of Object.entries(RUNTIME.paths || {})) {
+    if (CORE_FILE.test(file) && SERVED_CORE_PATH.test(served)) paths[file] = new URL(served, dataPath).href;
+  }
   const extraFiles = sanitizeExtraFiles(options.extraFiles);
   const retroarchConfig = sanitizeSettings(options.retroarchConfig, SAFE_CFG_KEY);
   const coreOptions = sanitizeSettings(options.coreOptions, SAFE_OPTION_KEY);

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, coverRequests, recordInputs, heldInputs, touchScreen, padGeometry, gameId } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom, megaDriveSoundRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
 
@@ -29,6 +29,8 @@ const colourRom = path.join(tmp, 'colour cycle.nes');
 fs.writeFileSync(colourRom, colourCycleRom());
 const mdSramRom = path.join(tmp, 'md battery.md');
 fs.writeFileSync(mdSramRom, megaDriveSramRom());
+const mdSound = path.join(tmp, 'md sound.md');
+fs.writeFileSync(mdSound, megaDriveSoundRom());
 // Cover art: a self-made cartridge that carries the No-Intro checksum of Super Mario Bros. (World)
 // under a meaningless file name, one named like a No-Intro release, and one nothing matches.
 const coverDir = path.join(tmp, 'covers');
@@ -354,7 +356,7 @@ await scenario('after one online visit, a game starts with no network at all (se
   const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'emulatorjs', 'runtime-manifest.json'), 'utf8'));
   await page.evaluate(() => navigator.serviceWorker.ready);
   const cached = await waitFor(() => page.evaluate(async urls => {
-    const cache = await caches.open('retroplay-emulatorjs-4.2.3-v1');
+    const cache = await caches.open('retroplay-emulatorjs-4.2.3-v2');
     const hits = await Promise.all(urls.map(url => cache.match(url)));
     return hits.every(Boolean);
   }, manifest.precache), { timeout: 60000, interval: 500 });
@@ -927,6 +929,107 @@ await scenario('faster cores: a new Mega Drive game runs on PicoDrive, a new NES
   const second = await waitFor(async () => { const value = await counter(); return value === ((first + 1) & 255) ? value : null; });
   assert.equal(second, (first + 1) & 255, `Genesis Plus GX continued PicoDrive's save (${first} → ${second})`);
 }, { viewport: { width: 1060, height: 680 } });
+
+await scenario('the cores are RetroPlay\'s own builds from their release directory, with sound through Web Audio at the player\'s volume', async page => {
+  const requests = [];
+  page.on('request', request => { const url = request.url(); if (url.includes('/emulatorjs/4.2.3/data/cores/')) requests.push(new URL(url).pathname); });
+  const iframe = () => 'document.querySelector("#player-screen iframe").contentWindow';
+  await importFile(page, checkerRom);
+  const state = await play(page, 'checkerboard');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  assert.ok(requests.some(p => /\/cores\/cores-fast-r\d+\/fceumm-legacy-wasm\.data$/.test(p)), `core from the release directory: ${requests.join(' ')}`);
+  assert.ok(requests.some(p => /\/cores\/cores-fast-r\d+\/reports\/fceumm\.json$/.test(p)), 'its own build report');
+  assert.ok(!requests.some(p => /\/cores\/(reports\/)?fceumm[-.]/.test(p)), `the stock files are not used: ${requests.join(' ')}`);
+  const audio = () => page.evaluate(source => { const w = eval(source); const emu = w.EJS_emulator; const rwa = emu.Module.RWA; return { state: rwa?.context?.state, time: rwa?.context?.currentTime || 0, gain: rwa?.gain?.gain?.value, al: Boolean(emu.Module.AL?.currentCtx) }; }, iframe());
+  const first = await audio();
+  assert.equal(first.state, 'running', JSON.stringify(first));
+  assert.equal(first.al, false, 'no OpenAL context: the build uses Web Audio');
+  await page.waitForTimeout(500);
+  assert.ok((await audio()).time > first.time, 'the audio clock runs');
+  const frames = () => page.evaluate(source => eval(source).EJS_emulator.gameManager.getFrameNum(), iframe());
+  const f0 = await frames();
+  await page.waitForTimeout(1000);
+  const fps = (await frames()) - f0;
+  assert.ok(fps >= 40 && fps <= 70, `normal speed with the audio driver pacing the frames (${fps} frames in 1 s)`);
+  await click(page, '#play-menu');
+  await waitStatus(page, /^Duraklatıldı/);
+  await click(page, '#menu-display');
+  await page.waitForSelector('#volume');
+  await page.evaluate(() => { const range = document.querySelector('#volume'); range.value = '30'; range.dispatchEvent(new Event('input', { bubbles: true })); });
+  assert.equal(Math.round((await audio()).gain * 100), 30, 'the volume reaches the Web Audio gain');
+  await page.evaluate(() => { const range = document.querySelector('#volume'); range.value = '0'; range.dispatchEvent(new Event('input', { bubbles: true })); });
+  assert.equal((await audio()).gain, 0, 'muted');
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('Mega Drive sound: a sound driver that reads its music from the cartridge plays FM and PSG on PicoDrive', async page => {
+  await importFile(page, mdSound);
+  const state = await play(page, 'md sound');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Mega Drive/, state.error);
+  assert.equal(await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.getCore()), 'picodrive');
+  await page.waitForTimeout(1500);
+  // The output of the core's Web Audio driver, before the player's volume: the 4.2.3 PicoDrive
+  // read garbage through the Z80's bank window, so only the PSG tone was heard (about a third).
+  const level = await page.evaluate(() => new Promise(resolve => {
+    const rwa = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.Module.RWA;
+    const tap = rwa.context.createScriptProcessor(4096, 2, 2);
+    let sum = 0, n = 0;
+    tap.onaudioprocess = event => { for (const x of event.inputBuffer.getChannelData(0)) { sum += x * x; n++; } };
+    rwa.gain.connect(tap); tap.connect(rwa.context.destination);
+    setTimeout(() => { rwa.gain.disconnect(tap); tap.disconnect(); resolve({ rms: Math.sqrt(sum / Math.max(1, n)), gain: rwa.gain.gain.value, n }); }, 2000);
+  }));
+  assert.ok(level.n > 44100, `audio flows (${level.n} samples in 2 s)`);
+  assert.ok(level.gain > 0, 'not muted');
+  assert.ok(level.rms / level.gain > 0.11, `FM and PSG are both heard: ${JSON.stringify(level)}`);
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('Super Nintendo: the game page offers Snes9x and the lighter Snes9x 2005; the choice is remembered and starts the game with it', async page => {
+  const core = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.getCore());
+  const frames = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager.getFrameNum());
+  await importFile(page, snesRom);
+  await openGame(page, 'snes pad');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#core-choice button')].map(b => [b.dataset.core, b.textContent.trim(), b.getAttribute('aria-pressed')])), [['snes', 'Snes9x', 'true'], ['snes9x2005_plus', 'Snes9x 2005', 'false']]);
+  await click(page, '#core-choice [data-core="snes9x2005_plus"]');
+  await page.waitForFunction(() => document.querySelector('#core-choice [data-core="snes9x2005_plus"]').getAttribute('aria-pressed') === 'true');
+  assert.match(await page.evaluate(() => document.querySelector('#core-choice').parentElement.textContent), /Snes9x 2005: daha hafif/);
+  let state = await play(page, 'snes pad');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · SNES \/ Snes9x 2005/, state.error);
+  assert.equal(await core(), 'snes9x2005_plus');
+  let f0 = await frames();
+  await page.waitForTimeout(800);
+  assert.ok((await frames()) - f0 > 20, 'the game runs');
+  await closeGame(page);
+  await page.reload({ waitUntil: 'networkidle' });
+  await openGame(page, 'snes pad');
+  assert.equal(await page.evaluate(() => document.querySelector('#core-choice [aria-pressed="true"]').dataset.core), 'snes9x2005_plus', 'remembered for the game');
+  await click(page, '#core-choice [data-core="snes"]');
+  await page.waitForFunction(() => document.querySelector('#core-choice [data-core="snes"]').getAttribute('aria-pressed') === 'true');
+  state = await play(page, 'snes pad');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · SNES \/ Snes9x/, state.error);
+  assert.equal(await core(), 'snes9x');
+  f0 = await frames();
+  await page.waitForTimeout(800);
+  assert.ok((await frames()) - f0 > 20, 'the game runs');
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('without a graphics card (software WebGL) a phone-sized picture is drawn at most 480 lines high, and the speed test says so', async page => {
+  await importFile(page, checkerRom);
+  const state = await play(page, 'checkerboard');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  await page.waitForTimeout(1500);
+  const info = await page.evaluate(() => { const w = document.querySelector('#player-screen iframe').contentWindow; const c = w.document.querySelector('canvas'); const r = c.getBoundingClientRect(); return { software: w.RETROPLAY_SOFTWARE_GL, cap: w.RETROPLAY_CANVAS_CAP, ready: w.RETROPLAY_CANVAS_CAP_READY, backing: [c.width, c.height], css: [r.width, r.height], ratio: w.devicePixelRatio }; });
+  assert.ok(info.software, `CI draws WebGL in software: ${JSON.stringify(info)}`);
+  assert.equal(info.cap, 480);
+  assert.equal(info.ready, true, 'the core glue was patched');
+  assert.ok(info.css[1] * info.ratio > 480, `the screen is taller than the limit: ${JSON.stringify(info)}`);
+  assert.equal(info.backing[1], 480, `picture drawn 480 lines high: ${JSON.stringify(info)}`);
+  assert.ok(Math.abs(info.backing[0] / info.backing[1] - info.css[0] / info.css[1]) < 0.02, `same shape: ${JSON.stringify(info)}`);
+  await click(page, '#perf-test');
+  const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 20000, interval: 300 });
+  assert.match(text || '', /ekran kartı olmadan çiziliyor/);
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
+  assert.equal(history[0].gpu, 'software');
+}, { mobile: true, render: 'auto' });
+
 
 await scenario('a blocked cover request (the old TV app) or a page instead of a picture is tried again later, not remembered as "no cover"', async page => {
   let answered = 0;
