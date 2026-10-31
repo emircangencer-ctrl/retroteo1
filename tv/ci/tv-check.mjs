@@ -1,7 +1,8 @@
 // Runs the built RetroPlay TV app on an Android TV emulator and checks it end to end through
 // Playwright's Android support (the app's WebView is debuggable): the TV layout, the remote, the
-// controller bridge, the upload page (a real HTTP upload from this machine) and the inbox, a game
-// started in the TV's WebView, Back opening the game menu, and Back on the home screen.
+// controller bridge, the upload page (a real HTTP upload from this machine) and the inbox, the game's
+// cover from the cover archive, a game started in the TV's WebView, a controller's R2 switching fast
+// forward, Back opening the game menu, and Back on the home screen.
 // Usage (repo root, emulator running): node tv/ci/tv-check.mjs RetroPlayTV.apk
 import fs from 'node:fs';
 import path from 'node:path';
@@ -104,7 +105,8 @@ try {
     const bad = await fetch('http://127.0.0.1:18686/api/status?k=0000x');
     if (bad.status !== 403) throw new Error(`wrong code accepted (${bad.status})`);
     const rom = checkerboardRom();
-    const response = await fetch(`http://127.0.0.1:18686/api/upload?k=${upload.code}&name=${encodeURIComponent('checkerboard.nes')}`, { method: 'PUT', body: rom });
+    // Named like a No-Intro release, so its cover is found (the content is RetroPlay's test cartridge).
+    const response = await fetch(`http://127.0.0.1:18686/api/upload?k=${upload.code}&name=${encodeURIComponent('Contra (USA).nes')}`, { method: 'PUT', body: rom });
     const body = await response.json();
     if (!body.ok) throw new Error(JSON.stringify(body));
     await page.waitForSelector('#tv-inbox-add', { timeout: 15_000 });
@@ -123,8 +125,15 @@ try {
     return review.slice(0, 90);
   });
 
+  await step('the cover comes from the cover archive (GitHub) through the app', async () => {
+    await page.evaluate(() => { location.hash = '#/'; });
+    await page.waitForFunction(() => { const img = document.querySelector('#library-games [data-cover="picture"] img'); return img && img.naturalWidth > 0; }, null, { timeout: 60_000 });
+    return await page.evaluate(() => { const img = document.querySelector('#library-games [data-cover="picture"] img'); return `${img.naturalWidth}×${img.naturalHeight}`; });
+  }, { critical: false });
+  await snap('cover');
+
   await step('a game starts in the TV WebView', async () => {
-    await openGame(page, 'checkerboard');
+    await openGame(page, 'Contra');
     await page.evaluate(() => document.querySelector('.detail [data-play]').click());
     const state = await waitForPlayer(page, 180_000);
     if (!/^Çalışıyor/.test(state.status)) throw new Error(`${state.status} ${state.error}`);
@@ -135,6 +144,16 @@ try {
     return `${state.status} · picture ${frame.w}×${frame.h} of ${frame.vw}×${frame.vh}`;
   });
   await snap('playing');
+
+  await step('a controller\'s R2 switches fast forward on and off (through the app)', async () => {
+    const ff = () => page.evaluate(() => document.querySelector('#play-ff').getAttribute('aria-pressed'));
+    await device.shell('input gamepad keyevent --longpress KEYCODE_BUTTON_R2');
+    await page.waitForFunction(() => document.querySelector('#play-ff').getAttribute('aria-pressed') === 'true', null, { timeout: 5_000 });
+    await sleep(800);
+    await device.shell('input gamepad keyevent --longpress KEYCODE_BUTTON_R2');
+    await page.waitForFunction(() => document.querySelector('#play-ff').getAttribute('aria-pressed') === 'false', null, { timeout: 5_000 });
+    return `on, then off (${await ff()})`;
+  }, { critical: false });
 
   await step('performance: speed factor in the emulator (software GPU; says nothing about a real TV)', async () => {
     await page.evaluate(() => { document.querySelector('#play-menu').click(); });

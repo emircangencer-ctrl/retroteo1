@@ -897,6 +897,48 @@ await scenario('cover art: found by ROM checksum or name, fetched once, kept on 
   await waitFor(async () => (await page.evaluate(async () => (await (await caches.open('retroplay-covers-v1')).keys()).length)) === 3);
 });
 
+await scenario('a blocked cover request (the old TV app) or a page instead of a picture is tried again later, not remembered as "no cover"', async page => {
+  let answered = 0;
+  const pictures = () => page.evaluate(() => document.querySelectorAll('#library-games [data-cover="picture"] img').length);
+  const stored = () => page.evaluate(async () => (await (await caches.open('retroplay-covers-v1')).keys()).length);
+  await page.route('https://raw.githubusercontent.com/**', route => { answered++; return route.fulfill({ status: 204, body: '' }); });
+  await importFile(page, byNameRom);
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(() => answered > 0, { timeout: 10000 });
+  await page.waitForTimeout(600);
+  assert.deepEqual([await pictures(), await stored()], [0, 0], 'an empty answer stores nothing');
+  await page.unroute('https://raw.githubusercontent.com/**');
+  await page.route('https://raw.githubusercontent.com/**', route => { answered++; return route.fulfill({ status: 200, headers: { 'content-type': 'text/html' }, body: '<html>Wi-Fi giriş sayfası</html>' }); });
+  const first = answered;
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(() => answered > first, { timeout: 10000 });
+  await page.waitForTimeout(600);
+  assert.deepEqual([await pictures(), await stored()], [0, 0], 'a page instead of a picture stores nothing');
+  // Next start with a working connection: the cover comes.
+  await page.unroute('https://raw.githubusercontent.com/**');
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(async () => (await pictures()) === 1, { timeout: 15000 });
+  assert.equal(await stored(), 1);
+});
+
+await scenario('controller R2 / L2 on an arcade board go to the game, not to fast forward or rewind', async page => {
+  await importFile(page, puckmanZip);
+  await play(page, 'Puck Man');
+  await recordInputs(page);
+  await page.evaluate(() => { window.__padOn = true; window.__pad.timestamp++; });
+  await page.waitForTimeout(500);
+  const set = (i, on) => page.evaluate(([i, on]) => { window.__pad.buttons[i] = { pressed: on, touched: on, value: on ? 1 : 0 }; window.__pad.timestamp++; }, [i, on]);
+  await set(7, true);
+  await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(() => document.querySelector('#play-ff').getAttribute('aria-pressed')), 'false');
+  assert.ok(await page.evaluate(() => window.__inputs.some(([index, value]) => index === 13 && value)), 'R2 reaches the arcade core');
+  await set(7, false);
+  await page.waitForTimeout(300);
+  assert.ok(await page.evaluate(() => window.__inputs.some(([index, value]) => index === 13 && !value)), 'and is released there');
+}, { init: fakePad });
+
 await scenario('fast forward and rewind on the real core: ⏩ and Space speed it up (up to 3×), ⏪ and Backspace held run time backwards', async page => {
   await importFile(page, colourRom);
   const state = await play(page, 'colour cycle');
@@ -1351,6 +1393,20 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   await page.evaluate(pads => { window.__tv.pads = pads; window.__tv.version++; }, [tvPad([]), tvPad([], 1, 'Second Pad')]);
   await page.waitForTimeout(250);
   assert.equal(await page.evaluate(() => window.__inputs.at(-1).join()), '8,0,1');
+  // Speed on the TV (the bar is out of the remote's reach): R2 switches fast forward, L2 held rewinds.
+  const ff = () => page.evaluate(() => document.querySelector('#play-ff').getAttribute('aria-pressed'));
+  const rw = () => page.evaluate(() => document.querySelector('#play-rewind').getAttribute('aria-pressed'));
+  const tvPress = async buttons => { await page.evaluate(pad => { window.__tv.pads = [pad]; window.__tv.version++; }, tvPad(buttons)); await page.waitForTimeout(250); };
+  await tvPress([7]);
+  assert.equal(await ff(), 'true', 'R2 switches fast forward on');
+  await tvPress([]);
+  await tvPress([7]);
+  assert.equal(await ff(), 'false', 'and R2 again off');
+  await tvPress([6]);
+  assert.equal(await rw(), 'true', 'L2 held rewinds');
+  await tvPress([]);
+  assert.equal(await rw(), 'false', 'released: forward again');
+  assert.ok(!(await page.evaluate(() => window.__inputs.some(([index]) => index === 12 || index === 13))), 'L2/R2 do not reach the console core');
   assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
   await waitStatus(page, /^Duraklatıldı/);
   assert.equal(await page.evaluate(() => document.querySelector('#fullscreen-game')), null, 'no fullscreen item: the TV app is always full screen');
@@ -1363,7 +1419,7 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
     return notice.left >= menu.right && notice.right <= innerWidth - 48;
   }), 'the notice does not cover the menu and stays inside the TV safe area');
   await page.keyboard.press('ArrowDown');
-  assert.equal(await page.evaluate(() => document.activeElement?.id), 'quick-save', 'the remote moves in the menu');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'menu-ff', 'the remote moves in the menu (Hızlı ileri, TV only)');
   // The last menu item, reached with the remote, ends inside the TV safe area (27 px at the bottom).
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(400);
@@ -1371,8 +1427,10 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowDown');
   assert.ok(await page.evaluate(() => window.__tv.keepOn.at(-1) === false), 'the screen may sleep while paused');
-  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  // Hızlı ileri in the menu: the menu closes, the game runs on fast.
+  await click(page, '#menu-ff');
   await waitStatus(page, /^Çalışıyor/);
+  await waitFor(async () => (await ff()) === 'true');
 }, { init: tvStub, viewport: { width: 960, height: 540 } });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {

@@ -4,13 +4,15 @@ name: RetroPlay TV
 # (the site's /tv address points there) and runs it on an Android TV emulator against the
 # deploy of the same commit (tv/ci/tv-check.mjs).
 
-# Parked (2026-10-27): runs when the TV app or this workflow changes, or by hand; the web side's TV
-# mode stays covered by the browser E2E (TV scenario).
+# Runs when the TV app or this workflow changes, or by hand; the web side's TV mode is covered by
+# the browser E2E (TV scenario) on every change. Only main publishes the APK; a branch build opens
+# its pull request's deploy preview and is checked on the emulators there.
 on:
   push:
     branches:
       - main
       - "fix/**"
+      - "feat/**"
     paths:
       - "tv/**"
       - ".github/workflows/tv.yml"
@@ -18,22 +20,37 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: tv-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  RETROPLAY_URL: ${{ github.ref_name == 'main' && 'https://retroteo1.netlify.app/' || 'https://deploy-preview-2--retroteo1.netlify.app/' }}
 
 jobs:
   apk:
     name: Build the TV app
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      url: ${{ steps.site.outputs.url }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+      - name: Which site the app opens
+        id: site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # main: the live site. A branch: the deploy preview of its open pull request.
+          URL=https://retroteo1.netlify.app/
+          if [ "$GITHUB_REF_NAME" != main ]; then
+            PR=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '.[0].number // empty' || true)
+            if [ -n "$PR" ]; then URL="https://deploy-preview-$PR--retroteo1.netlify.app/"
+            else echo "::warning title=TV site::No open pull request for $GITHUB_REF_NAME: this build opens the live site."; fi
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "RETROPLAY_URL=$URL" >> "$GITHUB_ENV"
+          echo "::notice title=TV site::$URL"
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
@@ -87,7 +104,7 @@ jobs:
           name: RetroPlayTV
           path: RetroPlayTV.apk
       - name: Publish as tv-latest
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.ref_name == 'main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -98,7 +115,7 @@ jobs:
           # by the permanently signed one (a single reinstall); a permanent one is never replaced
           # by a per-run one.
           SOURCE=$(git ls-files -s tv/android | sha256sum | cut -c1-16)
-          NOTES="RetroPlay TV 1.0.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
+          NOTES="RetroPlay TV 1.1.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
           if gh release view tv-latest >/dev/null 2>&1; then
             BODY=$(gh release view tv-latest --json body -q .body)
             HAS_APK=$(gh release view tv-latest --json assets -q '.assets[].name' | grep -cx RetroPlayTV.apk || true)
@@ -115,13 +132,15 @@ jobs:
             gh release create tv-latest --prerelease --title "RetroPlay TV" --notes "$NOTES" --target "$GITHUB_SHA"
           fi
           gh release upload tv-latest RetroPlayTV.apk --clobber
-          echo "::notice title=TV release::Published RetroPlay TV 1.0.${{ github.run_number }} (source $SOURCE)."
+          echo "::notice title=TV release::Published RetroPlay TV 1.1.${{ github.run_number }} (source $SOURCE)."
 
   emulator:
     name: Run on an Android TV emulator
     needs: apk
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      RETROPLAY_URL: ${{ needs.apk.outputs.url }}
     strategy:
       fail-fast: false
       matrix:
@@ -168,7 +187,7 @@ jobs:
           name: tv-ci-${{ matrix.target }}-${{ matrix.api }}
           path: tv-ci/
       - name: Attach the screenshots to tv-latest
-        if: always() && github.event_name == 'push'
+        if: always() && github.ref_name == 'main' && github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

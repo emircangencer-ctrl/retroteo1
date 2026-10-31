@@ -18,6 +18,18 @@ export const STANDARD_TO_RETROPAD = Object.freeze({
 /** The centre "home / guide" button opens the player menu. */
 export const MENU_BUTTON_INDEX = 16;
 
+/**
+ * Speed shortcuts on a controller (consoles): R2 switches fast forward on and off, L2 held runs
+ * the game backwards. Arcade boards keep L2/R2 for the game (MAME and FinalBurn Neo map extra
+ * buttons there). Returns 'fastForward' | 'rewind' | null.
+ */
+export function speedShortcut(name, { arcade = false } = {}) {
+  if (arcade) return null;
+  if (name === 'BUTTON_R2') return 'fastForward';
+  if (name === 'BUTTON_L2') return 'rewind';
+  return null;
+}
+
 const isDown = button => Boolean(button && (button.pressed || (typeof button.value === 'number' && button.value > 0.5)));
 
 /**

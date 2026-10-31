@@ -128,7 +128,7 @@
       <button type="button" class="btn btn-sm" onclick={() => (padText = describeGamepads(inspectGamepads(navigator)))}>Yeniden tara</button>
     </div>
     <div class="row stack">
-      <p class="hint">USB veya Bluetooth kontrolcü bağla ve bir tuşa bas. Oyunda düğmeler konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşudur; oyun menüsü ortadaki ana düğme ya da <b>Select + Start</b> ile açılır. Menülerde yön tuşu gezer, <b>A</b> seçer, <b>B</b> geri döner; kütüphanede <b>X</b> favori, <b>Y</b> ayrıntılar, <b>L/R</b> sistem değiştirir.</p>
+      <p class="hint">USB veya Bluetooth kontrolcü bağla ve bir tuşa bas. Oyunda düğmeler konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşudur; konsol oyunlarında <b>R2</b> hızlı ileri sarar, <b>L2</b> basılı tutulunca geri sarar; oyun menüsü ortadaki ana düğme ya da <b>Select + Start</b> ile açılır. Menülerde yön tuşu gezer, <b>A</b> seçer, <b>B</b> geri döner; kütüphanede <b>X</b> favori, <b>Y</b> ayrıntılar, <b>L/R</b> sistem değiştirir.</p>
     </div>
   </div>
 

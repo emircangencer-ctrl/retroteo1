@@ -21,3 +21,4 @@ export class GamepadPoller {
   releaseAll(): void;
   poll(): { pressed: string[]; released: string[] };
 }
+export function speedShortcut(name: string, options?: { arcade?: boolean }): 'fastForward' | 'rewind' | null;

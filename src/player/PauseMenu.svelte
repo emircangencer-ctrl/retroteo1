@@ -98,6 +98,7 @@
           <button type="button" class="item" id="menu-start" disabled={!player.running} onclick={() => player.tapFromMenu('BUTTON_START')}><Icon name="play" size={18} /><span class="grow">Başla</span></button>
         </div>
       {/if}
+      {#if tv.active}<button type="button" class="item" id="menu-ff" aria-pressed={player.fastForward} disabled={!player.running} onclick={() => player.toggleFastForwardFromMenu()}><Icon name="forward" size={18} /><span class="grow">Hızlı ileri</span><span class="aside">{player.fastForward ? 'açık' : 'kapalı'}</span></button>{/if}
       <button type="button" class="item" id="quick-save" disabled={!player.canSave || !player.running} onclick={async () => { await player.quickSave(); }}><Icon name="save" size={18} /><span class="grow">Hızlı kaydet</span></button>
       <button type="button" class="item" id="quick-load" disabled={!player.canLoad || !player.running} onclick={async () => { await player.quickLoad(); await player.closeMenu(); }}><Icon name="load" size={18} /><span class="grow">Hızlı yükle</span>{#if quick}<span class="aside">{slotTime(quick.createdAt)}</span>{/if}</button>
       <button type="button" class="item" id="menu-slots" disabled={!player.running || !player.canSave} onclick={() => player.setPanel('slots')}><Icon name="slots" size={18} /><span class="grow">Kayıt yuvaları</span><Icon name="chevron" size={16} class="chev" /></button>
@@ -181,7 +182,7 @@
           <span id="gamepad-status-text">{player.controls.gamepadText}</span>
           <button id="refresh-gamepads" class="text-btn" type="button" onclick={() => player.controls.updateGamepadStatus()}>Yeniden tara</button>
         </div>
-        <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.controls.isArcade ? ' Select jeton atar, Start başlatır.' : ''} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
+        <p class="note">Kontrolcü: tuşlar konumlarına göre eşlenir (alt = B, sağ = A, sol = Y, üst = X), sol çubuk yön tuşu gibi çalışır.{player.controls.isArcade ? ' Select jeton atar, Start başlatır.' : ' R2 hızlı ileri sarmayı açıp kapatır, L2 basılı tutulunca geri sarar.'} Menü: ortadaki ana düğme ya da Select + Start birlikte. Menüde A seçer, B geri döner.</p>
         {#if !player.controls.touchPlay && !tv.active}
           <div class="note keys" id="menu-key-hints"><span class="keys-title">Klavye</span>{#each player.controls.keyHintRows as hints, i (i)}<span class="hint-row" data-player={i + 1}>{#if player.controls.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>{/each}</div>
           <p class="note">{player.controls.isArcade ? '1. oyuncu: jeton 5 veya Sağ Shift, başla 1 veya Enter.' : '1. oyuncu: Start Enter ya da 1, Select Sağ Shift ya da 5.'}{player.controls.keyHintRows.length > 1 ? (player.controls.isArcade ? ' 2. oyuncu: jeton 6, başla 2.' : ' 2. oyuncu: Start 2, Select 6.') : ''} Boşluk hızlı ileri sarar{player.canRewind ? ', Backspace basılı tutulunca geri sarar' : ''}.</p>

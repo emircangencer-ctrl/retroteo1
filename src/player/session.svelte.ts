@@ -83,7 +83,9 @@ class PlayerSession {
       releaseButton: (name, source, index) => session.#emulator?.releaseButton?.(name, source, index),
       fitPicture: () => { try { session.#emulator?.fitInParent?.(); } catch {} },
       toggleMenu: () => session.toggleMenu(),
-      showNotice: (text, options) => session.showNotice(text, options)
+      showNotice: (text, options) => session.showNotice(text, options),
+      toggleFastForward: () => session.toggleFastForward(),
+      setRewinding: active => session.setRewinding(active)
     });
   })();
   #battery = new BatterySaves({ onFailure: message => { if (this.open) this.error = message; } });
@@ -772,14 +774,21 @@ class PlayerSession {
   }
 
   // ---- speed: fast forward and rewind --------------------------------------------------------------
-  /** ⏩ in the bar or Space: fast forward on or off. */
+  /** ⏩ in the bar, Space or a controller's R2: fast forward on or off. */
   toggleFastForward() {
     if (!this.running || this.paused || !this.#emulator) return;
     const next = !this.fastForward;
     if (this.#emulator.setFastForward?.(next)) this.fastForward = next;
   }
 
-  /** ⏪ held in the bar or Backspace held: the game runs backwards. */
+  /** Hızlı ileri from the pause menu (the TV, where the bar is out of the remote's reach). */
+  async toggleFastForwardFromMenu() {
+    await this.closeMenu();
+    // The emulator needs a frame or two after resuming.
+    setTimeout(() => this.toggleFastForward(), 120);
+  }
+
+  /** ⏪ held in the bar, Backspace or a controller's L2 held: the game runs backwards. */
   setRewinding(active: boolean) {
     if (active && (!this.running || this.paused || !this.canRewind)) return;
     if (!active && !this.rewinding) return;
