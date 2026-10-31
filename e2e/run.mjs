@@ -31,6 +31,8 @@ const mdSramRom = path.join(tmp, 'md battery.md');
 fs.writeFileSync(mdSramRom, megaDriveSramRom());
 const mdSound = path.join(tmp, 'md sound.md');
 fs.writeFileSync(mdSound, megaDriveSoundRom());
+const mdPal = path.join(tmp, 'pal test.md');
+fs.writeFileSync(mdPal, megaDriveSoundRom({ region: 'E' }));
 // Cover art: a self-made cartridge that carries the No-Intro checksum of Super Mario Bros. (World)
 // under a meaningless file name, one named like a No-Intro release, and one nothing matches.
 const coverDir = path.join(tmp, 'covers');
@@ -982,6 +984,33 @@ await scenario('Mega Drive sound: a sound driver that reads its music from the c
   assert.ok(level.rms / level.gain > 0.11, `FM and PSG are both heard: ${JSON.stringify(level)}`);
 }, { viewport: { width: 1060, height: 680 } });
 
+await scenario('a European (PAL) cartridge runs at 50 Hz as on its console; "60 Hz" on its game page plays it at full speed', async page => {
+  const pace = async () => page.evaluate(async () => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; const f0 = gm.getFrameNum(), t0 = performance.now(); await new Promise(r => setTimeout(r, 2000)); return Math.round((gm.getFrameNum() - f0) / ((performance.now() - t0) / 1000)); });
+  // A cartridge for every region has no choice to make.
+  await importFile(page, mdSound);
+  await openGame(page, 'md sound');
+  assert.equal(await page.evaluate(() => document.querySelector('#region-row')), null, 'JUE: no region choice');
+  await importFile(page, mdPal);
+  await openGame(page, 'pal test');
+  await page.waitForSelector('#region-row');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#sixty-hz button')].map(b => [b.dataset.hz, b.getAttribute('aria-pressed')])), [['50', 'true'], ['60', 'false']]);
+  let state = await play(page, 'pal test');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  await page.waitForTimeout(1000);
+  const fifty = await pace();
+  assert.ok(fifty >= 45 && fifty <= 53, `PAL: about 50 frames a second (${fifty})`);
+  await closeGame(page);
+  await openGame(page, 'pal test');
+  await click(page, '#sixty-hz [data-hz="60"]');
+  await page.waitForFunction(() => document.querySelector('#sixty-hz [data-hz="60"]').getAttribute('aria-pressed') === 'true');
+  state = await play(page, 'pal test');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  assert.deepEqual(await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.RETROPLAY_CORE_OPTIONS), { picodrive_region: 'US' });
+  await page.waitForTimeout(1000);
+  const sixty = await pace();
+  assert.ok(sixty >= 56 && sixty <= 64, `60 Hz: about 60 frames a second (${sixty}, was ${fifty})`);
+}, { viewport: { width: 1060, height: 680 } });
+
 await scenario('Super Nintendo: the game page offers Snes9x and the lighter Snes9x 2005; the choice is remembered and starts the game with it', async page => {
   const core = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.getCore());
   const frames = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager.getFrameNum());
@@ -1619,6 +1648,46 @@ await scenario('TV app 1.2: the screen\'s refresh rate in Settings and in the sp
   assert.equal(history[0].refresh, 50);
   assert.match(history[0].picture, /^\d+×\d+$/);
 }, { init: `(${tvStub})();(${tvStubWithScreen})();`, viewport: { width: 960, height: 540 }, render: 'auto' });
+
+// A TV box's GPU as WebGL names it (the page here draws with SwiftShader, which RetroPlay would otherwise cap at 480 lines).
+const tvGpu = () => {
+  for (const proto of [window.WebGLRenderingContext?.prototype, window.WebGL2RenderingContext?.prototype].filter(Boolean)) {
+    const base = proto.getParameter;
+    proto.getParameter = function (name) { return name === 0x9246 ? 'Mali-450 MP' : base.call(this, name); };
+  }
+};
+
+await scenario('TV: the speed test measures the game at 1080, 720 and 480 lines and keeps the best picture for this TV', async page => {
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  assert.equal(await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.RETROPLAY_SOFTWARE_GL), '', 'the GPU is not software');
+  await page.waitForTimeout(800);
+  await page.evaluate(() => window.RetroPlayTVHost.menu());
+  await page.waitForSelector('#perf-test');
+  await click(page, '#perf-test');
+  const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 40000, interval: 300 });
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
+  const entry = history[0];
+  assert.deepEqual(entry.pictures.map(p => p.lines), [1080, 720, 480]);
+  assert.ok(entry.pictures.every(p => p.fps > 0), JSON.stringify(entry.pictures));
+  assert.ok(Number(entry.pictures[2].picture.split('×')[1]) <= 480, `480 lines drawn at most 480 high: ${entry.pictures[2].picture}`);
+  assert.ok([1080, 720, 480].includes(entry.chosen), String(entry.chosen));
+  // (more than 999 frames a second are written with a thousands dot)
+  assert.match(text || '', new RegExp(`görüntü ${entry.chosen} satır \\(1080: [\\d.]+ · 720: [\\d.]+ · 480: [\\d.]+ kare/sn\\)`));
+  assert.ok(Number.isFinite(entry.startMs) && entry.startMs > 0, 'start time recorded');
+  const prefs = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-app-settings') || '{}'));
+  assert.equal(prefs.tvPictureMeasured, entry.chosen, 'kept for this TV');
+  const cap = await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.RETROPLAY_CANVAS_CAP);
+  assert.equal(cap, entry.chosen, 'the game goes on at the chosen height');
+  await closeGame(page);
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-picture-hint');
+  assert.match(await page.evaluate(() => document.querySelector('#tv-picture-hint').textContent), new RegExp(`bu TV için ${entry.chosen} satır seçti`));
+  // A fixed choice wins over the measurement.
+  await click(page, '#tv-picture [data-value="480"]');
+  await play(page, 'checkerboard');
+  assert.ok(await page.evaluate(() => /RETROPLAY_CANVAS_CAP = 480;/.test(document.querySelector('#player-screen iframe').srcdoc)));
+}, { init: `(${tvStub})();(${tvStubWithScreen})();(${tvGpu})();`, viewport: { width: 960, height: 540 }, render: 'auto' });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
   assert.deepEqual(cdnRequests, []);

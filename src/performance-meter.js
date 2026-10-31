@@ -23,9 +23,24 @@ export function describeResult(result) {
   if (!result || !Number.isFinite(result.headroom)) return 'Performans ölçülemedi';
   const verdict = classifyHeadroom(result.headroom).label;
   const pace = Number.isFinite(result.normalFps) && result.normalFps > 0 ? ` · normal oyun ${number(result.normalFps, 0)} kare/sn` : '';
+  // A PAL cartridge runs at 50 Hz on its own console: slower game and music, not a slow device.
+  const pal = result.rate === 50 ? ' · Avrupa (PAL) sürümü: oyun 50 Hz, ABD sürümünden %17 yavaş' : '';
+  const pictures = Array.isArray(result.pictures) && result.pictures.length
+    ? ` · görüntü ${result.chosen || result.pictures[0].lines} satır (${result.pictures.map(p => `${p.lines}: ${number(p.fps, 0)}`).join(' · ')} kare/sn)`
+    : '';
+  const start = Number.isFinite(result.startMs) && result.startMs > 0 ? ` · açılış ${number(result.startMs / 1000)} sn` : '';
   // No usable GPU: the browser draws the picture on the processor (worth knowing on a TV box).
   const gpu = result.gpu === 'software' ? ' · görüntü ekran kartı olmadan çiziliyor' : '';
-  return `Hız payı ${number(result.headroom)}× (${number(result.fps, 0)} kare/sn) · ${verdict}${pace}${gpu}${refreshNote(result.refresh)}`;
+  return `Hız payı ${number(result.headroom)}× (${number(result.fps, 0)} kare/sn) · ${verdict}${pace}${pal}${pictures}${start}${gpu}${refreshNote(result.refresh)}`;
+}
+
+/**
+ * The game's own rate: 50 for a PAL game (its normal pace is about 50 while the machine runs it
+ * clearly faster), else 60. A device too slow for a 60 Hz game also shows a pace near 50, but then
+ * it cannot run faster than that either.
+ */
+export function nominalRate(normalFps, fps) {
+  return Number.isFinite(normalFps) && normalFps >= 47 && normalFps <= 52.5 && Number.isFinite(fps) && fps >= normalFps * 1.1 ? 50 : 60;
 }
 
 /**
@@ -76,6 +91,6 @@ export function addToHistory(entry, storage = globalThis.localStorage) {
 export function historyReport(history) {
   if (!history.length) return 'Henüz performans ölçümü yok.';
   const device = history[0].device || 'Cihaz bilinmiyor';
-  const lines = history.map(entry => `${new Date(entry.at).toLocaleString('tr-TR')} · ${entry.title} · ${entry.platform}/${entry.core} · ${number(entry.headroom)}× (${number(entry.fps, 0)} kare/sn)${Number.isFinite(entry.normalFps) ? ` · normal ${number(entry.normalFps, 0)}` : ''}${entry.picture ? ` · görüntü ${entry.picture}` : ''}${entry.gpu === 'software' ? ' · yazılım WebGL' : ''}${Number.isFinite(entry.refresh) ? ` · ekran ${number(entry.refresh, 0)} Hz` : ''}`);
+  const lines = history.map(entry => `${new Date(entry.at).toLocaleString('tr-TR')} · ${entry.title} · ${entry.platform}/${entry.core} · ${number(entry.headroom)}× (${number(entry.fps, 0)} kare/sn)${Number.isFinite(entry.normalFps) ? ` · normal ${number(entry.normalFps, 0)}` : ''}${entry.rate === 50 ? ' · PAL 50 Hz' : ''}${entry.picture ? ` · görüntü ${entry.picture}` : ''}${Array.isArray(entry.pictures) && entry.pictures.length ? ` (${entry.pictures.map(p => `${p.lines}:${p.fps}`).join('/')} → ${entry.chosen})` : ''}${Number.isFinite(entry.startMs) ? ` · açılış ${number(entry.startMs / 1000)} sn` : ''}${entry.gpu === 'software' ? ' · yazılım WebGL' : ''}${Number.isFinite(entry.refresh) ? ` · ekran ${number(entry.refresh, 0)} Hz` : ''}`);
   return [`RetroPlay performans ölçümleri · ${device}${history[0].cores ? ` · ${history[0].cores} çekirdek` : ''}${history[0].memory ? ` · ${history[0].memory} GB` : ''}`, ...lines].join('\n');
 }

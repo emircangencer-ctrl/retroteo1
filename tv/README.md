@@ -38,7 +38,9 @@ with Google TV or Android TV built in.
   the TV its own mode back otherwise. Settings → Google TV shows the mode, and the speed test
   names the refresh rate ("TV ekranı 50 Hz: oyunlar %17 yavaş oynar").
 - **Picture size**: on the TV the game is drawn at most 1080 lines high, so a box that renders apps
-  at 4K never draws 2160 lines for a 240-line game (the speed test shows the picture size).
+  at 4K never draws 2160 lines for a 240-line game. The speed test (game menu → *Performansı ölç*)
+  measures the game at 1080, 720 and 480 lines and keeps the largest height that runs a 60 Hz game
+  with 1.3× headroom on this TV; Settings → Google TV → *Oyun görüntüsü* can fix one.
 - **Deploy previews**: Settings → Google TV → *Önizleme sürümü* opens a pull request's deploy
   preview by its number (`Sites`: the live site and `deploy-preview-<n>--…netlify.app` only), to try
   a change on the TV before it goes live. A badge says *ÖNİZLEME #n* on every screen; *Canlı sürüme

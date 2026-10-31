@@ -218,9 +218,9 @@ export function megaDriveSramRom() {
  * algorithm 7, key on) and a square wave on the PSG (channel 0), then idles; before every YM2612
  * write it reads the chip's busy flag, and it reads its data from the cartridge through the bank
  * window, as sound drivers do. The screen is a
- * plain backdrop.
+ * plain backdrop. `region`: the header's region field ('E' makes it a PAL cartridge).
  */
-export function megaDriveSoundRom() {
+export function megaDriveSoundRom({ region = 'JUE' } = {}) {
   const rom = new Uint8Array(128 * 1024);
   const w16 = (o, v) => { rom[o] = (v >>> 8) & 255; rom[o + 1] = v & 255; };
   const w32 = (o, v) => { w16(o, v >>> 16); w16(o + 2, v & 0xffff); };
@@ -228,7 +228,7 @@ export function megaDriveSoundRom() {
   for (let v = 2; v < 64; v++) w32(v * 4, 0x00000300);
   const text = (o, s) => { for (let i = 0; i < s.length; i++) rom[o + i] = s.charCodeAt(i); };
   text(0x100, 'SEGA GENESIS    '); text(0x150, 'RETROPLAY SOUND TEST'); text(0x180, 'GM 00000000-00');
-  w32(0x1A0, 0); w32(0x1A4, rom.length - 1); w32(0x1A8, 0x00FF0000); w32(0x1AC, 0x00FFFFFF); text(0x1F0, 'JUE');
+  w32(0x1A0, 0); w32(0x1A4, rom.length - 1); w32(0x1A8, 0x00FF0000); w32(0x1AC, 0x00FFFFFF); text(0x1F0, region.padEnd(3, ' '));
   // Z80 program (runs from address 0 of sound RAM).
   const ym = [[0x22, 0x00], [0x27, 0x00], [0x28, 0x00], [0x2B, 0x00]];
   for (const op of [0, 4, 8, 12]) ym.push([0x30 + op, 0x01], [0x40 + op, 0x10], [0x50 + op, 0x1F], [0x60 + op, 0x00], [0x70 + op, 0x00], [0x80 + op, 0x0F], [0x90 + op, 0x00]);

@@ -24,6 +24,7 @@
   const tvScreen = tv.display();
   const tvSlower = tvScreen ? Math.round(refreshSlowdown(tvScreen.refresh) * 100) : 0;
   let previewText = $state('');
+  const TV_PICTURES = [['auto', 'Otomatik'], ['1080', '1080'], ['720', '720'], ['480', '480']] as const;
   function openPreview() {
     const number = previewNumber(previewText);
     if (!number) { showToast('Bir PR numarası yaz (örneğin 9).', 'error'); return; }
@@ -241,6 +242,15 @@
         <span class="label">RetroPlay TV {tv.info?.versionName || ''}{tv.info?.model ? ` · ${tv.info.model}` : ''}</span>
         <p class="hint">Oyun eklemek için Oyun ekle → Telefondan gönder. Kontrolcüyü TV'nin Bluetooth ayarlarından eşle; düğmeler konumlarına göre eşlenir. Oyun menüsü: kumandanın Geri tuşu. Kütüphane ve kayıtlar bu TV'de saklanır.</p>
         <div class="inline"><button type="button" class="btn btn-sm" id="tv-exit" onclick={() => tv.exit()}>Uygulamadan çık</button></div>
+      </div>
+      <div class="row stack">
+        <span class="label">Oyun görüntüsü</span>
+        <div class="seg" role="group" aria-label="Oyun görüntüsü" id="tv-picture">
+          {#each TV_PICTURES as [value, label] (value)}
+            <button type="button" data-value={value} aria-pressed={settings.prefs.tvPicture === value} onclick={() => settings.setPrefs({ tvPicture: value })}>{label}</button>
+          {/each}
+        </div>
+        <p class="hint" id="tv-picture-hint">{settings.prefs.tvPicture === 'auto' ? (settings.prefs.tvPictureMeasured ? `Hız testi bu TV için ${settings.prefs.tvPictureMeasured} satır seçti.` : 'Oyunda menü → Performansı ölç, bu TV için en hızlı görüntü boyutunu seçer; o zamana kadar 1080 satır.') : `Oyun ${settings.prefs.tvPicture} satır yükseklikte çizilir.`} Daha az satır ekran kartını rahatlatır; görüntü biraz yumuşar.</p>
       </div>
       {#if tvScreen}
         <div class="row stack">

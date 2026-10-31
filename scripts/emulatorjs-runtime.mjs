@@ -170,7 +170,35 @@ export const RETROPLAY_PATCH = `
       return cfg;
     };
   }
+  // Core options RetroPlay sets for a game (window.RETROPLAY_CORE_OPTIONS: a PAL cartridge at 60 Hz)
+  // win over EmulatorJS's stored ones: in the options file the core reads when it loads, and when
+  // EmulatorJS applies its menu settings once the game runs.
+  function forcedOptions() {
+    var options = window.RETROPLAY_CORE_OPTIONS;
+    return options && typeof options === 'object' ? options : null;
+  }
+  var hasOwn = function (object, key) { return Object.prototype.hasOwnProperty.call(object, key); };
+  if (GameManager && GameManager.prototype && typeof GameManager.prototype.setVariable === 'function') {
+    var baseSetVariable = GameManager.prototype.setVariable;
+    GameManager.prototype.setVariable = function (key, value) {
+      var forced = forcedOptions();
+      return baseSetVariable.call(this, key, forced && hasOwn(forced, key) ? String(forced[key]) : value);
+    };
+  }
   var Emulator = window.EmulatorJS;
+  if (Emulator && Emulator.prototype && typeof Emulator.prototype.getCoreSettings === 'function') {
+    var baseCoreSettings = Emulator.prototype.getCoreSettings;
+    Emulator.prototype.getCoreSettings = function () {
+      var text = baseCoreSettings.call(this) || '';
+      var forced = forcedOptions();
+      if (!forced) return text;
+      var lines = String(text).split('\\n').filter(function (line) { var key = line.split('=')[0].trim(); return key && !hasOwn(forced, key); });
+      Object.keys(forced).forEach(function (key) {
+        if (/^[A-Za-z0-9_-]+$/.test(key)) lines.push(key + ' = "' + String(forced[key]).replace(/["\\r\\n]/g, '') + '"');
+      });
+      return lines.join('\\n') + '\\n';
+    };
+  }
   // RetroPlay's own core builds belong to a system EmulatorJS knows: its MAME 2003-Plus build is a
   // MAME core (arcade zips are written as they are, MAME controls and settings), Snes9x 2005 Plus
   // a Super Nintendo core, like the cores it knows by name.

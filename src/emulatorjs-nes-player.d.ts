@@ -22,6 +22,8 @@ export interface EmulatorJsPlayerOptions {
   shader?: string;
   /** At most this many picture lines (0: no limit; software WebGL lowers it to 480). */
   canvasCap?: number;
+  /** Core options that win over EmulatorJS's stored ones from the first frame. */
+  forcedCoreOptions?: Record<string, string>;
 }
 export class EmulatorJsPlayer {
   constructor(container: HTMLElement | null, options?: EmulatorJsPlayerOptions);
@@ -46,6 +48,7 @@ export class EmulatorJsPlayer {
   setVolume(value: number): boolean;
   resumeAudio(): void;
   renderInfo(): { software: string; cap: number; width: number; height: number };
+  setCanvasCap(lines: number): boolean;
   screenshot(options?: { timeout?: number }): Promise<Blob | null>;
   restartGame(): boolean;
   fastForward: boolean;

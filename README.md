@@ -135,6 +135,10 @@ game) and reloads when the player taps it.
   latest save state was made with the other core starts with that core. SNES keeps the core id
   `snes` (EmulatorJS's Snes9x) so save states made before Snes9x 2005 was added still load.
 - Rewind keeps a state every 2nd frame (every 6th on a TV: about a third of the work).
+- European (PAL) cartridges run at 50 Hz like on their console (game and music 17 % slower than
+  the American release). The game page shows it (Mega Drive and SNES headers, NES 2.0, else the
+  file name) and offers **60 Hz · tam hız** per game, which sets the core's region option
+  (`src/lib/region.ts`); the runtime patch makes it win over EmulatorJS's stored options.
 - Measured and left out: minimal Asyncify with the 4.2.3 OpenAL driver (the game froze in about
   one start in six; RetroPlay's builds drop Asyncify entirely instead), auto frameskip and PicoDrive's fast
   renderer (small gains or less accurate pictures), Snes9x 2010 (crashed while loading with the

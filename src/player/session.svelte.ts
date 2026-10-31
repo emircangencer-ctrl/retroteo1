@@ -14,7 +14,9 @@ import { needsArcadeRecheck } from '../lib/arcade-records.ts';
 import { readZipDirectory } from '../zip-rom.js';
 import { fullscreenElement, isFullscreen, enterFullscreen, leaveFullscreen } from '../fullscreen.js';
 import { displayStart, displayShader, displayLabel, DISPLAY_SCALES } from '../display-modes.js';
-import { describeResult, paceWarning, deviceSummary, addToHistory } from '../performance-meter.js';
+import { describeResult, paceWarning, deviceSummary, addToHistory, nominalRate } from '../performance-meter.js';
+import { tvPictureLines, chooseTvPicture, TV_PICTURE_LINES } from '../lib/tv.ts';
+import { regionCoreOptions } from '../lib/region.ts';
 import * as db from '../lib/db.ts';
 import { library } from '../lib/library.svelte.ts';
 import { settings, type DisplayChoice } from '../lib/settings.svelte.ts';
@@ -40,8 +42,6 @@ import type { Game, SaveStateRecord, SlotId, SlotInfo } from '../lib/types.ts';
  */
 export const REWIND_CONFIG = Object.freeze({ rewind_enable: 'true', rewind_granularity: '2' });
 export const REWIND_CONFIG_TV = Object.freeze({ rewind_enable: 'true', rewind_granularity: '6' });
-/** Picture lines on a TV at most (consoles have 224–240; 1080 keeps a 4K box from drawing 2160). */
-export const TV_CANVAS_CAP = 1080;
 export type MenuPanel = 'main' | 'slots' | 'display' | 'controls';
 export interface PlayerAction { label: string; run: () => void }
 interface StartOptions { coreOverride?: string; fresh?: boolean; slot?: SlotId }
@@ -71,6 +71,9 @@ class PlayerSession {
   fullscreen = $state(false);
   fullscreenFallback = $state(false);
   perfRunning = $state(false);
+  /** Milliseconds from "Oyna" to the running game, for the speed test. */
+  lastStartMs = 0;
+  #launchAt = 0;
   coreId = $state<string | null>(null);
   coreName = $state('');
   vertical = $state(false);
@@ -180,6 +183,7 @@ class PlayerSession {
 
   // ---- start -------------------------------------------------------------------------------------
   async start(id: string, options: StartOptions = {}) {
+    this.#launchAt = performance.now();
     if (this.#closing) await this.#closing;
     let game = library.get(id);
     if (!game || !isPlayable(game)) {
@@ -303,8 +307,11 @@ class PlayerSession {
         systemLabel: candidate.label,
         gameId: emulatorGameId(game),
         shader: start.shader,
-        // The TV: never more than 1080 lines, even when a box renders the app at 4K.
-        canvasCap: tv.active ? TV_CANVAS_CAP : 0,
+        // The TV: the picture height the speed test found best for it (1080 until measured), so a
+        // weak TV box draws fewer pixels; Settings can fix one.
+        canvasCap: tv.active ? tvPictureLines(settings.prefs.tvPicture, settings.prefs.tvPictureMeasured) : 0,
+        // A PAL cartridge the player wants at 60 Hz: the core's region option, from the first frame.
+        forcedCoreOptions: regionCoreOptions(candidate.coreId, Boolean(game.sixtyHz)),
         // Consoles keep RetroArch's rewind buffer (a state every 2nd frame: about 15 % more work per
         // frame on Super Nintendo, measured); arcade boards' states are too large for it.
         retroarchConfig: { ...start.retroarchConfig, ...(game.platform === 'ARCADE' ? {} : tv.active ? REWIND_CONFIG_TV : REWIND_CONFIG) },
@@ -376,6 +383,7 @@ class PlayerSession {
       else if (tv.active && !this.notice) this.showNotice('Oyun menüsü: kumandanın Geri tuşu', { timeout: 3500 });
 
       this.running = true;
+      this.lastStartMs = Math.round(performance.now() - this.#launchAt);
       this.status = this.#statusLine('Çalışıyor');
       // RetroPlay draws its own bar and menu; EmulatorJS's own menus stay hidden.
       player.setImmersive?.(true);
@@ -850,15 +858,42 @@ class PlayerSession {
     if (this.menuOpen) await this.closeMenu();
     if (this.paused) { this.showNotice('Ölçüm için önce oyunu devam ettir'); return; }
     this.perfRunning = true;
-    this.showNotice('Performans ölçülüyor… yaklaşık 7 saniye', { timeout: 9000 });
+    // On a TV with a GPU the game is measured at each picture height and the best one is kept.
+    const levels = tv.active && typeof player.setCanvasCap === 'function' && !player.renderInfo?.().software ? TV_PICTURE_LINES : null;
+    this.showNotice(levels ? 'Performans ölçülüyor… görüntü 3 boyutta deneniyor, yaklaşık 15 saniye' : 'Performans ölçülüyor… yaklaşık 7 saniye', { timeout: levels ? 18000 : 9000 });
     try {
       const normalFps = await player.measurePace({ ms: 2000 });
-      const result = this.#emulator === player ? await player.benchmark({ seconds: 4 }) : null;
+      let result: { fps: number; headroom: number } | null = null;
+      let pictures: Array<{ lines: number; fps: number; picture: string }> | null = null;
+      let chosen = 0;
+      if (levels) {
+        pictures = [];
+        for (const lines of levels) {
+          if (this.#emulator !== player) return;
+          player.setCanvasCap(lines);
+          await new Promise(resolve => setTimeout(resolve, 700));
+          const measured = await player.benchmark({ seconds: 3 });
+          if (!measured) break;
+          const info = player.renderInfo();
+          pictures.push({ lines, fps: Math.round(measured.fps), picture: `${info.width}×${info.height}` });
+        }
+        const best = chooseTvPicture(pictures);
+        if (best) settings.setPrefs({ tvPictureMeasured: best });
+        chosen = tvPictureLines(settings.prefs.tvPicture, settings.prefs.tvPictureMeasured);
+        player.setCanvasCap(chosen);
+        const used = pictures.find(p => p.lines === chosen) || pictures[0];
+        if (used) result = { fps: used.fps, headroom: used.fps / 60 };
+        await new Promise(resolve => setTimeout(resolve, 400));
+      } else {
+        result = await player.benchmark({ seconds: 4 });
+      }
       if (this.#emulator !== player) return;
       if (!result) { this.showNotice('Performans ölçülemedi'); return; }
       const render = player.renderInfo?.();
       const screen = tv.display();
-      const entry = { at: Date.now(), title: game.title, platform: game.platform, core: this.coreId || '', headroom: result.headroom, fps: result.fps, normalFps, gpu: render?.software ? 'software' : 'hardware', ...(render?.height ? { picture: `${render.width}×${render.height}` } : {}), ...(screen ? { refresh: screen.refresh } : {}), ...deviceSummary() };
+      // A PAL (50 Hz) game: its normal pace is 50 and the machine is clearly faster than that.
+      const rate = nominalRate(normalFps, result.fps);
+      const entry = { at: Date.now(), title: game.title, platform: game.platform, core: this.coreId || '', headroom: result.fps / rate, fps: result.fps, normalFps, rate, gpu: render?.software ? 'software' : 'hardware', ...(render?.height ? { picture: `${render.width}×${render.height}` } : {}), ...(pictures ? { pictures, chosen } : {}), ...(this.lastStartMs > 0 ? { startMs: this.lastStartMs } : {}), ...(screen ? { refresh: screen.refresh } : {}), ...deviceSummary() };
       addToHistory(entry);
       const warning = paceWarning(normalFps);
       this.showNotice(warning ? `${describeResult(entry)} · ${warning}` : describeResult(entry), { timeout: 10000 });

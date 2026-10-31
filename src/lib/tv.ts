@@ -28,6 +28,29 @@ export function refreshSlowdown(refresh: number): number {
   return refresh < 60 ? 1 - refresh / 60 : 0;
 }
 
+/** Picture heights the TV can draw the game at (lines), largest first. */
+export const TV_PICTURE_LINES: readonly number[] = Object.freeze([1080, 720, 480]);
+export type TvPicture = 'auto' | '1080' | '720' | '480';
+
+/** Lines the TV draws: the player's choice, else this TV's measured best, else 1080. */
+export function tvPictureLines(choice: string, measured: number): number {
+  if (choice === '1080' || choice === '720' || choice === '480') return Number(choice);
+  return TV_PICTURE_LINES.includes(measured) ? measured : 1080;
+}
+
+/**
+ * This TV's best picture height from the speed test at each height: the largest that runs a 60 Hz
+ * game with 1.3× headroom; if none does, the fastest (a larger one when within 5 % of it).
+ */
+export function chooseTvPicture(results: ReadonlyArray<{ lines: number; fps: number }>, rate = 60): number {
+  const valid = results.filter(r => TV_PICTURE_LINES.includes(r.lines) && Number.isFinite(r.fps) && r.fps > 0);
+  if (!valid.length) return 0;
+  const enough = valid.filter(r => r.fps >= rate * 1.3).sort((a, b) => b.lines - a.lines);
+  if (enough.length) return enough[0].lines;
+  const best = Math.max(...valid.map(r => r.fps));
+  return valid.filter(r => r.fps >= best * 0.95).sort((a, b) => b.lines - a.lines)[0].lines;
+}
+
 /** A pull request number typed on the TV (1–999999), or '' if it is not one. */
 export function previewNumber(text: string): string {
   const value = String(text ?? '').trim();

@@ -9,11 +9,12 @@ import { RETROPLAY_PATCH, PACKAGES, CORES, ALL_CORES, BUILT_CORES, FAST_CORES, P
 
 function patchedRuntime({ cfg = 'video_vsync = true\naudio_latency = 64\n', extraCfg, extraFiles, fetchImpl, renderer = '', page = {} } = {}) {
   const written = [];
-  class EJS_GameManager { getRetroArchCfg() { return cfg; } }
+  class EJS_GameManager { getRetroArchCfg() { return cfg; } setVariable(key, value) { (this.set ||= []).push([key, value]); } }
   class EmulatorJS {
     constructor() { this.gameManager = { FS: { writeFile: (name, data) => written.push([name, data.length]) } }; }
     getCores() { return { arcade: ['fbneo'], mame: ['mame2003_plus', 'mame2003'], nes: ['fceumm'], snes: ['snes9x'] }; }
     downloadRom() { written.push(['rom', 0]); return Promise.resolve('rom-loaded'); }
+    getCoreSettings() { return 'picodrive_region = "Auto"\npicodrive_input1 = "6 button pad"\n'; }
   }
   const window = { EJS_GameManager, EmulatorJS, RETROPLAY_RETROARCH_CFG: extraCfg, RETROPLAY_EXTRA_FILES: extraFiles, ...page };
   // A WebGL context whose renderer name the patch reads (SwiftShader: software WebGL).
@@ -121,4 +122,18 @@ test('picture line limit: software WebGL draws at most 480 lines, a page limit (
   assert.equal(patchedRuntime({ renderer: 'SwiftShader', page: { RETROPLAY_CANVAS_CAP: 0, RETROPLAY_RENDER: 'full' } }).window.RETROPLAY_CANVAS_CAP, 0);
   assert.equal(patchedRuntime({ renderer: 'Mali-G31', page: { RETROPLAY_CANVAS_CAP: 1080, RETROPLAY_RENDER: 'full' } }).window.RETROPLAY_CANVAS_CAP, 0);
   assert.equal(patchedRuntime({ renderer: 'Adreno (TM) 610', page: { RETROPLAY_CANVAS_CAP: 0 } }).window.RETROPLAY_CANVAS_CAP, 0, 'a phone with a GPU: no limit');
+});
+
+test('forced core options win in the options file the core loads and when EmulatorJS applies its stored settings', () => {
+  const { EmulatorJS, EJS_GameManager } = patchedRuntime({ page: { RETROPLAY_CORE_OPTIONS: { picodrive_region: 'US' } } });
+  const file = new EmulatorJS().getCoreSettings();
+  assert.match(file, /^picodrive_region = "US"$/m);
+  assert.doesNotMatch(file, /"Auto"/);
+  assert.match(file, /^picodrive_input1 = "6 button pad"$/m, 'other stored options stay');
+  const gm = new EJS_GameManager();
+  gm.setVariable('picodrive_region', 'Auto');
+  gm.setVariable('picodrive_input1', '3 button pad');
+  assert.deepEqual(gm.set, [['picodrive_region', 'US'], ['picodrive_input1', '3 button pad']]);
+  const plain = patchedRuntime();
+  assert.equal(new plain.EmulatorJS().getCoreSettings(), 'picodrive_region = "Auto"\npicodrive_input1 = "6 button pad"\n', 'nothing forced: unchanged');
 });

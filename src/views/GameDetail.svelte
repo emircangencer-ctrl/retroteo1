@@ -22,6 +22,7 @@
   import { crc32, diagnoseSuperMarioBros3Rom, inspectNesRom } from '../nes-rom.js';
   import { ARCADE_CORES, describeArcadeStatus, onlyKeysMissing, missingSummary } from '../arcade.js';
   import { displayLabel } from '../display-modes.js';
+  import { isPalGame } from '../lib/region.ts';
   import { SLOT_IDS, type SlotId, type SlotInfo } from '../lib/types.ts';
 
   const game = $derived(library.get(router.route.id));
@@ -37,6 +38,8 @@
   let menuOpen = $state(false);
   let sheet = $state<SlotInfo | null>(null);
   let dump = $state<'verified' | 'unverified' | null>(null);
+  /** A PAL (50 Hz) cartridge, read from its header (or its file name). */
+  let palGame = $state<boolean | null>(null);
   let biosInput: HTMLInputElement | null = $state(null);
 
   $effect(() => {
@@ -53,11 +56,13 @@
     const blob = gameBlob;
     const g = untrack(() => library.get(gameId));
     dump = null;
+    palGame = null;
     if (!g || !blob || g.platform === 'ARCADE' || blob.size > 16 * 1024 * 1024) return;
     let alive = true;
     blob.arrayBuffer().then(buffer => {
       if (!alive) return;
       const bytes = new Uint8Array(buffer);
+      palGame = isPalGame(g.platform, bytes, g.fileName || g.title);
       if (g.platform === 'NES') {
         const d = diagnoseSuperMarioBros3Rom(bytes, `${g.fileName || ''} ${g.title}`, inspectNesRom(bytes)) as { status: string } | null;
         dump = d ? (d.status === 'reference-match' ? 'verified' : 'unverified') : null;
@@ -82,6 +87,11 @@
   const mapper = $derived(game?.romValidation && Number.isInteger(game.romValidation.mapper) ? ` · Mapper ${game.romValidation.mapper}` : '');
 
   function play(options: { fresh?: boolean; slot?: SlotId } = {}) { if (game) void player.start(game.id, options); }
+
+  function setSixtyHz(on: boolean) {
+    if (!game || Boolean(game.sixtyHz) === on) return;
+    void library.patch(game.id, { sixtyHz: on }).catch(error => showToast(`Kaydedilemedi: ${(error as Error)?.message || error}`, 'error'));
+  }
 
   function chooseCore(coreId: string) {
     if (!game || coreId === activeCore) return;
@@ -253,6 +263,16 @@
           <span class="hint break">{game.fileName || '—'}</span>
           <span class="value">{formatBytes(game.size)}{game.crc32 ? ` · CRC32 ${game.crc32}` : ''}{mapper}</span>
         </div>
+        {#if coreChoices && (palGame || game.sixtyHz)}
+          <div class="row stack" id="region-row">
+            <span class="label">Bölge: Avrupa (PAL)</span>
+            <div class="seg" role="group" aria-label="Oyun hızı" id="sixty-hz">
+              <button type="button" data-hz="50" aria-pressed={!game.sixtyHz} onclick={() => setSixtyHz(false)}>50 Hz · orijinal</button>
+              <button type="button" data-hz="60" aria-pressed={Boolean(game.sixtyHz)} onclick={() => setSixtyHz(true)}>60 Hz · tam hız</button>
+            </div>
+            <span class="hint">{game.sixtyHz ? 'Oyun 60 Hz\'te, ABD sürümünün hızında çalışır. Bir oyun bölge uyarısı gösterir ya da tuhaf davranırsa 50 Hz\'e dön.' : 'Avrupa sürümleri orijinalinde 50 Hz çalışır: oyun ve müzik ABD sürümünden %17 yavaştır. 60 Hz çoğu oyunda sorunsuzdur.'}</span>
+          </div>
+        {/if}
         <div class="row stack">
           <span class="label">Emülatör</span>
           {#if coreChoices}

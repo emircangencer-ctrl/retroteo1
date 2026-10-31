@@ -172,6 +172,8 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     // At most this many lines (the TV: 1080); the runtime patch lowers it to 480 with software WebGL.
     'window.RETROPLAY_CANVAS_CAP = ' + String(canvasCap(options.canvasCap)) + ';',
     'window.EJS_defaultOptions = ' + literal(coreOptions) + ';',
+    // Core options that win over EmulatorJS's own stored ones, from the first frame (a PAL game at 60 Hz).
+    'window.RETROPLAY_CORE_OPTIONS = ' + literal(sanitizeSettings(options.forcedCoreOptions, SAFE_OPTION_KEY)) + ';',
     'window.EJS_shaders = ' + literal(RETROPLAY_SHADERS) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
     'window.EJS_gameName = ' + literal(gameName) + ';',
@@ -187,11 +189,11 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay EmulatorJS runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsPlayer {
-  constructor(container, { onError = () => {}, onWarning = () => {}, onHotkey = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled', canvasCap = 0 } = {}) {
+  constructor(container, { onError = () => {}, onWarning = () => {}, onHotkey = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, forcedCoreOptions = {}, shader = 'disabled', canvasCap = 0 } = {}) {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
-    this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader, canvasCap }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
+    this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, forcedCoreOptions, shader, canvasCap }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.fastForward=false; this.rewinding=false; this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.boundWake=()=>this.resumeAudio(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur); document.addEventListener('pointerdown',this.boundWake,true); document.addEventListener('keydown',this.boundWake,true);
@@ -366,6 +368,21 @@ export class EmulatorJsPlayer {
     if (!this.started || this.destroyed || typeof emu?.enableShader !== 'function') return false;
     try { emu.enableShader(safeShader(name)); return true; }
     catch (error) { try { this.onWarning(`Görüntü modu uygulanamadı: ${error?.message || error}`); } catch {} return false; }
+  }
+  /**
+   * Draws the running game at most `lines` lines high from now on (0: the screen's resolution).
+   * Software WebGL keeps at most 480; the 'full' render preference keeps the screen's resolution.
+   * The core's glue code measures its canvas again on a window resize (see the runtime patch).
+   */
+  setCanvasCap(lines) {
+    const win = this.frame?.contentWindow;
+    if (!this.started || this.destroyed || !win) return false;
+    let cap = canvasCap(lines);
+    if (win.RETROPLAY_RENDER === 'full') cap = 0;
+    else if (win.RETROPLAY_SOFTWARE_GL) cap = cap > 0 ? Math.min(cap, 480) : 480;
+    win.RETROPLAY_CANVAS_CAP = cap;
+    try { win.dispatchEvent(new win.Event('resize')); } catch { return false; }
+    return true;
   }
   /** The software WebGL renderer ('' with a GPU), the line cap in use and the picture's size in pixels. */
   renderInfo() {

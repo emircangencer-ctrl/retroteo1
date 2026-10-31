@@ -650,3 +650,9 @@ test('the picture line limit reaches the emulator document: the TV sets 1080, an
   assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: '1e9;alert(1)' }).includes('window.RETROPLAY_CANVAS_CAP = 0;'));
   assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: 100 }).includes('window.RETROPLAY_CANVAS_CAP = 0;'));
 });
+
+test('forced core options (a PAL game at 60 Hz) reach the emulator document, unsafe keys and values cleaned', () => {
+  const html = buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'segaMD', 3, 'picodrive', { forcedCoreOptions: { picodrive_region: 'US', 'bad key': 'x' } });
+  assert.ok(html.includes('window.RETROPLAY_CORE_OPTIONS = {"picodrive_region":"US"};'));
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'segaMD', 3, 'picodrive').includes('window.RETROPLAY_CORE_OPTIONS = {};'));
+});
