@@ -2,7 +2,8 @@
 // Playwright's Android support (the app's WebView is debuggable): the TV layout, the remote, the
 // controller bridge, the upload page (a real HTTP upload from this machine) and the inbox, the game's
 // cover from the cover archive, a game started in the TV's WebView, a controller's R2 switching fast
-// forward, Back opening the game menu, and Back on the home screen.
+// forward, Back opening the game menu, and Back on the home screen; the display mode and deploy
+// previews (app 1.2).
 // Usage (repo root, emulator running): node tv/ci/tv-check.mjs RetroPlayTV.apk
 import fs from 'node:fs';
 import path from 'node:path';
@@ -71,6 +72,25 @@ try {
       .map(el => `${el.tagName}${el.id ? '#' + el.id : ''}`).slice(0, 5).join(', '));
     if (found) throw new Error(`found: ${found}`);
   }, { critical: false });
+
+  await step('the app reports the display mode (and asks for 60 Hz only when the TV is not at 60 Hz)', async () => {
+    const screen = await page.evaluate(() => JSON.parse(window.RetroPlayTV.display()));
+    if (!(Math.abs(screen.refresh - 60) < 1.5) || !Array.isArray(screen.modes) || !screen.modes.length) throw new Error(JSON.stringify(screen));
+    if (screen.requested) throw new Error(`asked for ${screen.requested} although the screen is at ${screen.refresh} Hz`);
+    return `${screen.mode} · modes ${screen.modes.join(', ')}`;
+  }, { critical: false });
+
+  await step('a deploy preview opens by its PR number, nothing else', async () => {
+    const refused = await page.evaluate(() => ['abc', '0', '9--evil.example', '1234567'].map(value => window.RetroPlayTV.openSite(value)));
+    if (refused.some(Boolean)) throw new Error(`accepted: ${refused}`);
+    const number = Number(/deploy-preview-(\d+)--/.exec(process.env.RETROPLAY_URL || '')?.[1] || 0);
+    if (!number) return 'refused bad values (live build: no preview to reopen)';
+    await page.evaluate(n => window.RetroPlayTV.openSite(String(n)), number);
+    await sleep(1500);
+    await page.waitForFunction(n => document.documentElement.classList.contains('tv') && Boolean(document.querySelector('#app-shell')) && JSON.parse(window.RetroPlayTV.info()).preview === n && Boolean(document.querySelector('#tv-preview-badge')), number, { timeout: 120_000 });
+    return `refused bad values; preview #${number} opened with its badge`;
+  }, { critical: false });
+  await snap('preview');
 
   await step('the remote moves the focus', async () => {
     const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');

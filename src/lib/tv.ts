@@ -12,9 +12,27 @@ export interface TvBridge {
   stopUpload(): void;
   setKeepScreenOn(on: boolean): void;
   exit(): void;
+  /** The TV's display mode (app 1.2+): JSON, see TvDisplay. */
+  display?(): string;
+  /** Opens the live site ('live') or a pull request's deploy preview (its number) (app 1.2+). */
+  openSite?(which: string): boolean;
 }
 
-export interface TvInfo { app: string; versionName: string; versionCode: number; sdk: number; model: string; device: string; address: string | null; filePicker: boolean }
+export interface TvInfo { app: string; versionName: string; versionCode: number; sdk: number; model: string; device: string; address: string | null; filePicker: boolean; preview?: number; sites?: boolean }
+/** mode "3840x2160@60.00"; requested: the mode the app asked for so games run at 60 Hz ('' if none). */
+export interface TvDisplay { mode: string; refresh: number; width: number; height: number; requested: string; modes: string[] }
+
+/** The emulator advances one frame per screen refresh: how much slower than 60 Hz games play (0–1). */
+export function refreshSlowdown(refresh: number): number {
+  if (!Number.isFinite(refresh) || refresh <= 0 || Math.abs(refresh - 60) <= 0.5) return 0;
+  return refresh < 60 ? 1 - refresh / 60 : 0;
+}
+
+/** A pull request number typed on the TV (1–999999), or '' if it is not one. */
+export function previewNumber(text: string): string {
+  const value = String(text ?? '').trim();
+  return /^[1-9]\d{0,5}$/.test(value) ? value : '';
+}
 export interface InboxFile { id: string; name: string; size: number; time: number }
 export interface UploadInfo { url: string; address: string; port: number; code: string }
 

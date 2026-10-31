@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
+import android.view.Display;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -58,16 +59,22 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
     private UploadServer server;
     private InputManager inputManager;
     private ValueCallback<Uri[]> fileCallback;
-    private Uri startUrl;
-    private String origin;
+    /** The site shown: the live site, or a pull request's deploy preview (see Sites). */
+    private volatile String site;
+    private volatile String origin;
     private boolean pageLoaded = false;
+    /** The display mode asked for so games run at 60 Hz (0: none asked; see DisplayModes). */
+    private volatile int requestedMode = 0;
 
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        startUrl = Uri.parse(BuildConfig.START_URL);
-        origin = originOf(startUrl);
+        String saved = state != null ? state.getString("site") : null;
+        site = saved != null && Sites.allowed(BuildConfig.START_URL, saved) ? saved : BuildConfig.START_URL;
+        origin = originOf(Uri.parse(site));
+        requestedMode = state != null ? state.getInt("displayMode", 0) : 0;
+        applyDisplayMode();
         inbox = new Inbox(new File(getFilesDir(), "inbox"));
         gamepads = new GamepadBridge();
         server = new UploadServer(inbox, readAsset("upload.html"), deviceName(), entry -> runJs("window.RetroPlayTVHost && window.RetroPlayTVHost.inboxChanged && window.RetroPlayTVHost.inboxChanged()"));
@@ -107,7 +114,7 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
         if (state != null && web.restoreState(state) != null) {
             pageLoaded = true;
         } else {
-            web.loadUrl(BuildConfig.START_URL);
+            web.loadUrl(site);
         }
         web.requestFocus();
     }
@@ -116,6 +123,8 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         web.saveState(out);
+        out.putString("site", site);
+        out.putInt("displayMode", requestedMode);
     }
 
     @Override
@@ -302,7 +311,7 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
             if (!request.isForMainFrame()) return;
             // First start without a network (later starts work offline through the service worker).
             pageLoaded = false;
-            String html = new String(readAsset("offline.html"), StandardCharsets.UTF_8).replace("{{URL}}", BuildConfig.START_URL);
+            String html = new String(readAsset("offline.html"), StandardCharsets.UTF_8).replace("{{URL}}", site);
             view.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
         }
     }
@@ -340,7 +349,9 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
                 + ",\"model\":" + Json.quote(Build.MANUFACTURER + " " + Build.MODEL)
                 + ",\"device\":" + Json.quote(deviceName())
                 + ",\"address\":" + Json.quote(address)
-                + ",\"filePicker\":" + canPickFiles() + "}";
+                + ",\"filePicker\":" + canPickFiles()
+                + ",\"preview\":" + Sites.preview(site)
+                + ",\"sites\":" + Sites.live(BuildConfig.START_URL).endsWith(".netlify.app/") + "}";
         }
 
         @JavascriptInterface
@@ -391,6 +402,94 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
         @JavascriptInterface
         public void exit() {
             main.post(() -> moveTaskToBack(true));
+        }
+
+        /** The TV's display mode, the one asked for and the ones it offers (JSON). */
+        @JavascriptInterface
+        public String display() {
+            return displayJson();
+        }
+
+        /**
+         * Opens the live site ("live") or a pull request's deploy preview (its number), to try a
+         * change on the TV before it goes live; false for anything else. Not remembered: the app
+         * opens the live site again when it is started anew.
+         */
+        @JavascriptInterface
+        public boolean openSite(String which) {
+            String url = Sites.resolve(BuildConfig.START_URL, which);
+            if (url == null) return false;
+            main.post(() -> {
+                site = url;
+                origin = originOf(Uri.parse(url));
+                pageLoaded = false;
+                Log.i(TAG, "open " + url);
+                web.loadUrl(url);
+            });
+            return true;
+        }
+    }
+
+    // ---- display ----------------------------------------------------------------------------------
+    /**
+     * Asks for a display mode of about 60 Hz when the TV box outputs another rate (DisplayModes):
+     * the emulator advances one frame per refresh. Asked once; Android applies it while the app is
+     * in front and gives the TV its own mode back when the app is not.
+     */
+    private void applyDisplayMode() {
+        try {
+            Display display = getWindowManager().getDefaultDisplay();
+            Display.Mode[] modes = display.getSupportedModes();
+            int id = requestedMode;
+            boolean known = false;
+            for (Display.Mode mode : modes) known |= mode.getModeId() == id;
+            if (!known) {
+                Display.Mode current = display.getMode();
+                int[] widths = new int[modes.length];
+                int[] heights = new int[modes.length];
+                float[] rates = new float[modes.length];
+                for (int i = 0; i < modes.length; i++) {
+                    widths[i] = modes[i].getPhysicalWidth();
+                    heights[i] = modes[i].getPhysicalHeight();
+                    rates[i] = modes[i].getRefreshRate();
+                }
+                int pick = DisplayModes.choose(current.getPhysicalWidth(), current.getPhysicalHeight(), current.getRefreshRate(), widths, heights, rates);
+                id = pick >= 0 ? modes[pick].getModeId() : 0;
+            }
+            requestedMode = id;
+            WindowManager.LayoutParams params = getWindow().getAttributes();
+            if (params.preferredDisplayModeId != id) {
+                params.preferredDisplayModeId = id;
+                getWindow().setAttributes(params);
+            }
+            Log.i(TAG, "display " + describe(display.getMode()) + (id != 0 ? ", asked for mode " + id : ", kept"));
+        } catch (RuntimeException e) {
+            Log.w(TAG, "display mode: " + e);
+        }
+    }
+
+    private static String describe(Display.Mode mode) {
+        return mode.getPhysicalWidth() + "x" + mode.getPhysicalHeight() + "@" + String.format(java.util.Locale.ROOT, "%.2f", mode.getRefreshRate());
+    }
+
+    /** {"mode","refresh","width","height","requested","modes":[…]} for the page (speed test, settings). */
+    String displayJson() {
+        try {
+            Display display = getWindowManager().getDefaultDisplay();
+            Display.Mode current = display.getMode();
+            StringBuilder list = new StringBuilder();
+            String requested = "";
+            for (Display.Mode mode : display.getSupportedModes()) {
+                if (list.length() > 0) list.append(',');
+                list.append(Json.quote(describe(mode)));
+                if (mode.getModeId() == requestedMode) requested = describe(mode);
+            }
+            return "{\"mode\":" + Json.quote(describe(current))
+                + ",\"refresh\":" + String.format(java.util.Locale.ROOT, "%.2f", current.getRefreshRate())
+                + ",\"width\":" + current.getPhysicalWidth() + ",\"height\":" + current.getPhysicalHeight()
+                + ",\"requested\":" + Json.quote(requested) + ",\"modes\":[" + list + "]}";
+        } catch (RuntimeException e) {
+            return "{}";
         }
     }
 

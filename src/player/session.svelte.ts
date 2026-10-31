@@ -40,6 +40,8 @@ import type { Game, SaveStateRecord, SlotId, SlotInfo } from '../lib/types.ts';
  */
 export const REWIND_CONFIG = Object.freeze({ rewind_enable: 'true', rewind_granularity: '2' });
 export const REWIND_CONFIG_TV = Object.freeze({ rewind_enable: 'true', rewind_granularity: '6' });
+/** Picture lines on a TV at most (consoles have 224–240; 1080 keeps a 4K box from drawing 2160). */
+export const TV_CANVAS_CAP = 1080;
 export type MenuPanel = 'main' | 'slots' | 'display' | 'controls';
 export interface PlayerAction { label: string; run: () => void }
 interface StartOptions { coreOverride?: string; fresh?: boolean; slot?: SlotId }
@@ -301,6 +303,8 @@ class PlayerSession {
         systemLabel: candidate.label,
         gameId: emulatorGameId(game),
         shader: start.shader,
+        // The TV: never more than 1080 lines, even when a box renders the app at 4K.
+        canvasCap: tv.active ? TV_CANVAS_CAP : 0,
         // Consoles keep RetroArch's rewind buffer (a state every 2nd frame: about 15 % more work per
         // frame on Super Nintendo, measured); arcade boards' states are too large for it.
         retroarchConfig: { ...start.retroarchConfig, ...(game.platform === 'ARCADE' ? {} : tv.active ? REWIND_CONFIG_TV : REWIND_CONFIG) },
@@ -852,7 +856,9 @@ class PlayerSession {
       const result = this.#emulator === player ? await player.benchmark({ seconds: 4 }) : null;
       if (this.#emulator !== player) return;
       if (!result) { this.showNotice('Performans ölçülemedi'); return; }
-      const entry = { at: Date.now(), title: game.title, platform: game.platform, core: this.coreId || '', headroom: result.headroom, fps: result.fps, normalFps, gpu: player.renderInfo?.().software ? 'software' : 'hardware', ...deviceSummary() };
+      const render = player.renderInfo?.();
+      const screen = tv.display();
+      const entry = { at: Date.now(), title: game.title, platform: game.platform, core: this.coreId || '', headroom: result.headroom, fps: result.fps, normalFps, gpu: render?.software ? 'software' : 'hardware', ...(render?.height ? { picture: `${render.width}×${render.height}` } : {}), ...(screen ? { refresh: screen.refresh } : {}), ...deviceSummary() };
       addToHistory(entry);
       const warning = paceWarning(normalFps);
       this.showNotice(warning ? `${describeResult(entry)} · ${warning}` : describeResult(entry), { timeout: 10000 });

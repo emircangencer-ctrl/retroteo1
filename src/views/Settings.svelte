@@ -18,8 +18,17 @@
   import { loadHistory, historyReport, PERF_HISTORY_KEY } from '../performance-meter.js';
   import { inspectGamepads, describeGamepads } from '../gamepad-status.js';
   import { tv } from '../lib/tv.svelte.ts';
-  import { TV_APK_URL } from '../lib/tv.ts';
+  import { TV_APK_URL, refreshSlowdown, previewNumber } from '../lib/tv.ts';
   const tvInstallUrl = typeof location !== 'undefined' ? `${location.host}/tv` : 'retroplay/tv';
+  // The TV's display mode: games advance one frame per refresh (the app asks for 60 Hz).
+  const tvScreen = tv.display();
+  const tvSlower = tvScreen ? Math.round(refreshSlowdown(tvScreen.refresh) * 100) : 0;
+  let previewText = $state('');
+  function openPreview() {
+    const number = previewNumber(previewText);
+    if (!number) { showToast('Bir PR numarası yaz (örneğin 9).', 'error'); return; }
+    if (!tv.openSite(number)) showToast('Önizleme açılamadı.', 'error');
+  }
 
   const scales = Object.entries(DISPLAY_SCALES) as Array<[DisplayScale, { label: string; hint: string }]>;
   const filters = Object.entries(DISPLAY_FILTERS) as Array<[DisplayFilter, { label: string; hint: string }]>;
@@ -233,6 +242,28 @@
         <p class="hint">Oyun eklemek için Oyun ekle → Telefondan gönder. Kontrolcüyü TV'nin Bluetooth ayarlarından eşle; düğmeler konumlarına göre eşlenir. Oyun menüsü: kumandanın Geri tuşu. Kütüphane ve kayıtlar bu TV'de saklanır.</p>
         <div class="inline"><button type="button" class="btn btn-sm" id="tv-exit" onclick={() => tv.exit()}>Uygulamadan çık</button></div>
       </div>
+      {#if tvScreen}
+        <div class="row stack">
+          <span class="label">Ekran</span>
+          <p class="hint" id="tv-display">{tvScreen.width}×{tvScreen.height} · {Math.round(tvScreen.refresh)} Hz{tvScreen.requested ? ' · uygulama oyunlar için 60 Hz istedi' : ''}{tvSlower > 0 ? ` · oyunlar %${tvSlower} yavaş oynar: TV'nin görüntü ayarlarından 60 Hz seç` : ''}</p>
+        </div>
+      {/if}
+      {#if tv.canOpenPreviews}
+        <div class="row stack">
+          {#if tv.preview}
+            <span class="label">Önizleme #{tv.preview} açık</span>
+            <p class="hint">Bu, canlı sürüm değil: henüz canlıya alınmamış bir değişiklik. Kütüphanesi ve kayıtları canlı sürümden ayrı. Uygulama yeniden açılınca canlı sürüm açılır.</p>
+            <div class="inline"><button type="button" class="btn btn-sm btn-primary" id="tv-live" onclick={() => tv.openSite('live')}>Canlı sürüme dön</button></div>
+          {:else}
+            <span class="label">Önizleme sürümü</span>
+            <p class="hint">Bir değişikliği canlıya almadan TV'de denemek için PR numarasını yaz. Önizlemenin kütüphanesi ayrı; oyunu Oyun ekle → Telefondan gönder ile ekle.</p>
+            <div class="inline">
+              <input type="text" inputmode="numeric" maxlength="6" class="preview-number" id="tv-preview-number" placeholder="PR no" aria-label="PR numarası" bind:value={previewText} onkeydown={event => { if (event.key === 'Enter') openPreview(); }} />
+              <button type="button" class="btn btn-sm" id="tv-preview-open" onclick={openPreview}>Aç</button>
+            </div>
+          {/if}
+        </div>
+      {/if}
     {:else}
       <div class="row stack">
         <span class="label">RetroPlay'i televizyonda oyna</span>
@@ -289,6 +320,7 @@
   .plain { font-size: 13px; color: var(--text-3); line-height: 1.5; }
   .perf-history { margin: 0; padding: 10px 12px; max-height: 180px; overflow: auto; border-radius: var(--r); background: var(--bg); border: 1px solid var(--line-faint); font-family: var(--mono); font-size: 12px; line-height: 1.6; color: #C2C7D0; white-space: pre-wrap; }
   .inline { display: flex; gap: 8px; }
+  .preview-number { width: 120px; min-height: 40px; padding: 0 12px; border-radius: var(--r); border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-family: var(--mono); }
   .about { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 4px; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
   @media (min-width: 960px) { .settings { max-width: 820px; } }
 </style>

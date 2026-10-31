@@ -643,3 +643,10 @@ test('Space held fast-forwards and Backspace held rewinds (as hotkeys, never gam
     restore();
   }
 });
+
+test('the picture line limit reaches the emulator document: the TV sets 1080, anything odd is no limit', () => {
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: 1080 }).includes('window.RETROPLAY_CANVAS_CAP = 1080;'));
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm').includes('window.RETROPLAY_CANVAS_CAP = 0;'));
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: '1e9;alert(1)' }).includes('window.RETROPLAY_CANVAS_CAP = 0;'));
+  assert.ok(buildEmulatorDocument('blob:https://retroplay.invalid/rom', 'Game', 'nes', 3, 'fceumm', { canvasCap: 100 }).includes('window.RETROPLAY_CANVAS_CAP = 0;'));
+});

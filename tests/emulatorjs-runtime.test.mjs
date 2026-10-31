@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { RETROPLAY_PATCH, PACKAGES, CORES, ALL_CORES, BUILT_CORES, FAST_CORES, PRECACHED_CORES, DATA_PATH, EJS_VERSION, ensurePinnedFiles, coreFilePaths, servedCoreDir } from '../scripts/emulatorjs-runtime.mjs';
 
-function patchedRuntime({ cfg = 'video_vsync = true\naudio_latency = 64\n', extraCfg, extraFiles, fetchImpl } = {}) {
+function patchedRuntime({ cfg = 'video_vsync = true\naudio_latency = 64\n', extraCfg, extraFiles, fetchImpl, renderer = '', page = {} } = {}) {
   const written = [];
   class EJS_GameManager { getRetroArchCfg() { return cfg; } }
   class EmulatorJS {
@@ -15,8 +15,11 @@ function patchedRuntime({ cfg = 'video_vsync = true\naudio_latency = 64\n', extr
     getCores() { return { arcade: ['fbneo'], mame: ['mame2003_plus', 'mame2003'], nes: ['fceumm'], snes: ['snes9x'] }; }
     downloadRom() { written.push(['rom', 0]); return Promise.resolve('rom-loaded'); }
   }
-  const window = { EJS_GameManager, EmulatorJS, RETROPLAY_RETROARCH_CFG: extraCfg, RETROPLAY_EXTRA_FILES: extraFiles };
-  runInNewContext(RETROPLAY_PATCH, { window, fetch: fetchImpl || (async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })), Promise, Object, Array, String, Uint8Array, Error });
+  const window = { EJS_GameManager, EmulatorJS, RETROPLAY_RETROARCH_CFG: extraCfg, RETROPLAY_EXTRA_FILES: extraFiles, ...page };
+  // A WebGL context whose renderer name the patch reads (SwiftShader: software WebGL).
+  const gl = { getExtension: name => (name === 'WEBGL_debug_renderer_info' ? { UNMASKED_RENDERER_WEBGL: 1 } : null), getParameter: () => renderer, RENDERER: 2 };
+  const document = { createElement: () => ({ getContext: () => (renderer ? gl : null) }) };
+  runInNewContext(RETROPLAY_PATCH, { window, document, fetch: fetchImpl || (async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })), Promise, Object, Array, String, Uint8Array, Error, Math });
   return { window, written, EJS_GameManager, EmulatorJS };
 }
 
@@ -109,4 +112,13 @@ test('pinned downloads: fetched once, reused from the cache, refused when the co
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('picture line limit: software WebGL draws at most 480 lines, a page limit (the TV: 1080) is kept with a GPU, "full" removes both', () => {
+  assert.equal(patchedRuntime({ renderer: 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))' }).window.RETROPLAY_CANVAS_CAP, 480);
+  assert.equal(patchedRuntime({ renderer: 'Mali-G31', page: { RETROPLAY_CANVAS_CAP: 1080 } }).window.RETROPLAY_CANVAS_CAP, 1080);
+  assert.equal(patchedRuntime({ renderer: 'SwiftShader', page: { RETROPLAY_CANVAS_CAP: 1080 } }).window.RETROPLAY_CANVAS_CAP, 480, 'the lower of the two');
+  assert.equal(patchedRuntime({ renderer: 'SwiftShader', page: { RETROPLAY_CANVAS_CAP: 0, RETROPLAY_RENDER: 'full' } }).window.RETROPLAY_CANVAS_CAP, 0);
+  assert.equal(patchedRuntime({ renderer: 'Mali-G31', page: { RETROPLAY_CANVAS_CAP: 1080, RETROPLAY_RENDER: 'full' } }).window.RETROPLAY_CANVAS_CAP, 0);
+  assert.equal(patchedRuntime({ renderer: 'Adreno (TM) 610', page: { RETROPLAY_CANVAS_CAP: 0 } }).window.RETROPLAY_CANVAS_CAP, 0, 'a phone with a GPU: no limit');
 });

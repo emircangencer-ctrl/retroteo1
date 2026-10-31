@@ -1468,6 +1468,19 @@ const tvStub = () => {
     exit: () => { state.exited = true; }
   };
 };
+// The TV app 1.2+: the display mode (a box that outputs 50 Hz and offers no 60 Hz mode) and deploy previews.
+const tvStubWithScreen = () => {
+  if (window !== window.top) return;
+  const opened = [];
+  const base = window.RetroPlayTV;
+  const info = JSON.parse(base.info());
+  window.__opened = opened;
+  window.RetroPlayTV = { ...base,
+    info: () => JSON.stringify({ ...info, versionName: '1.2.0', sites: true, preview: Number(sessionStorage.getItem('tv-preview') || 0) }),
+    display: () => JSON.stringify({ mode: '3840x2160@50.00', refresh: 50, width: 3840, height: 2160, requested: '', modes: ['3840x2160@50.00', '1920x1080@50.00'] }),
+    openSite: which => { opened.push(which); return /^([1-9]\d{0,5}|live)$/.test(which); }
+  };
+};
 const tvPad = (pressed, index = 0, id = 'Test Pad') => ({ index, id, timestamp: Date.now(), axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, b) => [pressed.includes(b) ? 1 : 0, pressed.includes(b) ? 1 : 0]) });
 
 await scenario('TV app: files sent from a phone are imported, the remote moves the focus, Back goes back and opens the game menu, controllers come from the app', async (page, context) => {
@@ -1566,6 +1579,42 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   await waitStatus(page, /^Çalışıyor/);
   await waitFor(async () => (await ff()) === 'true');
 }, { init: tvStub, viewport: { width: 960, height: 540 } });
+
+await scenario('TV app 1.2: the screen\'s refresh rate in Settings and in the speed test; a deploy preview opens by its PR number and says so', async page => {
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-display');
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-display').textContent.trim()), "3840×2160 · 50 Hz · oyunlar %17 yavaş oynar: TV'nin görüntü ayarlarından 60 Hz seç");
+  // A preview by its number; anything else is refused before it reaches the app.
+  await page.fill('#tv-preview-number', '9x');
+  await click(page, '#tv-preview-open');
+  await page.fill('#tv-preview-number', '9');
+  await click(page, '#tv-preview-open');
+  assert.deepEqual(await page.evaluate(() => window.__opened), ['9']);
+  // In a preview: a badge on every screen and the way back.
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-preview-badge')), null, 'no badge on the live site');
+  await page.evaluate(() => sessionStorage.setItem('tv-preview', '9'));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('#tv-preview-badge');
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-preview-badge').textContent), 'ÖNİZLEME #9');
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-live');
+  await click(page, '#tv-live');
+  assert.deepEqual(await page.evaluate(() => window.__opened), ['live']);
+  // The speed test names the refresh rate; the picture is limited to 1080 lines on the TV.
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  const cap = await page.evaluate(() => { const frame = document.querySelector('#player-screen iframe'); return { asked: /RETROPLAY_CANVAS_CAP = (\d+);/.exec(frame.srcdoc)?.[1], used: frame.contentWindow.RETROPLAY_CANVAS_CAP }; });
+  assert.deepEqual(cap, { asked: '1080', used: 480 }, 'the TV asks for 1080 lines; software WebGL here lowers it to 480');
+  await page.waitForTimeout(800);
+  await page.evaluate(() => window.RetroPlayTVHost.menu());
+  await page.waitForSelector('#perf-test');
+  await click(page, '#perf-test');
+  const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 20000, interval: 300 });
+  assert.match(text || '', /TV ekranı 50 Hz: oyunlar %17 yavaş oynar/);
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
+  assert.equal(history[0].refresh, 50);
+  assert.match(history[0].picture, /^\d+×\d+$/);
+}, { init: `(${tvStub})();(${tvStubWithScreen})();`, viewport: { width: 960, height: 540 }, render: 'auto' });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
   assert.deepEqual(cdnRequests, []);

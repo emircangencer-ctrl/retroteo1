@@ -264,7 +264,11 @@ the app and polled by the page as standard gamepads. Games get onto the TV with 
 **Telefondan gönder**: a QR code, the TV's address and a 4-digit code for an upload page on the
 home network; the files then go through the usual review. The site's `/tv` address redirects to
 the latest APK (`tv-latest` release, built by `.github/workflows/tv.yml`, which also runs the app
-on Google TV and Android TV emulators).
+on Google TV and Android TV emulators); `/tv-test` to the build of an open pull request.
+The app (1.2) asks the TV for 60 Hz (games advance one frame per refresh; 50 Hz plays them a sixth
+slower), the picture is drawn at most 1080 lines high, and Settings can open a pull request's
+deploy preview to try a change on the TV first. A secret phrase (`TV_SIGNING_SEED`) gives every
+build the same signing key, so updates keep the TV's library.
 
 ## Arcade sets and BIOS files
 

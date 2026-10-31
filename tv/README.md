@@ -31,6 +31,19 @@ with Google TV or Android TV built in.
   pauses for a minute. Many Google TV devices have no file picker; where one exists, *Dosya seç*
   is offered too (USB drives).
 - Keeps the screen on while a game runs (not while paused or browsing).
+- **60 Hz**: the emulator advances one frame per screen refresh, so a box that outputs 50 Hz (or
+  24/25/30 Hz after a film) plays every game a sixth slower or worse. The app asks Android for a
+  display mode of about 60 Hz — at the current resolution if the TV offers it, else the largest
+  resolution that has it (`DisplayModes`); Android applies it while the app is in front and gives
+  the TV its own mode back otherwise. Settings → Google TV shows the mode, and the speed test
+  names the refresh rate ("TV ekranı 50 Hz: oyunlar %17 yavaş oynar").
+- **Picture size**: on the TV the game is drawn at most 1080 lines high, so a box that renders apps
+  at 4K never draws 2160 lines for a 240-line game (the speed test shows the picture size).
+- **Deploy previews**: Settings → Google TV → *Önizleme sürümü* opens a pull request's deploy
+  preview by its number (`Sites`: the live site and `deploy-preview-<n>--…netlify.app` only), to try
+  a change on the TV before it goes live. A badge says *ÖNİZLEME #n* on every screen; *Canlı sürüme
+  dön* returns, and so does starting the app anew. A preview has its own library (another site to
+  the WebView); files from the phone go to whichever is open.
 - Saves nothing outside itself: the library and saves live in the app's WebView storage on the TV,
   there is no ROM download or backup export there, and uninstalling the app removes them.
 
@@ -52,6 +65,14 @@ in Turkey yet; if it does later, the APK may need to be registered or installed 
 
 ## Updating and the signing key
 
+**Easiest: one secret phrase.** Add a repository secret `TV_SIGNING_SEED` (GitHub → Settings →
+Secrets and variables → Actions → New repository secret) holding a long random phrase, at least 24
+characters. `tv/ci/seed-keystore.py` derives the same RSA-3072 key and the same certificate from it
+on every build (the CI checks that the derivation never changes), so new versions install over the
+old one and keep the TV's library. A phrase can be made on Windows in PowerShell:
+`$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)`.
+Keep a copy (a password manager): with another phrase the app has to be reinstalled once.
+
 The signing key is never stored in the repository. The workflow signs with the
 `TV_KEYSTORE_BASE64` (a PKCS#12 keystore, base64) and `TV_KEYSTORE_PASSWORD` repository secrets
 when they exist, so every build has the same key and a new APK installs over the old one, keeping
@@ -71,9 +92,10 @@ uninstall (which deletes the app's data on the TV).
 
 ## Building
 
-GitHub Actions (`.github/workflows/tv.yml`) builds it with Gradle 8.11 / AGP 8.7 (JDK 17), checks
+GitHub Actions (`.github/workflows/tv.yml`) runs the unit tests (`DisplayModes`, `Sites`), builds it with Gradle 8.11 / AGP 8.7 (JDK 17), checks
 the APK (signature, `leanback-launchable-activity`), publishes it as the `tv-latest` release (from
-`main` only) and runs it on Android TV emulators (Google TV API 34 and Android TV API 33) against
+`main` only; a pull request's build goes to `tv-test`, which the site's `/tv-test` address points to,
+for trying a change of the app itself on the TV before it goes live) and runs it on Android TV emulators (Google TV API 34 and Android TV API 33) against
 the deploy of the same commit: install, the TV layout, the remote, a controller key event, a real
 HTTP upload into the inbox, the import, the game's cover from GitHub, a game started in the
 WebView, R2 switching fast forward, Back opening the game menu, Back on the home screen.

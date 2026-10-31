@@ -192,8 +192,9 @@ export const RETROPLAY_PATCH = `
   // Software WebGL (no usable GPU: SwiftShader, llvmpipe …) draws every pixel on the CPU, and a
   // phone-sized picture then costs more than the game itself (measured: Mega Drive 37 → 59 frames
   // a second on a 4× slowed CPU). There the picture is drawn at most RETROPLAY_CANVAS_CAP lines
-  // high (twice the consoles' 240) and the browser scales it up. RETROPLAY_RENDER = 'full' keeps
-  // the full resolution.
+  // high (twice the consoles' 240) and the browser scales it up. The page may set a cap of its own
+  // (the TV app: 1080 lines, so a TV box rendering at 4K never draws 2160); RETROPLAY_RENDER = 'full'
+  // keeps the full resolution.
   function softwareRenderer() {
     try {
       var canvas = document.createElement('canvas');
@@ -209,7 +210,8 @@ export const RETROPLAY_PATCH = `
     }
   }
   window.RETROPLAY_SOFTWARE_GL = softwareRenderer();
-  if (window.RETROPLAY_SOFTWARE_GL && window.RETROPLAY_RENDER !== 'full' && !(window.RETROPLAY_CANVAS_CAP > 0)) window.RETROPLAY_CANVAS_CAP = 480;
+  if (window.RETROPLAY_RENDER === 'full') window.RETROPLAY_CANVAS_CAP = 0;
+  else if (window.RETROPLAY_SOFTWARE_GL) window.RETROPLAY_CANVAS_CAP = window.RETROPLAY_CANVAS_CAP > 0 ? Math.min(window.RETROPLAY_CANVAS_CAP, 480) : 480;
   var CANVAS_STORE_CODE = 'RPE.canvasWidth=width;RPE.canvasHeight=height;';
   var CANVAS_STORE_CAP = 'if(window.RETROPLAY_CANVAS_CAP>0&&height>window.RETROPLAY_CANVAS_CAP){width=Math.round(width*window.RETROPLAY_CANVAS_CAP/height);height=window.RETROPLAY_CANVAS_CAP}' + CANVAS_STORE_CODE;
   if (Emulator && Emulator.prototype && typeof Emulator.prototype.initGameCore === 'function') {

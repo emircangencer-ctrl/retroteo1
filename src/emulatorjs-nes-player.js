@@ -93,6 +93,7 @@ const CORES_BY_SYSTEM = Object.freeze({
   mame: new Set(['mame2003_plus', 'mame2003_plus_next'])
 });
 const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+const canvasCap = value => (Number.isInteger(value) && value >= 240 && value <= 4320 ? value : 0);
 const CORE_FILE = /^[a-z0-9_]+(-legacy)?(-wasm\.data|\.json)$/;
 const SERVED_CORE_PATH = /^cores\/[A-Za-z0-9_.-]+\/(reports\/)?[a-z0-9_]+(-legacy)?(-wasm\.data|\.json)$/;
 const ALLOWED_SHADERS = new Set([...Object.values(DISPLAY_MODES), ...Object.values(DISPLAY_SCALES), ...Object.values(DISPLAY_FILTERS)].map(mode => mode.shader).filter(Boolean));
@@ -168,6 +169,8 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
     'window.RETROPLAY_RETROARCH_CFG = ' + literal(retroarchConfig) + ';',
     // 'full': draw at the screen's full resolution even with software WebGL (see the runtime patch).
     'window.RETROPLAY_RENDER = ' + literal(options.render === 'full' ? 'full' : 'auto') + ';',
+    // At most this many lines (the TV: 1080); the runtime patch lowers it to 480 with software WebGL.
+    'window.RETROPLAY_CANVAS_CAP = ' + String(canvasCap(options.canvasCap)) + ';',
     'window.EJS_defaultOptions = ' + literal(coreOptions) + ';',
     'window.EJS_shaders = ' + literal(RETROPLAY_SHADERS) + ';',
     'window.EJS_gameUrl = ' + literal(gameUrl) + ';',
@@ -184,11 +187,11 @@ export function buildEmulatorDocument(gameUrl, gameName, systemId = 'nes', gameI
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>RetroPlay EmulatorJS runtime</title></head><body style="margin:0;background:#000;overflow:hidden"><div id="ejs-player"></div><script>' + startup + '</script></body></html>';
 }
 export class EmulatorJsPlayer {
-  constructor(container, { onError = () => {}, onWarning = () => {}, onHotkey = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled' } = {}) {
+  constructor(container, { onError = () => {}, onWarning = () => {}, onHotkey = () => {}, gameId = 1, systemId = 'nes', systemLabel = 'NES', coreId = systemId, extraFiles = [], retroarchConfig = {}, coreOptions = {}, shader = 'disabled', canvasCap = 0 } = {}) {
     if (!ALLOWED_SYSTEM_IDS.has(systemId)) throw new TypeError(`Unsupported EmulatorJS system: ${systemId}`);
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
-    this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
+    this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader, canvasCap }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
     this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.fastForward=false; this.rewinding=false; this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.boundWake=()=>this.resumeAudio(); this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur); document.addEventListener('pointerdown',this.boundWake,true); document.addEventListener('keydown',this.boundWake,true);
@@ -364,10 +367,12 @@ export class EmulatorJsPlayer {
     try { emu.enableShader(safeShader(name)); return true; }
     catch (error) { try { this.onWarning(`Görüntü modu uygulanamadı: ${error?.message || error}`); } catch {} return false; }
   }
-  /** The software WebGL renderer the game is drawn with ('' with a GPU) and the line cap in use. */
+  /** The software WebGL renderer ('' with a GPU), the line cap in use and the picture's size in pixels. */
   renderInfo() {
     const win = this.frame?.contentWindow;
-    return { software: String(win?.RETROPLAY_SOFTWARE_GL || ''), cap: Number(win?.RETROPLAY_CANVAS_CAP) || 0 };
+    let canvas = null;
+    try { canvas = win?.document?.querySelector('#ejs-player canvas') || null; } catch {}
+    return { software: String(win?.RETROPLAY_SOFTWARE_GL || ''), cap: Number(win?.RETROPLAY_CANVAS_CAP) || 0, width: Number(canvas?.width) || 0, height: Number(canvas?.height) || 0 };
   }
   /** Sound volume 0–1 of the running game. */
   setVolume(value) {

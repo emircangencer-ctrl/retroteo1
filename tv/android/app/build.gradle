@@ -16,7 +16,7 @@ android {
         minSdk 24
         targetSdk 35
         versionCode buildNumber
-        versionName "1.1.${buildNumber}"
+        versionName "1.2.${buildNumber}"
         buildConfigField 'String', 'START_URL', "\"${retroplayUrl}\""
     }
 
@@ -24,9 +24,10 @@ android {
         buildConfig true
     }
 
-    // The signing key never lives in the repository. CI passes one in: the TV_KEYSTORE_* secrets
-    // when they exist (the same key for every build, so new versions install over old ones and keep
-    // the app's data), otherwise a key made for that run. Without either, the debug key is used.
+    // The signing key never lives in the repository. CI passes one in: the key derived from the
+    // TV_SIGNING_SEED secret or the TV_KEYSTORE_* secrets when they exist (the same key for every
+    // build, so new versions install over old ones and keep the app's data), otherwise a key made
+    // for that run. Without either, the debug key is used.
     signingConfigs {
         ci {
             def store = System.getenv('TV_KEYSTORE_FILE')
@@ -56,4 +57,9 @@ android {
         abortOnError false
         checkReleaseBuilds false
     }
+}
+
+dependencies {
+    // Unit tests only (DisplayModes, Sites); the app itself has no libraries.
+    testImplementation 'junit:junit:4.13.2'
 }

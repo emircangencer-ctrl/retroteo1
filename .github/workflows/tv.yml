@@ -60,19 +60,41 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.11.1"
+      - name: Set up Python (the signing key from a phrase)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check the phrase-derived key is the same on every run
+        run: |
+          pip install --quiet "cryptography==44.0.2"
+          # A test phrase (not a secret) whose certificate is known: the derivation must never change,
+          # or the TV app would stop installing over itself.
+          FP=$(TV_SIGNING_SEED="test phrase only for local checks 0123456789" TV_KEYSTORE_PASSWORD=x python3 tv/ci/seed-keystore.py "$RUNNER_TEMP/test.p12")
+          [ "$FP" = 3523995f950e5d39d25e62c69a5e89391d542f8c381c02ce2e61b20d9aa8fdf8 ] || { echo "::error title=TV signing::the phrase-derived certificate changed ($FP)"; exit 1; }
+          keytool -list -keystore "$RUNNER_TEMP/test.p12" -storetype pkcs12 -storepass x | grep -q '^retroplay-tv,' || { echo "::error title=TV signing::alias retroplay-tv missing"; exit 1; }
+          rm -f "$RUNNER_TEMP/test.p12"
       - name: Prepare the signing key
         env:
+          TV_SIGNING_SEED: ${{ secrets.TV_SIGNING_SEED }}
           TV_KEYSTORE_BASE64: ${{ secrets.TV_KEYSTORE_BASE64 }}
           TV_KEYSTORE_SECRET_PASSWORD: ${{ secrets.TV_KEYSTORE_PASSWORD }}
         run: |
-          # Never in the repository. With the TV_KEYSTORE_BASE64 / TV_KEYSTORE_PASSWORD secrets every
-          # build has the same key (updates install over the app and keep its data); without them
-          # this run makes its own key, and the published APK is replaced only when tv/android changes.
+          # Never in the repository. With the TV_SIGNING_SEED secret (a phrase: tv/ci/seed-keystore.py
+          # derives the same key from it every time) or the TV_KEYSTORE_BASE64 / TV_KEYSTORE_PASSWORD
+          # secrets every build has the same key (updates install over the app and keep its data);
+          # without them this run makes its own key, and the published APK is replaced only when
+          # tv/android changes.
           KEY="$RUNNER_TEMP/retroplay-tv.p12"
           if [ -n "$TV_KEYSTORE_BASE64" ] && [ -n "$TV_KEYSTORE_SECRET_PASSWORD" ]; then
             echo "$TV_KEYSTORE_BASE64" | base64 -d > "$KEY"
             PASS="$TV_KEYSTORE_SECRET_PASSWORD"
             echo "TV_SIGNING=stable" >> "$GITHUB_ENV"
+          elif [ -n "$TV_SIGNING_SEED" ]; then
+            PASS=$(openssl rand -hex 16)
+            echo "::add-mask::$PASS"
+            FP=$(TV_KEYSTORE_PASSWORD="$PASS" python3 tv/ci/seed-keystore.py "$KEY") || { echo "::error title=TV signing::TV_SIGNING_SEED is shorter than 24 characters or unusable"; exit 1; }
+            echo "TV_SIGNING=stable" >> "$GITHUB_ENV"
+            echo "::notice title=TV signing::Permanent key from TV_SIGNING_SEED · certificate SHA-256 ${FP:0:16}…"
           else
             PASS=$(openssl rand -hex 16)
             keytool -genkeypair -keystore "$KEY" -storetype pkcs12 -alias retroplay-tv -keyalg RSA -keysize 3072 -validity 36500 \
@@ -82,6 +104,10 @@ jobs:
           fi
           echo "::add-mask::$PASS"
           { echo "TV_KEYSTORE_FILE=$KEY"; echo "TV_KEYSTORE_PASSWORD=$PASS"; echo "TV_KEY_ALIAS=retroplay-tv"; } >> "$GITHUB_ENV"
+      - name: Unit tests (display modes, sites)
+        run: |
+          set -o pipefail
+          gradle -p tv/android testReleaseUnitTest --no-daemon --console=plain 2>&1 | tee test.log
       - name: Build the APK
         run: |
           set -o pipefail
@@ -89,7 +115,7 @@ jobs:
       - name: Report build errors
         if: failure()
         run: |
-          grep -nE "error:|e: |What went wrong|FAILURE|Could not|Execution failed|\.java:[0-9]+" build.log | head -40 | while IFS= read -r line; do echo "::error title=TV build::$line"; done
+          cat test.log build.log 2>/dev/null | grep -nE "error:|e: |What went wrong|FAILURE|FAILED|Could not|Execution failed|\.java:[0-9]+|Test.*>" | head -40 | while IFS= read -r line; do echo "::error title=TV build::$line"; done
       - name: Check the APK
         run: |
           APK=tv/android/app/build/outputs/apk/release/app-release.apk
@@ -103,6 +129,19 @@ jobs:
         with:
           name: RetroPlayTV
           path: RetroPlayTV.apk
+      - name: Publish a pull request's build as tv-test
+        if: github.ref_name != 'main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(env.RETROPLAY_URL, 'deploy-preview-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # For trying a change of the app itself on the TV before it goes live: the site's /tv-test
+          # address points here (Downloader). It opens the pull request's deploy preview; signed like
+          # tv-latest once the permanent key exists, so tv-latest installs over it later.
+          NOTES="RetroPlay TV 1.2.${{ github.run_number }} (deneme) · ${GITHUB_REF_NAME} · ${GITHUB_SHA::7} · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Canlı sürüm değil: TV'de Downloader'a sitenin /tv-test adresini yaz."
+          if gh release view tv-test >/dev/null 2>&1; then gh release edit tv-test --notes "$NOTES"
+          else gh release create tv-test --prerelease --title "RetroPlay TV (deneme)" --notes "$NOTES" --target "$GITHUB_SHA"; fi
+          gh release upload tv-test RetroPlayTV.apk --clobber
+          echo "::notice title=TV test release::tv-test = $GITHUB_REF_NAME (${GITHUB_SHA::7}), signing $TV_SIGNING, opens $RETROPLAY_URL"
       - name: Publish as tv-latest
         if: github.ref_name == 'main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
@@ -115,7 +154,7 @@ jobs:
           # by the permanently signed one (a single reinstall); a permanent one is never replaced
           # by a per-run one.
           SOURCE=$(git ls-files -s tv/android | sha256sum | cut -c1-16)
-          NOTES="RetroPlay TV 1.1.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
+          NOTES="RetroPlay TV 1.2.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
           if gh release view tv-latest >/dev/null 2>&1; then
             BODY=$(gh release view tv-latest --json body -q .body)
             HAS_APK=$(gh release view tv-latest --json assets -q '.assets[].name' | grep -cx RetroPlayTV.apk || true)
@@ -132,7 +171,7 @@ jobs:
             gh release create tv-latest --prerelease --title "RetroPlay TV" --notes "$NOTES" --target "$GITHUB_SHA"
           fi
           gh release upload tv-latest RetroPlayTV.apk --clobber
-          echo "::notice title=TV release::Published RetroPlay TV 1.1.${{ github.run_number }} (source $SOURCE)."
+          echo "::notice title=TV release::Published RetroPlay TV 1.2.${{ github.run_number }} (source $SOURCE)."
 
   emulator:
     name: Run on an Android TV emulator
