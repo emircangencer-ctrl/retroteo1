@@ -18,7 +18,7 @@
   import { tv } from '../lib/tv.svelte.ts';
   import { coverArt } from '../lib/cover-art.svelte.ts';
   import { player, slotName } from '../player/session.svelte.ts';
-  import { SYSTEM_CORE_LABELS } from '../player/launch.ts';
+  import { SYSTEM_CORE_LABELS, CONSOLE_CORES, consoleCoreOrder } from '../player/launch.ts';
   import { crc32, diagnoseSuperMarioBros3Rom, inspectNesRom } from '../nes-rom.js';
   import { ARCADE_CORES, describeArcadeStatus, onlyKeysMissing, missingSummary } from '../arcade.js';
   import { displayLabel } from '../display-modes.js';
@@ -69,7 +69,7 @@
 
   const slotMap = $derived(new Map(slots.map(s => [s.slot, s])));
   const used = $derived(slots.length);
-  const coreLabel = $derived(!game ? '' : game.platform === 'NES' ? (game.nesCore === 'fceumm' ? 'FCEUmm' : 'Nestopia') : game.platform === 'ARCADE' ? ((ARCADE_CORES as Record<string, { label: string }>)[game.arcade?.core || '']?.label || 'Arcade') : SYSTEM_CORE_LABELS[game.platform] || '—');
+  const coreLabel = $derived(!game ? '' : CONSOLE_CORES[game.platform] ? (CONSOLE_CORES[game.platform].find(core => core.coreId === consoleCoreOrder(game)[0])?.name || '—') : game.platform === 'ARCADE' ? ((ARCADE_CORES as Record<string, { label: string }>)[game.arcade?.core || '']?.label || 'Arcade') : SYSTEM_CORE_LABELS[game.platform] || '—');
   const titleParts = $derived(splitTitle(game?.title || ''));
   const meta = $derived(!game || !look ? '' : [look.label, game.year, game.arcade?.manufacturer, game.arcade?.set ? `${game.arcade.set}.zip` : ''].filter(Boolean).join(' · '));
   const biosMissing = $derived(Boolean(game?.arcade?.bios && !library.biosIds.has(`${game.arcade.bios}.zip`)));

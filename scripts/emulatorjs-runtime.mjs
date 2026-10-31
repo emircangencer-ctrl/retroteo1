@@ -28,6 +28,7 @@ export const PACKAGES = Object.freeze({
   nestopia: { name: '@emulatorjs/core-nestopia', integrity: 'sha512-Flz0+Sebpn5sgjJvghhQydZ5OM+Jf4jwa+E6tG1TuZGQ4+5sYeJFB3FA5zHAIXZuFBS91cWnIXRbpOUennf8Fw==' },
   fceumm: { name: '@emulatorjs/core-fceumm', integrity: 'sha512-XX9Vv2N/hzp0TstNMCTSppEs+sg+1lpJpPdSDuRqIO/cwdt7dUcF+WjNX1yQJLRbP5+XwcNHZ6K4BKy8CJpndQ==' },
   snes9x: { name: '@emulatorjs/core-snes9x', integrity: 'sha512-JTe9Rv9eOuCkgkG4ILwuCZUqNcVI3m9ju1NHTTjridUlFgJSqL4DUqF/vLKN9olCpsqlJFfcCayAOoikJxefwA==' },
+  picodrive: { name: '@emulatorjs/core-picodrive', integrity: 'sha512-FUxeHeJIIKi4XG+UdOoCARDjH7hV11XLb6LFUO644F7Ri08veGqMQkOJAoCP8uXGxa/JdgS7SXqc0a40+vLv2w==' },
   genesis_plus_gx: { name: '@emulatorjs/core-genesis_plus_gx', integrity: 'sha512-D1e2XA2CPRAjfr0JurpXJgR9dePxl/xHtaE8v1T9BqD9A3DLfobIFWsWU9jCFS4NfUxCvcLdTYdY/We3QzvcTw==' },
   fbneo: { name: '@emulatorjs/core-fbneo', integrity: 'sha512-54Yx8Kcq8DH42caTakws3pMUZc6UkBNqtZgg7Q04lNmWWc/W0wPGN0gHxG90xmlOFGHHtxp9QnicBb1NXMjGWg==' },
   mame2003_plus: { name: '@emulatorjs/core-mame2003_plus', integrity: 'sha512-z37RxbT4R6dJe4r+/+GGN0gDW7d3K+DACJPowqJDSYO8TQK9RQBWPl0nsgp1aiLYkRL7yspbJn2tu2inBMWZow==' },
@@ -35,7 +36,7 @@ export const PACKAGES = Object.freeze({
 });
 
 /** Cores RetroPlay ships. Thread variants are omitted: they need cross-origin isolation. */
-export const CORES = Object.freeze(['nestopia', 'fceumm', 'snes9x', 'genesis_plus_gx', 'fbneo', 'mame2003_plus', 'fbalpha2012_cps2']);
+export const CORES = Object.freeze(['nestopia', 'fceumm', 'snes9x', 'picodrive', 'genesis_plus_gx', 'fbneo', 'mame2003_plus', 'fbalpha2012_cps2']);
 
 /**
  * Cores RetroPlay builds itself (.github/workflows/cores.yml) with the toolchain of the 4.2.3 cores,
@@ -57,7 +58,9 @@ export const BUILT_CORES = Object.freeze({
 /** Every core the runtime serves. */
 export const ALL_CORES = Object.freeze([...CORES, ...Object.keys(BUILT_CORES)]);
 /** Cores stored for offline use when the app is installed (the default console cores, ~3.5 MB). */
-export const PRECACHED_CORES = Object.freeze(['nestopia', 'snes9x', 'genesis_plus_gx']);
+// The default console cores (the faster ones: FCEUmm, PicoDrive); Nestopia and Genesis Plus GX are
+// cached when a game first uses them.
+export const PRECACHED_CORES = Object.freeze(['fceumm', 'snes9x', 'picodrive']);
 const CORE_VARIANTS = Object.freeze(['-legacy-wasm.data', '-wasm.data']);
 
 // Same order as EmulatorJS's loader.js uses when it loads the unminified sources.

@@ -51,6 +51,8 @@ export interface Game {
   status?: string;
   lastPlayed?: number;
   nesCore?: string;
+  /** NES / Mega Drive: the core chosen for this game ("… ile dene"), when it is not the default. */
+  consoleCore?: string;
   unverifiedDumpAccepted?: boolean;
   restoredMetadataOnly?: boolean;
   // Faz 2

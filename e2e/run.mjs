@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, coverRequests, recordInputs, heldInputs, touchScreen, padGeometry, gameId } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
 
@@ -27,6 +27,8 @@ const twoPlayersRom = path.join(tmp, 'two players.nes');
 fs.writeFileSync(twoPlayersRom, twoPlayerRom());
 const colourRom = path.join(tmp, 'colour cycle.nes');
 fs.writeFileSync(colourRom, colourCycleRom());
+const mdSramRom = path.join(tmp, 'md battery.md');
+fs.writeFileSync(mdSramRom, megaDriveSramRom());
 // Cover art: a self-made cartridge that carries the No-Intro checksum of Super Mario Bros. (World)
 // under a meaningless file name, one named like a No-Intro release, and one nothing matches.
 const coverDir = path.join(tmp, 'covers');
@@ -407,13 +409,13 @@ await scenario('the performance meter measures the speed factor and normal play 
   const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
   assert.equal(history.length, 1);
   assert.ok(history[0].headroom > 1, `headroom ${history[0].headroom}`);
-  assert.equal(history[0].core, 'nestopia');
+  assert.equal(history[0].core, 'fceumm', 'the faster NES core');
   const fastForward = await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.isFastForward);
   assert.equal(Boolean(fastForward), false, 'fast-forward is off again');
   await closeGame(page);
   await page.evaluate(() => { location.hash = '#/settings'; });
   await page.waitForSelector('#perf-history');
-  assert.match(await page.evaluate(() => document.querySelector('#perf-history').textContent), /checkerboard · NES\/nestopia/);
+  assert.match(await page.evaluate(() => document.querySelector('#perf-history').textContent), /checkerboard · NES\/fceumm/);
 // Headless Chromium draws WebGL in software (SwiftShader), where the speed depends on the canvas size
 // far more than on any device: a ~800×600 picture keeps this a test of the meter, not of the machine.
 }, { viewport: { width: 1060, height: 680 } });
@@ -898,6 +900,32 @@ await scenario('cover art: found by ROM checksum or name, fetched once, kept on 
   await answerDialog(page, true);
   await waitFor(async () => (await page.evaluate(async () => (await (await caches.open('retroplay-covers-v1')).keys()).length)) === 3);
 });
+
+await scenario('faster cores: a new Mega Drive game runs on PicoDrive, a new NES game on FCEUmm; an in-game save carries over to the other core', async page => {
+  const core = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.getCore());
+  const counter = async () => { const save = await waitFor(async () => (await appBatterySaves(page)).find(s => s.byteLength >= 2) || null); return save.bytes[1]; };
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  assert.equal(await core(), 'fceumm');
+  await closeGame(page);
+  await importFile(page, mdSramRom);
+  let state = await play(page, 'md battery');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Mega Drive/, state.error);
+  assert.equal(await core(), 'picodrive');
+  await page.waitForTimeout(1500);
+  await closeGame(page);
+  const first = await counter();
+  // Started with Genesis Plus GX ("… ile dene" remembers it): the app's copy of the save goes in, the cartridge counts on.
+  const id = await gameId(page, 'md battery');
+  await page.evaluate(id => new Promise((resolve, reject) => { const r = indexedDB.open('retroplay-local-v1'); r.onsuccess = () => { const tx = r.result.transaction('games', 'readwrite'); const store = tx.objectStore('games'); const get = store.get(id); get.onsuccess = () => { store.put({ ...get.result, consoleCore: 'genesis_plus_gx' }); }; tx.oncomplete = () => { r.result.close(); resolve(); }; tx.onerror = () => reject(tx.error); }; }), id);
+  await page.reload({ waitUntil: 'networkidle' });
+  state = await play(page, 'md battery');
+  assert.equal(await core(), 'genesis_plus_gx');
+  await page.waitForTimeout(1500);
+  await closeGame(page);
+  const second = await waitFor(async () => { const value = await counter(); return value === ((first + 1) & 255) ? value : null; });
+  assert.equal(second, (first + 1) & 255, `Genesis Plus GX continued PicoDrive's save (${first} → ${second})`);
+}, { viewport: { width: 1060, height: 680 } });
 
 await scenario('a blocked cover request (the old TV app) or a page instead of a picture is tried again later, not remembered as "no cover"', async page => {
   let answered = 0;

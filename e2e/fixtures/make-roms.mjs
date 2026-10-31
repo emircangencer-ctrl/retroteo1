@@ -179,3 +179,35 @@ export function colourCycleRom() {
   rom.set(bank(code, vectors), 16);
   return rom;
 }
+
+/**
+ * A self-authored Mega Drive cartridge with battery RAM ($200001-$203FFF, odd bytes): on every
+ * start it adds one to the byte at $200001 (a boot counter) and writes $5A at $200003; then it
+ * counts the byte at $200005 up forever, so the battery RAM keeps changing; display on.
+ */
+export function megaDriveSramRom() {
+  const rom = new Uint8Array(128 * 1024);
+  const w32 = (o, v) => { rom[o] = v >>> 24; rom[o + 1] = (v >>> 16) & 255; rom[o + 2] = (v >>> 8) & 255; rom[o + 3] = v & 255; };
+  w32(0, 0x00FFFE00); w32(4, 0x00000200);
+  for (let v = 2; v < 64; v++) w32(v * 4, 0x00000280);
+  const text = (o, s) => { for (let i = 0; i < s.length; i++) rom[o + i] = s.charCodeAt(i); };
+  text(0x100, 'SEGA GENESIS    '); text(0x150, 'RETROPLAY SRAM TEST'); text(0x180, 'GM 00000000-00');
+  w32(0x1A0, 0); w32(0x1A4, rom.length - 1); w32(0x1A8, 0x00FF0000); w32(0x1AC, 0x00FFFFFF);
+  rom.set([0x52, 0x41, 0xF8, 0x20], 0x1B0); w32(0x1B4, 0x00200001); w32(0x1B8, 0x00203FFF);
+  text(0x1F0, 'JUE');
+  const code = [
+    0x13FC, 0x0001, 0x00A1, 0x30F1,   // move.b #1,($A130F1)  battery RAM on
+    0x1039, 0x0020, 0x0001,           // move.b ($200001),d0
+    0x5200,                           // addq.b #1,d0
+    0x13C0, 0x0020, 0x0001,           // move.b d0,($200001)
+    0x13FC, 0x005A, 0x0020, 0x0003,   // move.b #$5A,($200003)
+    0x33FC, 0x8004, 0x00C0, 0x0004, 0x33FC, 0x8174, 0x00C0, 0x0004, 0x33FC, 0x8C81, 0x00C0, 0x0004,
+    0x23FC, 0xC000, 0x0000, 0x00C0, 0x0004, 0x33FC, 0x00E0, 0x00C0, 0x0000,
+    0x5239, 0x0020, 0x0005,           // loop: addq.b #1,($200005)
+    0x60F8];                          // bra loop
+  code.forEach((word, i) => { rom[0x200 + i * 2] = word >> 8; rom[0x201 + i * 2] = word & 255; });
+  rom[0x280] = 0x4E; rom[0x281] = 0x73; // rte
+  let sum = 0; for (let i = 0x200; i < rom.length; i += 2) sum = (sum + ((rom[i] << 8) | rom[i + 1])) & 0xffff;
+  rom[0x18E] = sum >> 8; rom[0x18F] = sum & 255;
+  return rom;
+}

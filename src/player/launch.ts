@@ -4,7 +4,36 @@ import { ARCADE_CORES, onlyKeysMissing, isCps2KeyMissing, keyFindings, arcadeCor
 import { STAND_IN_PARENT_ZIP } from '../lib/arcade-records.ts';
 import type { BiosRecord, Game } from '../lib/types.ts';
 
-export const SYSTEM_CORE_LABELS: Readonly<Record<string, string>> = Object.freeze({ NES: 'Nestopia', SNES: 'Snes9x', MD: 'Genesis Plus GX', ARCADE: 'FinalBurn Neo / MAME 2003-Plus' });
+export const SYSTEM_CORE_LABELS: Readonly<Record<string, string>> = Object.freeze({ NES: 'FCEUmm', SNES: 'Snes9x', MD: 'PicoDrive', ARCADE: 'FinalBurn Neo / MAME 2003-Plus' });
+
+/**
+ * Consoles with two cores, the faster first (measured on a CPU slowed 8×, like a TV box: FCEUmm and
+ * PicoDrive run about twice as fast as Nestopia and Genesis Plus GX). In-game saves are the same
+ * file for both; save states are not, so a game keeps the core its states were made with.
+ */
+export const CONSOLE_CORES: Readonly<Record<string, ReadonlyArray<{ coreId: string; name: string }>>> = Object.freeze({
+  NES: Object.freeze([{ coreId: 'fceumm', name: 'FCEUmm' }, { coreId: 'nestopia', name: 'Nestopia' }]),
+  MD: Object.freeze([{ coreId: 'picodrive', name: 'PicoDrive' }, { coreId: 'genesis_plus_gx', name: 'Genesis Plus GX' }])
+});
+
+/**
+ * NES boards (iNES mapper numbers) of the licensed library that both NES cores run: FCEUmm goes
+ * first only for these. A core given a board it does not know can crash the page instead of
+ * failing, so unusual boards keep Nestopia first and FCEUmm offered, as before.
+ */
+export const FAST_NES_MAPPERS: ReadonlySet<number> = new Set([0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 16, 18, 19, 21, 22, 23, 24, 25, 26, 32, 33, 34, 64, 65, 66, 67, 68, 69, 70, 71, 73, 75, 76, 78, 79, 80, 82, 85, 86, 87, 88, 89, 92, 93, 94, 95, 97, 118, 119, 140, 152, 159, 180, 184, 185, 206, 207, 210]);
+
+/** The core a console game starts with: chosen for it, else the one of its save states, else the faster. */
+export function consoleCoreOrder(game: Pick<Game, 'platform' | 'nesCore' | 'consoleCore' | 'romValidation'>, stateCore = ''): string[] {
+  let list = (CONSOLE_CORES[game.platform] || []).map(core => core.coreId);
+  if (game.platform === 'NES') {
+    const mapper = Number(game.romValidation?.mapper ?? game.romValidation?.mapperNumber);
+    if (!Number.isInteger(mapper) || !FAST_NES_MAPPERS.has(mapper)) list = ['nestopia', 'fceumm'];
+  }
+  const chosen = game.consoleCore || (game.platform === 'NES' ? game.nesCore : '') || '';
+  const first = [chosen, stateCore].find(id => id && list.includes(id));
+  return first ? [first, ...list.filter(id => id !== first)] : list;
+}
 
 export interface CoreChoice { coreId: string; systemId: string; name: string; label: string; gameName?: string }
 export interface ExtraFile { name: string; url: string }
@@ -19,7 +48,7 @@ export interface LaunchDeps {
   readZipDirectory: (blob: Blob) => Promise<Array<{ name: string; crc?: string; size?: number }>>;
   makeUrl?: (blob: Blob) => string;
   revokeUrl?: (url: string) => void;
-  /** ?nescore=fceumm (compare FCEUmm with Nestopia). */
+  /** ?nescore=nestopia / fceumm (compare the NES cores). */
   forcedNesCore?: string | null;
   /** Whether this browser can run an arcade core (default: arcadeCoreSupported). */
   coreSupported?: (coreId: string) => boolean;
@@ -29,7 +58,7 @@ interface SystemInfo { shortLabel: string; emulatorJsCoreId: string; emulatorJsS
 
 const cores = ARCADE_CORES as Record<string, { label: string; systemId: string; opensParentZip?: boolean; requiresSimd?: boolean }>;
 
-export async function resolveLaunch(game: Game, system: SystemInfo, { coreOverride = '' }: { coreOverride?: string }, deps: LaunchDeps): Promise<Launch> {
+export async function resolveLaunch(game: Game, system: SystemInfo, { coreOverride = '', stateCore = '' }: { coreOverride?: string; stateCore?: string }, deps: LaunchDeps): Promise<Launch> {
   const makeUrl = deps.makeUrl || (blob => URL.createObjectURL(blob));
   const revoke = deps.revokeUrl || (url => URL.revokeObjectURL(url));
   const prefer = (launch: Launch): Launch => {
@@ -37,11 +66,11 @@ export async function resolveLaunch(game: Game, system: SystemInfo, { coreOverri
     const chosen = launch.cores.find(core => core.coreId === coreOverride);
     return chosen ? { ...launch, cores: [chosen] } : launch;
   };
-  if (game.platform === 'NES') {
-    const forced = deps.forcedNesCore === 'fceumm';
-    const nestopia: CoreChoice = { coreId: 'nestopia', systemId: 'nes', name: 'Nestopia', label: system.shortLabel };
-    const fceumm: CoreChoice = { coreId: 'fceumm', systemId: 'nes', name: 'FCEUmm', label: forced ? `${system.shortLabel} / FCEUmm karşılaştırma modu` : `${system.shortLabel} / FCEUmm` };
-    const list = forced ? [fceumm] : game.nesCore === 'fceumm' ? [fceumm, nestopia] : [nestopia, fceumm];
+  if (CONSOLE_CORES[game.platform]) {
+    const names = Object.fromEntries(CONSOLE_CORES[game.platform].map(core => [core.coreId, core.name]));
+    const forced = game.platform === 'NES' && deps.forcedNesCore && names[deps.forcedNesCore] ? deps.forcedNesCore : '';
+    const order = forced ? [forced] : consoleCoreOrder(game, stateCore);
+    const list: CoreChoice[] = order.map(coreId => ({ coreId, systemId: system.emulatorJsSystemId, name: names[coreId], label: forced ? `${system.shortLabel} / ${names[coreId]} karşılaştırma modu` : `${system.shortLabel} / ${names[coreId]}` }));
     return prefer({ cores: list, gameName: game.title, extraFiles: [] });
   }
   if (game.platform !== 'ARCADE') {
@@ -107,9 +136,10 @@ export async function keyBlock(game: Game, deps: Pick<LaunchDeps, 'arcadeSetCata
   return { status: `Başlatılamadı · ${what} ${found.different.length && !found.absent.length ? 'uyuşmuyor' : 'eksik'}`, message: `${problem} ${why} ${fix}` };
 }
 
-/** The core that opened a game is remembered for it (NES: FCEUmm; arcade: the core and its set name). */
+/** The core that opened a game is remembered for it (consoles: the core; arcade: the core and its set name). */
 export function rememberCore(game: Game, coreId: string): Game {
-  if (game.platform === 'NES') return { ...game, nesCore: coreId };
+  if (game.platform === 'NES') return { ...game, nesCore: coreId, consoleCore: coreId };
+  if (CONSOLE_CORES[game.platform]) return { ...game, consoleCore: coreId };
   if (game.platform === 'ARCADE' && game.arcade) {
     const alt = (game.arcade.alternatives || []).find(choice => choice.core === coreId);
     const previous = { core: game.arcade.core, status: game.arcade.status, set: game.arcade.set };
