@@ -114,6 +114,8 @@ async function scenario(name, fn, options = {}) {
   } catch (error) {
     results.push({ name, ok: false, error });
     console.log(`FAIL ${name}\n     ${error?.stack || error}\n     ${logs.slice(-5).join('\n     ')}`);
+    // On GitHub the failure is also an annotation, readable on the pull request without the log.
+    if (process.env.GITHUB_ACTIONS) console.log(`::error title=E2E FAIL::${name} — ${String(error?.message || error).replace(/\s+/g, ' ').slice(0, 600)}`);
   } finally {
     await context.close();
   }
