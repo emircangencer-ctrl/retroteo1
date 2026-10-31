@@ -12,8 +12,12 @@ import type { Game } from './types.ts';
 export const COVER_CACHE = 'retroplay-covers-v1';
 /** Pictures are kept this wide (cards are at most ~200 CSS px; 2× for sharp screens). */
 export const COVER_WIDTH = 320;
-/** Changes whenever the lists in /assets/covers change (vite.config.js). */
-export const COVER_LISTS = typeof __COVER_LISTS__ === 'string' ? __COVER_LISTS__ : 'dev';
+/**
+ * Changes whenever the lists in /assets/covers change (vite.config.js). The suffix makes every game
+ * remembered without a cover be looked up once more: "2" after the TV app before 1.1, whose blocked
+ * requests were taken for "no cover".
+ */
+export const COVER_LISTS = `${typeof __COVER_LISTS__ === 'string' ? __COVER_LISTS__ : 'dev'}:2`;
 const CHECKSUM_LIMIT = 16 * 1024 * 1024;
 const PARALLEL = 2;
 const keyOf = (id: string) => `/__covers/${encodeURIComponent(id)}`;
