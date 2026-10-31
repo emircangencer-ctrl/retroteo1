@@ -83,6 +83,13 @@ Source layout:
 
 ## Offline and updates
 
+Games, saves and slots live in IndexedDB. The app asks the browser to keep them when the device runs
+low on space (`navigator.storage.persist()`: at start, again after games are added, and from
+Settings → Depolama with **Kalıcı yap**); browsers decide by use (Chrome grants installed or
+often-used apps, Firefox asks), and Settings says which it is. Starting an arcade game reads only
+the cabinet controls (`/assets/arcade-input.json`, ~95 KB, generated from the MAME 2003-Plus catalog
+by `scripts/build-arcade-catalogs.mjs --input`) instead of the 3.4 MB catalog.
+
 The service worker stores the app shell, every built asset (including lazily loaded chunks and the
 arcade game lists), the EmulatorJS runtime and the NES, SNES and Mega Drive cores when the app is
 installed; arcade cores are stored on first use. After one online visit a game starts with no
@@ -98,9 +105,18 @@ game) and reloads when the player taps it.
    (sub-folders included; files that are not games are passed over and counted). Every file is
    checked first and listed — playable, flagged (for example an unrecognised SMB3 dump), already in
    the library or chosen twice, not supported — and only the ticked ones are added.
-2. **Oyna** / **Devam et** on the game page or the home screen. On phones and tablets the player
-   becomes a handheld (see *Touch controls and controllers*); on a computer the game fills the
-   window at 4:3 and keyboard and controllers work.
+2. The library is the start screen (three tabs: Kütüphane, Oyun ekle, Ayarlar). A tap on a cover
+   plays the game; the cover's ⋯ corner (controllers: Y; keyboard: I) opens its page. A record that
+   cannot start yet (no ROM, an incomplete set, a missing BIOS) opens its page, which says why. The
+   last game played leads the unfiltered library as **Kaldığın yerden** with its last picture.
+   Titles show the name only ("Tekken 3"); versions and regions from the DATs ("Japan, TET1/VER.E1",
+   "USA · Rev 1") sit on the line underneath (`src/lib/title.ts`); search still uses the full title.
+   On phones and tablets the player becomes a handheld (see *Touch controls and controllers*); on a
+   computer the game fills the window at 4:3 and keyboard and controllers work. The bar's ⏩ (or
+   Space) switches fast forward on and off (RetroArch's 3×, as far as the device keeps up); on NES,
+   Super Nintendo and Mega Drive ⏪ held (or Backspace held) rewinds: those games start with
+   RetroArch's rewind buffer, a state every 2nd frame (about 15 % more work per frame on Super
+   Nintendo, measured); arcade boards' states are too large for it.
 3. The menu (☰, Esc, the controller's guide button or Select+Start) pauses the game: Oyuna dön,
    Hızlı kaydet / Hızlı yükle, Kayıt yuvaları, Ekran ve ses, Kontroller, Tam ekran, Performansı ölç,
    Yeniden başlat, Oyundan çık. On a phone held upright it opens from the top; held sideways and on
@@ -217,6 +233,16 @@ and ROM sizes/CRC32s (no game data): FinalBurn Neo v1.0.0.03 (EmulatorJS/FBNeo `
 sets), MAME 2003-Plus (`3a72dae`, 5257 sets) and FB Alpha 2012 CPS2 (EmulatorJS/fbalpha2012_cps2
 `3fb5b89`, 284 sets; it ships no DAT, so its ROM tables are read from `d_cps2.c`).
 
+The full lists live in `data/arcade/` (11 MB). The build cuts them into small pieces
+(`scripts/arcade-shards.mjs` → `/assets/arcade/`): sets by name (a ROM a set shares with its
+parent or BIOS is stored as a reference to it) and, per ROM checksum, the sets with that file and
+their file counts. Recognising a zip (`src/arcade-catalog.js`) reads only its set, the sets its
+parent/BIOS chain reaches and — where a core has no set of that name or the zip does not fill it —
+the checksum entries of the zip's files, which give the best-fitting set without reading any set.
+A named zip reads a few dozen KB instead of 1.9 MB compressed / 11 MB of JSON; the result is the
+same as with the full lists (checked for every set of every core, named and renamed). Each piece's
+address carries the lists' stamp, so a piece cached from other lists is never used.
+
 - On import a zip without console ROMs is read from its central directory only and matched by set
   name, or by checksums if it was renamed. FinalBurn Neo is preferred; FB Alpha 2012 CPS2 runs CPS2
   sets from before MAME 0.178 (2016), which lack the 20-byte `.key` file FinalBurn Neo and MAME
@@ -236,6 +262,27 @@ sets), MAME 2003-Plus (`3a72dae`, 5257 sets) and FB Alpha 2012 CPS2 (EmulatorJS/
 - If a core cannot open a file (RetroArch keeps running its own menu; an empty save state reveals
   it), the next core is offered instead of switching silently — a core given a file it cannot
   handle can crash the page.
+
+## Cover art
+
+Games show their box art (or, without one, their title screen) from
+[libretro-thumbnails](https://github.com/libretro-thumbnails), the archive RetroArch uses.
+`scripts/build-cover-index.mjs` makes one list per system (`public/assets/covers/*.json`: picture
+names at a pinned commit of each repository, symbolic links resolved) and, for NES, Super Nintendo
+and Mega Drive, a table of No-Intro ROM checksums (libretro-database `metadat/no-intro`) → picture.
+
+- A console game is recognised by its ROM checksum first (NES without its 16-byte header, Super
+  Nintendo without a 512-byte copier header), the way RetroArch does, so the file name does not
+  matter; then by name: exact, same letters and digits ("PuckMan" = "Puck Man", "Legend of Zelda,
+  The" = "The Legend of Zelda"), then another version of the same game (closest region and tags; no
+  hacks, prototypes or pirate copies unless asked for by name). Arcade games are found by name.
+- The picture is fetched once from raw.githubusercontent.com (CORS-enabled; only the game's name is
+  in the address), made 320 px wide (WebP, ~20 KB) and kept in its own Cache Storage bucket
+  `retroplay-covers-v1`. The library database is not touched; the service worker does not clear the
+  bucket on updates. A game with no picture is remembered until the lists change (`__COVER_LISTS__`).
+- Lookups run only when no game is running; offline they wait for the network. Settings → Görüntü →
+  **Kapak resimleri** turns covers off (nothing is fetched); a wrong cover can be removed from the
+  game's page (⋯ → **Kapak resmini kaldır**); removing a game removes its picture.
 
 ## Save data
 

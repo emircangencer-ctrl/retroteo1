@@ -5,11 +5,16 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { encodePng } from './png.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const DIST = path.resolve(here, '..', 'dist');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain', '.wasm': 'application/wasm', '.data': 'application/octet-stream' };
 export const cdnRequests = [];
+/** Cover pictures asked of raw.githubusercontent.com; answered here with a test picture (no network). */
+export const coverRequests = [];
+// A 400×560 test "box art": orange with a blue lower third.
+export const COVER_PNG = encodePng(400, 560, (x, y) => (y < 373 ? [240, 96, 32] : [32, 64, 224]));
 
 export function startServer(port = 0) {
   const server = http.createServer((req, res) => {
@@ -33,6 +38,10 @@ export async function newPage(browser, base, { mobile = false, serviceWorkers = 
   await context.route('https://cdn.emulatorjs.org/**', route => {
     cdnRequests.push(route.request().url());
     return route.abort('blockedbyclient');
+  });
+  await context.route('https://raw.githubusercontent.com/**', route => {
+    coverRequests.push(route.request().url());
+    return route.fulfill({ status: 200, headers: { 'content-type': 'image/png', 'access-control-allow-origin': '*' }, body: COVER_PNG });
   });
   if (init) await context.addInitScript(init);
   const page = await context.newPage();

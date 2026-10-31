@@ -3,7 +3,7 @@
 // against the cores' game lists. Nothing is written here (see importer.svelte.ts for step 2).
 import { inspectNesRom, diagnoseSuperMarioBros3Rom, crc32 } from '../nes-rom.js';
 import { extractRomFilesFromZip, readZipDirectory } from '../zip-rom.js';
-import { identifyArcadeZip, describeArcadeStatus } from '../arcade.js';
+import { describeArcadeStatus } from '../arcade.js';
 import { classifyImport } from '../import-match.js';
 import { detectRomPlatform, isMegaDriveHeader } from '../rom-detect.js';
 import { platformInfo } from '../platforms.js';
@@ -54,7 +54,8 @@ export interface ReviewItem {
 export interface ScanContext {
   games: Game[];
   biosIds: Set<string>;
-  loadCatalogs: () => Promise<unknown>;
+  /** Recognises an arcade zip from its file list (src/arcade-catalog.js identifyArcade). */
+  identifyArcade: (fileName: string, entries: Array<{ name: string; size?: number; crc?: string }>) => Promise<unknown>;
 }
 
 export interface ScanResult { items: ReviewItem[]; log: string[]; ignored: number }
@@ -131,18 +132,21 @@ export async function scanRom(file: File, ctx: ScanContext, pending: Map<string,
   return ready;
 }
 
+type FoundArcade = IdentifiedArcade & { kind: string; title: string; label: string; missing: string[] };
+
 /** Looks at one zip: a console ROM archive, an arcade set or a BIOS. */
-async function scanZip(file: File, ctx: ScanContext, pending: Map<string, ReviewItem>, state: { catalogs: unknown; catalogError: Error | null }, log: string[]): Promise<ReviewItem[]> {
+async function scanZip(file: File, ctx: ScanContext, pending: Map<string, ReviewItem>, log: string[]): Promise<ReviewItem[]> {
   const item = base(file);
   let entries: Array<{ name: string }>;
   try { entries = await readZipDirectory(file); }
   catch (error) { return [skip(item, 'ZIP açılamadı · eklenmeyecek', `ZIP hatası: ${(error as Error)?.message || error}`, String((error as Error)?.message || error))]; }
 
+  // The arcade lists are read only for zips without console ROMs; a failure (offline) is explained.
+  let catalogError: Error | null = null;
+  let found: FoundArcade | null = null;
   if (!entries.some(entry => CONSOLE_EXTS.has(fileExt(entry.name)))) {
-    if (!state.catalogs && !state.catalogError) {
-      try { state.catalogs = await ctx.loadCatalogs(); } catch (error) { state.catalogError = error as Error; }
-    }
-    const found = state.catalogs ? identifyArcadeZip(file.name, entries, state.catalogs) as (IdentifiedArcade & { kind: string; title: string; label: string; missing: string[] }) | null : null;
+    try { found = await ctx.identifyArcade(file.name, entries) as FoundArcade | null; }
+    catch (error) { catalogError = error as Error; }
     if (found?.kind === 'bios') {
       const missing = found.missing || [];
       return [{
@@ -153,7 +157,8 @@ async function scanZip(file: File, ctx: ScanContext, pending: Map<string, Review
     }
     if (found?.kind === 'game') {
       const biosInstalled = !found.bios || ctx.biosIds.has(`${found.bios}.zip`);
-      const parentInstalled = !found.parent || found.status !== 'needs-parent' || ctx.games.some(g => g.platform === 'ARCADE' && g.arcade?.set === found.parent && g.blob instanceof Blob);
+      const parent = found.parent;
+      const parentInstalled = !parent || found.status !== 'needs-parent' || ctx.games.some(g => g.platform === 'ARCADE' && g.arcade?.set === parent && g.blob instanceof Blob);
       const status = describeArcadeStatus(found, { biosInstalled, parentInstalled }) as string;
       const playable = (found.status === 'complete' || (found.status === 'needs-parent' && parentInstalled)) && biosInstalled;
       const hash = await sha256(file);
@@ -177,13 +182,13 @@ async function scanZip(file: File, ctx: ScanContext, pending: Map<string, Review
   }
 
   if (!entries.some(entry => ROM_EXTENSIONS.has(fileExt(entry.name)))) {
-    const why = state.catalogError ? `Arcade oyun listesi yüklenemedi (${state.catalogError.message}); bağlantı varken yeniden dene.` : 'İçinde ROM yok ve bir arcade seti ya da BIOS olarak da tanınmadı.';
+    const why = catalogError ? `Arcade oyun listesi yüklenemedi (${catalogError.message}); bağlantı varken yeniden dene.` : 'İçinde ROM yok ve bir arcade seti ya da BIOS olarak da tanınmadı.';
     return [skip(item, 'ZIP içinde desteklenen oyun yok · eklenmeyecek', 'ZIP içinde desteklenen ROM yok', why)];
   }
   let extracted: File[];
   try { extracted = await extractRomFilesFromZip(file); }
   catch (error) {
-    const message = `${(error as Error)?.message || error}${state.catalogError ? ` (arcade oyun listesi yüklenemedi: ${state.catalogError.message})` : ''}`;
+    const message = `${(error as Error)?.message || error}${catalogError ? ` (arcade oyun listesi yüklenemedi: ${catalogError.message})` : ''}`;
     return [skip(item, 'ZIP açılamadı · eklenmeyecek', `ZIP hatası: ${message}`, message)];
   }
   if (!extracted.length) return [skip(item, 'ZIP içinde desteklenen oyun yok · eklenmeyecek', 'ZIP içinde desteklenen ROM yok', 'İçinde ROM yok ve bir arcade seti ya da BIOS olarak da tanınmadı.')];
@@ -201,13 +206,12 @@ export async function scanFiles(files: File[], ctx: ScanContext, { folder = fals
   const log: string[] = [];
   const items: ReviewItem[] = [];
   const pending = new Map<string, ReviewItem>();
-  const state = { catalogs: null as unknown, catalogError: null as Error | null };
   let ignored = 0;
   const list = folder ? files.filter(file => { const keep = SCAN_EXTENSIONS.has(fileExt(file.name)); if (!keep) ignored++; return keep; }) : files;
   let done = 0;
   for (const file of list) {
     try {
-      if (fileExt(file.name) === 'zip') items.push(...await scanZip(file, ctx, pending, state, log));
+      if (fileExt(file.name) === 'zip') items.push(...await scanZip(file, ctx, pending, log));
       else items.push(await scanRom(file, ctx, pending));
     } catch (error) {
       items.push(skip(base(file), 'Okunamadı · eklenmeyecek', `okunamadı: ${(error as Error)?.message || error}`, String((error as Error)?.message || error)));

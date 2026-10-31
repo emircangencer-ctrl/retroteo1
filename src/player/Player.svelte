@@ -19,13 +19,13 @@
   onMount(() => { player.mount({ modal, screen, touchRoot, biosInput }); });
 
   const loading = $derived(player.open && !player.running && !player.blocked && !player.consent && !player.error);
-  const showPadChip = $derived(player.touchPlay && player.padInUse);
+  const showPadChip = $derived(player.controls.touchPlay && player.controls.padInUse);
 
   // Desktop: the bar steps away while playing in fullscreen and comes back on mouse movement.
   function wake() {
     idle = false;
     if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => { if (player.running && !player.paused && !player.menuOpen && (player.fullscreen || tv.active) && !player.touchPlay) idle = true; }, 2500);
+    idleTimer = setTimeout(() => { if (player.running && !player.paused && !player.menuOpen && (player.fullscreen || tv.active) && !player.controls.touchPlay) idle = true; }, 2500);
   }
   // In fullscreen and on a TV the bar steps away while playing.
   $effect(() => { void player.running; if ((!player.fullscreen && !tv.active) || player.menuOpen) idle = false; else wake(); });
@@ -36,6 +36,17 @@
     player.tapInput(name);
     (event.currentTarget as HTMLElement).blur();
   }
+
+  // ⏪ rewinds while held (finger or mouse); ⏩ switches fast forward on and off.
+  function rewindDown(event: PointerEvent) {
+    const button = event.currentTarget as HTMLElement;
+    try { button.setPointerCapture(event.pointerId); } catch {}
+    player.setRewinding(true);
+  }
+  function rewindUp(event: PointerEvent) {
+    player.setRewinding(false);
+    (event.currentTarget as HTMLElement).blur();
+  }
 </script>
 
 <div
@@ -43,16 +54,16 @@
   id="player-modal"
   class="player"
   class:hidden={!player.open}
-  class:touch-play={player.touchPlay}
+  class:touch-play={player.controls.touchPlay}
   class:menu-open={player.menuOpen}
   class:settings-view={player.menuOpen && player.panel === 'controls'}
-  class:pad-hidden={player.padHidden}
-  class:pad-in-use={player.padInUse}
+  class:pad-hidden={player.controls.padHidden}
+  class:pad-in-use={player.controls.padInUse}
   class:is-vertical={player.vertical}
   class:is-fallback={player.fullscreenFallback}
   class:tv={tv.active}
   class:idle
-  data-orientation={player.touchPlay ? player.orientation : 'desktop'}
+  data-orientation={player.controls.touchPlay ? player.controls.orientation : 'desktop'}
   role="dialog"
   aria-modal="true"
   aria-labelledby="player-title"
@@ -67,11 +78,13 @@
       <strong id="player-title">{player.title}</strong>
       <span class="status-line" id="player-status" role="status">{player.status}</span>
     </div>
-    <button type="button" class="play-chip play-pad-chip" id="play-pad-chip" hidden={!showPadChip} title="Kontrolcü bağlı · dokunmatik tuşları göster/gizle" aria-label="Kontrolcü bağlı · dokunmatik tuşları göster veya gizle" onclick={() => player.togglePadWithGamepad()}>🎮</button>
-    {#if player.isArcade}
+    <button type="button" class="play-chip play-pad-chip" id="play-pad-chip" hidden={!showPadChip} title="Kontrolcü bağlı · dokunmatik tuşları göster/gizle" aria-label="Kontrolcü bağlı · dokunmatik tuşları göster veya gizle" onclick={() => player.controls.togglePadWithGamepad()}>🎮</button>
+    {#if player.controls.isArcade}
       <button type="button" class="play-chip desk-only arcade-chip coin" id="play-coin" disabled={!player.running || player.paused} title="Jeton at" onclick={event => tap(event, 'BUTTON_SELECT')}>Jeton<kbd>{keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_SELECT)}</kbd></button>
       <button type="button" class="play-chip desk-only arcade-chip" id="play-start" disabled={!player.running || player.paused} title="Başla (1. oyuncu)" onclick={event => tap(event, 'BUTTON_START')}>Başla<kbd>{keyboardLabels.cap(PRIMARY_SYSTEM_KEY.arcade.BUTTON_START)}</kbd></button>
     {/if}
+    <button type="button" class="play-chip speed-chip" id="play-rewind" hidden={!player.canRewind} disabled={!player.running || player.paused} aria-pressed={player.rewinding} aria-label="Geri sar (basılı tut)" title="Geri sar · basılı tut (Backspace)" onpointerdown={rewindDown} onpointerup={rewindUp} onpointercancel={rewindUp} onlostpointercapture={() => player.setRewinding(false)} oncontextmenu={event => event.preventDefault()}><Icon name="rewind" size={18} /></button>
+    <button type="button" class="play-chip speed-chip" id="play-ff" disabled={!player.running || player.paused} aria-pressed={player.fastForward} aria-label="Hızlı ileri" title="Hızlı ileri · aç/kapat (Space)" onclick={event => { player.toggleFastForward(); (event.currentTarget as HTMLElement).blur(); }}><Icon name="forward" size={18} /></button>
     <button type="button" class="play-chip" id="play-save" disabled={!player.canSave || !player.running} onclick={() => player.quickSave()}>Kaydet</button>
     <button type="button" class="play-chip" id="play-load" disabled={!player.canLoad || !player.running} onclick={() => player.quickLoad()}>Yükle</button>
     <button type="button" class="play-chip desk-only" id="bar-fullscreen" aria-label={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} title={player.fullscreen || player.fullscreenFallback ? 'Tam ekrandan çık' : 'Tam ekran'} onclick={() => player.toggleFullscreen()}><Icon name={player.fullscreen || player.fullscreenFallback ? 'fullscreen-exit' : 'fullscreen'} size={18} /></button>
@@ -136,12 +149,12 @@
   {/if}
   <PauseMenu />
 
-  {#if !player.touchPlay && !tv.active && player.open && player.running && !player.menuOpen}
+  {#if !player.controls.touchPlay && !tv.active && player.open && player.running && !player.menuOpen}
     <p class="desk-hints" aria-hidden="true">
-      {#each player.keyHintRows as hints, i (i)}
-        <span class="hint-row" data-player={i + 1}>{#if player.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>
+      {#each player.controls.keyHintRows as hints, i (i)}
+        <span class="hint-row" data-player={i + 1}>{#if player.controls.keyHintRows.length > 1}<b class="who">{i + 1}P</b>{/if}<KeyHints {hints} /></span>
       {/each}
-      {#if gamepadUI.connected}<span class="pad"><Icon name="gamepad" size={16} /> kontrolcü hazır · {player.isArcade ? 'Select jeton · Start başla · ' : ''}Select+Start menü</span>{/if}
+      {#if gamepadUI.connected}<span class="pad"><Icon name="gamepad" size={16} /> kontrolcü hazır · {player.controls.isArcade ? 'Select jeton · Start başla · ' : ''}Select+Start menü</span>{/if}
     </p>
   {/if}
   <input type="file" id="player-bios-input" hidden accept=".zip,application/zip" bind:this={biosInput} />

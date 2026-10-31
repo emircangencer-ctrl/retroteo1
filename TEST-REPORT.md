@@ -408,3 +408,39 @@ Historical note: Stage 25 and Stage 26 describe an automatic FCEUmm fallback tha
 - With the user's own Tekken 3 set (local only): 5, 1 then 6, 2 bring both players in; → moves 1P's cursor, A moves 2P's; J and F pick; the fight starts (Nina vs King).
 - Tests: unit 300/300 (keyboard map of both players and every system, no shared keys, halves do not cross, hints per player, automatic controller order, sensor filter). E2E: two-player, phone, desktop, arcade and TV scenarios updated.
 - **Not verified here:** a real laptop keyboard with two people (key rollover differs per keyboard), real controllers on the user's devices.
+
+## Stage 45 — simpler, faster, safer: the "Hemen" package (2026-10-30)
+
+- From the audit and research (summary given to the user): six small changes with direct effect.
+- Library = start screen: Home merged into the library (three tabs: Kütüphane, Oyun ekle, Ayarlar); "Kaldığın yerden" card on top of the unfiltered library; the first-run welcome is the empty library. One tap on a cover plays (records that cannot start open their page); ⋯ on the cover (Y on a controller, I on the keyboard) opens the page.
+- Clean titles: "Tekken 3 (Japan, TET1/VER.E1)" shows as "Tekken 3" with "Japan, TET1/VER.E1" underneath (cards, game page, player bar); "[!]" marks dropped; search keeps the full title.
+- Arcade start: the 3.4 MB MAME catalog is no longer downloaded and parsed to start a game; a 95 KB controls table generated from it (identical values, unit-tested) is read instead. E2E: after a reload, starting Puck Man requests `arcade-input.json` and none of the full lists.
+- Storage the browser keeps: persistence was already requested at start, but a refusal was final. Now asked again after games are added and from Settings (**Kalıcı yap**), with the state shown. (Correction to the audit summary, which said it was never requested.)
+- Fast forward and rewind: verified on the real core first (colour-cycle test cartridge): fast forward 60 → 166 fps in this container; rewind runs the colour sequence backwards exactly and the game continues afterwards; rewind cost measured on Super Nintendo: a state every frame ~25–35 % more work per frame, every 2nd frame ~15 % → consoles start with `rewind_granularity = 2`, arcade without rewind. Bar: ⏩ toggle, ⏪ hold; keyboard Space (toggle) and Backspace (hold).
+- Also checked and left out: run-ahead (compiled into the cores but no effect with EmulatorJS 4.2.3: 2 frames from press to picture with and without it, in four configurations).
+- Tests: unit 305/305 (titles, controls table vs catalog, fast forward/rewind and their keys). E2E: new scenarios (start screen and one tap, fast forward and rewind on the real core, arcade start without the catalog); updated: controller focus, arcade, TV.
+- **Not verified here:** on the user's phone and computer (feel of the new card, rewind smoothness on real games, whether Chrome grants persistence there).
+
+## Stage 46 — real cover art (2026-10-31)
+
+- Box art from libretro-thumbnails (RetroArch's archive), lists pinned to a commit per repository. Consoles are recognised by No-Intro ROM checksum first (NES headerless, SNES without copier header), then by name; arcade by name. Matched at list-build time: NES 5327 checksums, SNES 3416, Mega Drive 1863; name lists NES 5452/8158 (box art/title screens), SNES 3676/3641, MD 2350/2084, FBNeo 6283/11062, MAME 6029/12401. Lists load only for systems in the library (gzip 54–172 KB each).
+- Pictures fetched once, made 320 px WebP and kept in Cache Storage `retroplay-covers-v1`; IndexedDB unchanged (still version 4, same stores — checked in E2E). No lookups while a game runs. Setting to turn covers off; ⋯ → **Kapak resmini kaldır** on a game's page.
+- Titles: "Legend of Zelda, The (USA)" now reads "The Legend of Zelda".
+- Real network (this container, Chromium): five NES test cartridges — one carrying Super Mario Bros.'s No-Intro checksum under the name "my game", three named like releases, one unknown — got four covers in ~2.3 s; the unknown one keeps the drawn cover.
+- Tests: unit 315/315 (matching against the shipped lists, checksums, list builder, addresses, article titles). E2E: new scenario with raw.githubusercontent.com answered locally — checksum and name matches, exactly one request per game at the pinned commit, 320 px pictures, nothing fetched after a reload, setting off/on, removal stays after a reload, deleting a game deletes its picture. All other scenarios run with covers on.
+- **Not verified here:** on the user's phone (look of the covers, first fetch over mobile data).
+
+## Stage 47 — arcade lists in small pieces (2026-10-31)
+
+- Before: recognising one arcade zip downloaded and parsed all four lists (10.9 MB JSON, 1.9 MB gzip; FinalBurn Neo alone 67 ms to parse in this container, several times that on a phone), again after every app update.
+- Now: the full lists moved to `data/arcade/`; the build cuts them into pieces (FinalBurn Neo 256 by name + 256 by checksum, MAME 2003-Plus 128 + 256, the small cores 1–8). A ROM shared with the parent/BIOS is a reference (set pieces are half the full lists). A renamed or incomplete zip is scored from the checksum index alone, then only the best-fitting set is read.
+- Measured per import (pieces · JSON read, against 10.9 MB before): sf2.zip 14 · 147 KB; kof98.zip 16 · 174 KB; puckman.zip 28 · 231 KB (MAME 2003-Plus has no "puckman": its Pac-Man sets are found for the alternatives and the 4-way joystick); tekken3.zip 36 · 305 KB; mslug.zip 58 · 468 KB (Neo Geo zips carry the BIOS files); a renamed sf2 76 · 660 KB. Pieces are fetched in parallel, once per session, and kept by the service worker.
+- Same results: an exhaustive comparison of every set of every core, named and renamed (19,864 cases), against identifyArcadeZip over the full lists: 0 differences. Unit test keeps a sample (named, renamed, split, one file missing, BIOS) plus a round trip of every stored set.
+- Service worker shell cache `retroplay-shell-v15`: drops the full lists earlier versions kept (up to 11 MB per device).
+- **Not verified here:** on the user's phone (import speed of a real arcade zip).
+
+## Stage 48 — player code split; multi-core emulation evaluated (2026-10-31)
+
+- `src/player/session.svelte.ts` (1126 lines) split: `controls.svelte.ts` (touch pad and layout, controllers and players, keyboard hints; components read `player.controls.*`) and `battery.ts` (in-game saves kept by the app). The session keeps starting, menu, slots, play time, speed, fullscreen, leaving (891 lines). No behaviour change: unit 319/319, E2E 47/47.
+- Multi-core emulation (Document-Isolation-Policy + EmulatorJS thread cores), measured in Chromium 153 with `Document-Isolation-Policy: isolate-and-require-corp`: the page and the player frame are cross-origin isolated, SharedArrayBuffer is there, and EmulatorJS 4.2.3's `-thread` cores load and run. Speed: Nestopia headroom 7.73× without threads vs 7.74× with (average of 4 runs each, 7.25–8.53 spread) — no gain, because the libretro cores emulate on one thread; RetroArch's threaded video (`video_threaded`) makes the game fail to start. Shipping it would add the thread cores (~10 MB offline) and an isolation header every embedded resource must satisfy, for nothing. **Not shipped**; worth revisiting only for a core that itself runs on several threads (for example RetroPlay's own MAME 2003-Plus build — Tekken is on hold).
+

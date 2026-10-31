@@ -25,6 +25,6 @@ test('when the first core cannot open a file the next one is offered (never swit
 
 test('there is a single service worker source and it starts new cache generations', async () => {
   await assert.rejects(access(new URL('../service-worker.js', import.meta.url)), 'the old duplicate root service-worker.js must stay removed');
-  assert.match(publicWorker, /CACHE_NAME = 'retroplay-shell-v14'/);
+  assert.match(publicWorker, /CACHE_NAME = 'retroplay-shell-v15'/);
   assert.match(publicWorker, /RUNTIME_CACHE_NAME = 'retroplay-emulatorjs-4\.2\.3-v1'/);
 });

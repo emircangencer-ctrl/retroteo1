@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { splitTitle } from '../lib/title.ts';
   import { untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import Cover from '../components/Cover.svelte';
@@ -15,6 +16,7 @@
   import { exportRom, exportSram } from '../lib/exports.ts';
   import { importer } from '../lib/importer.svelte.ts';
   import { tv } from '../lib/tv.svelte.ts';
+  import { coverArt } from '../lib/cover-art.svelte.ts';
   import { player, slotName } from '../player/session.svelte.ts';
   import { SYSTEM_CORE_LABELS } from '../player/launch.ts';
   import { crc32, diagnoseSuperMarioBros3Rom, inspectNesRom } from '../nes-rom.js';
@@ -68,6 +70,7 @@
   const slotMap = $derived(new Map(slots.map(s => [s.slot, s])));
   const used = $derived(slots.length);
   const coreLabel = $derived(!game ? '' : game.platform === 'NES' ? (game.nesCore === 'fceumm' ? 'FCEUmm' : 'Nestopia') : game.platform === 'ARCADE' ? ((ARCADE_CORES as Record<string, { label: string }>)[game.arcade?.core || '']?.label || 'Arcade') : SYSTEM_CORE_LABELS[game.platform] || '—');
+  const titleParts = $derived(splitTitle(game?.title || ''));
   const meta = $derived(!game || !look ? '' : [look.label, game.year, game.arcade?.manufacturer, game.arcade?.set ? `${game.arcade.set}.zip` : ''].filter(Boolean).join(' · '));
   const biosMissing = $derived(Boolean(game?.arcade?.bios && !library.biosIds.has(`${game.arcade.bios}.zip`)));
   const parentMissing = $derived(Boolean(game?.arcade && !arcadeParentInstalled(game.arcade, library.games)));
@@ -133,6 +136,7 @@
             <div class="popover" role="menu">
               {#if game.blob && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; exportRom(game); }}><Icon name="download" size={18} />ROM'u indir</button>{/if}
               {#if hasSram && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; void exportSram(game); }}><Icon name="save" size={18} />Oyun içi kaydı indir (.srm)</button>{/if}
+              {#if coverArt.picture(game.id)}<button type="button" role="menuitem" id="remove-cover" onclick={() => { menuOpen = false; void coverArt.remove(game.id).then(() => showToast('Kapak resmi kaldırıldı; bu oyun için yeniden aranmayacak.')); }}><Icon name="close" size={18} />Kapak resmini kaldır</button>{/if}
               <button type="button" role="menuitem" class="danger" onclick={remove}><Icon name="trash" size={18} />Kütüphaneden kaldır</button>
             </div>
           {/if}
@@ -143,7 +147,8 @@
     <section class="hero">
       <div class="cover-box"><Cover {game} size="md" /></div>
       <div class="hero-text">
-        <h1 class="title">{game.title}</h1>
+        <h1 class="title">{titleParts.name}</h1>
+        {#if titleParts.detail}<p class="title-detail" id="title-detail">{titleParts.detail}</p>{/if}
         <p class="meta">{meta}</p>
         <div class="badges">
           {#if dump === 'verified'}<span class="badge ok"><Icon name="check" size={14} stroke={2.2} />Doğrulanmış döküm</span>{/if}
@@ -270,6 +275,7 @@
 {/if}
 
 <style>
+  .title-detail { margin-top: 2px; font-size: 14px; color: var(--text-2); }
   .head-actions { display: flex; gap: 8px; }
   .fav[aria-pressed='true'] { color: var(--accent); }
   .more-wrap { position: relative; }

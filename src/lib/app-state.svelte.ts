@@ -21,12 +21,25 @@ class AppState {
     addEventListener('online', () => { this.online = true; });
     addEventListener('offline', () => { this.online = false; });
     void this.#register();
-    if (navigator.storage?.persist) {
-      navigator.storage.persisted?.().then(already => {
-        if (already) { this.persisted = true; return; }
-        return navigator.storage.persist().then(granted => { this.persisted = granted; });
-      }).catch(() => {});
+    void this.requestPersistence();
+  }
+
+  /**
+   * Asks the browser to keep the library when the device runs low on space (otherwise games and
+   * saves are "best effort" storage the browser may clear). Asked at start, again after games are
+   * added and from Settings: browsers decide by use (Chrome grants installed or often-used apps;
+   * Firefox asks the player), so a refusal at first is not final.
+   */
+  async requestPersistence(): Promise<boolean | null> {
+    const storage = typeof navigator === 'undefined' ? null : navigator.storage;
+    if (!storage?.persist) { this.persisted = null; return null; }
+    try {
+      if (await storage.persisted?.()) { this.persisted = true; return true; }
+      this.persisted = await storage.persist();
+    } catch {
+      this.persisted = false;
     }
+    return this.persisted;
   }
 
   async #register() {

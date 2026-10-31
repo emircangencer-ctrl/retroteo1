@@ -70,7 +70,7 @@ test('touch devices keep the handheld layout in fullscreen; desktop fills the wi
 
 test('a browser that rejects or ignores fullscreen gets the wide fallback on desktop and a short notice on phones', async () => {
   const session = await read('../src/player/session.svelte.ts');
-  assert.match(session, /if \(!result\.supported\) \{[\s\S]*?if \(this\.touchPlay\) \{ this\.showNotice\('Bu tarayıcı tam ekranı desteklemiyor'\); return; \}[\s\S]*?this\.#setFallback\(true\)/);
+  assert.match(session, /if \(!result\.supported\) \{[\s\S]*?if \(this\.controls\.touchPlay\) \{ this\.showNotice\('Bu tarayıcı tam ekranı desteklemiyor'\); return; \}[\s\S]*?this\.#setFallback\(true\)/);
   assert.match(session, /if \(result\.error \|\| !result\.entered\) \{[\s\S]*?Tarayıcı tam ekrana izin vermedi[\s\S]*?this\.#setFallback\(true\)/);
 });
 

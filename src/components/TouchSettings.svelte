@@ -9,7 +9,7 @@
   const t = $derived(settings.touch);
   const id = (name: string) => `${prefix}-${name}`;
   const pct = (v: number) => `%${Math.round(v * 100)}`;
-  const set = (patch: Record<string, unknown>) => player.setTouch(patch);
+  const set = (patch: Record<string, unknown>) => player.controls.setTouch(patch);
 </script>
 
 <div class="ts" class:compact>
@@ -62,7 +62,7 @@
     </div>
   {/if}
   <div class="row reset-row">
-    <button type="button" class="text-btn" id={id('reset')} onclick={() => player.resetTouch()}>Varsayılan ayarlara dön</button>
+    <button type="button" class="text-btn" id={id('reset')} onclick={() => player.controls.resetTouch()}>Varsayılan ayarlara dön</button>
   </div>
 </div>
 

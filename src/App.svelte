@@ -5,7 +5,6 @@
   import Dialog from './components/Dialog.svelte';
   import Toast from './components/Toast.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
-  import Home from './views/Home.svelte';
   import Library from './views/Library.svelte';
   import GameDetail from './views/GameDetail.svelte';
   import Import from './views/Import.svelte';
@@ -21,11 +20,15 @@
   import { gamepadUI } from './lib/gamepad-ui.svelte.ts';
   import { player } from './player/session.svelte.ts';
   import { tv } from './lib/tv.svelte.ts';
+  import { coverArt } from './lib/cover-art.svelte.ts';
 
   const route = $derived(router.route);
   const scrollMemory = new Map<string, number>();
 
   $effect(() => { document.documentElement.style.setProperty('--accent', settings.prefs.accent); });
+  // Cover pictures: stored ones show at once; new games are looked up when no game is running.
+  $effect(() => { coverArt.setActive(settings.prefs.covers && !player.open); });
+  $effect(() => { if (library.ready) void coverArt.sync(library.games); });
   // On the TV the screen stays on while a game runs (no screensaver over the game).
   $effect(() => { if (tv.bridge) tv.keepScreenOn(player.running && !player.paused); });
   $effect(() => {
@@ -91,9 +94,7 @@
 <div class="app-shell" id="app-shell" inert={player.open || undefined}>
   <Sidebar />
   <main class="app-content" class:with-sidebar={true} data-nav-region="page">
-    {#if route.name === 'home'}
-      <Home />
-    {:else if route.name === 'library'}
+    {#if route.name === 'home' || route.name === 'library'}
       <Library />
     {:else if route.name === 'game'}
       {#key route.id}<GameDetail />{/key}

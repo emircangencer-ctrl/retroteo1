@@ -4,6 +4,28 @@
 //   so SRAM changes constantly and a restored save is observable after a soft reset.
 const PRG_BANK = 16384;
 
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crcState = (bytes, crc = 0xffffffff) => { for (const b of bytes) crc = (CRC_TABLE[(crc ^ b) & 0xff] ^ (crc >>> 8)) >>> 0; return crc; };
+
+/**
+ * A copy of `rom` whose last 4 bytes are changed so the CRC32 of rom[from..] is `target`: a
+ * self-authored cartridge that a checksum list takes for a given game (it holds none of that game).
+ */
+export function withChecksum(rom, target, from = 16) {
+  const out = Uint8Array.from(rom);
+  const body = out.subarray(from);
+  let t = (Number.parseInt(target, 16) ^ 0xffffffff) >>> 0;
+  const ks = [];
+  for (let i = 0; i < 4; i++) {
+    const k = CRC_TABLE.findIndex(v => v >>> 24 === t >>> 24);
+    ks.unshift(k);
+    t = ((t ^ CRC_TABLE[k]) << 8) >>> 0;
+  }
+  let crc = crcState(body.subarray(0, body.length - 4));
+  ks.forEach((k, i) => { body[body.length - 4 + i] = (crc ^ k) & 0xff; crc = (CRC_TABLE[k] ^ (crc >>> 8)) >>> 0; });
+  return out;
+}
+
 function bank(code, vectors) {
   const bytes = new Uint8Array(PRG_BANK).fill(0xea);
   bytes.set(code, 0);
@@ -122,6 +144,38 @@ export function twoPlayerRom() {
   const vectors = { nmi: rti, reset: 0xc000, irq: rti };
   const rom = new Uint8Array(16 + PRG_BANK + 8192);
   rom.set([0x4e, 0x45, 0x53, 0x1a, 1, 1, 0x00, 0x00], 0); // iNES, 16 KiB PRG, 8 KiB CHR, mapper 0
+  rom.set(bank(code, vectors), 16);
+  return rom;
+}
+
+/**
+ * colour-cycle.nes — NROM: a frame counter drives the backdrop colour, one of 16 hues ($10–$1F) for
+ * 8 frames each, so the picture shows which way time runs (forward, fast forward, rewind).
+ */
+export function colourCycleRom() {
+  const code = [
+    0x78, 0xd8, 0xa2, 0xff, 0x9a,                         // SEI, CLD, LDX #$FF, TXS
+    0xa9, 0x00, 0x8d, 0x00, 0x20, 0x8d, 0x01, 0x20,       // rendering off
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // wait for vblank
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // and once more
+    0xa9, 0x00, 0x85, 0x02                                // counter = 0
+  ];
+  const loop = 0xc000 + code.length;
+  code.push(
+    0x2c, 0x02, 0x20, 0x10, 0xfb,                         // loop: wait for vblank
+    0xe6, 0x02,                                           // INC counter
+    0xa5, 0x02, 0x4a, 0x4a, 0x4a, 0x29, 0x0f, 0x09, 0x10, // A = $10 + (counter / 8) % 16
+    0x48,                                                 // PHA
+    0xa9, 0x3f, 0x8d, 0x06, 0x20, 0xa9, 0x00, 0x8d, 0x06, 0x20, // PPUADDR = $3F00
+    0x68, 0x8d, 0x07, 0x20,                               // PLA, STA $2007
+    0xa9, 0x00, 0x8d, 0x06, 0x20, 0x8d, 0x06, 0x20,       // PPUADDR = $0000
+    0x4c, loop & 0xff, loop >> 8                          // JMP loop
+  );
+  const rti = 0xc000 + code.length;
+  code.push(0x40);
+  const vectors = { nmi: rti, reset: 0xc000, irq: rti };
+  const rom = new Uint8Array(16 + PRG_BANK + 8192);
+  rom.set([0x4e, 0x45, 0x53, 0x1a, 1, 1, 0x00, 0x00], 0);
   rom.set(bank(code, vectors), 16);
   return rom;
 }

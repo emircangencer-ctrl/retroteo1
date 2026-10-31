@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, recordInputs, heldInputs, touchScreen, padGeometry } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom } from './fixtures/make-roms.mjs';
+import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, coverRequests, recordInputs, heldInputs, touchScreen, padGeometry, gameId } from './harness.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
 
@@ -25,10 +25,25 @@ const checkerRom = path.join(tmp, 'checkerboard.nes');
 fs.writeFileSync(checkerRom, checkerboardRom());
 const twoPlayersRom = path.join(tmp, 'two players.nes');
 fs.writeFileSync(twoPlayersRom, twoPlayerRom());
+const colourRom = path.join(tmp, 'colour cycle.nes');
+fs.writeFileSync(colourRom, colourCycleRom());
+// Cover art: a self-made cartridge that carries the No-Intro checksum of Super Mario Bros. (World)
+// under a meaningless file name, one named like a No-Intro release, and one nothing matches.
+const coverDir = path.join(tmp, 'covers');
+fs.mkdirSync(coverDir);
+const checkerVariant = n => { const rom = checkerboardRom(); rom[rom.length - 1] = n; return rom; };
+const byChecksumRom = path.join(coverDir, 'my game.nes');
+fs.writeFileSync(byChecksumRom, withChecksum(checkerboardRom(), 'D445F698'));
+const byNameRom = path.join(coverDir, 'Contra (USA).nes');
+fs.writeFileSync(byNameRom, checkerVariant(1));
+const noCoverRom = path.join(coverDir, 'nothing like it.nes');
+fs.writeFileSync(noCoverRom, checkerVariant(2));
 
 // Arcade sets made of CRC-matched placeholder files (zeros; no game data), built from the catalogs.
-const fbneoCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fbneo.json'), 'utf8'));
-const mameCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-mame2003plus.json'), 'utf8'));
+// (the full lists the build cuts into the pieces the app reads)
+const ARCADE_DATA = path.join(DIST, '..', 'data', 'arcade');
+const fbneoCatalog = JSON.parse(fs.readFileSync(path.join(ARCADE_DATA, 'arcade-fbneo.json'), 'utf8'));
+const mameCatalog = JSON.parse(fs.readFileSync(path.join(ARCADE_DATA, 'arcade-mame2003plus.json'), 'utf8'));
 const arcadeFile = (name, roms, options) => { const file = path.join(tmp, name); fs.writeFileSync(file, placeholderSet(roms, options)); return file; };
 const puckmanZip = arcadeFile('puckman.zip', fbneoCatalog.games.puckman[6]);
 const renamedZip = arcadeFile('Pac Man kopyam.zip', fbneoCatalog.games.puckman[6]);
@@ -46,7 +61,7 @@ fs.mkdirSync(path.dirname(noKeyZip));
 fs.writeFileSync(noKeyZip, placeholderSet(fbneoCatalog.games.spf2t[6], { omit: ['spf2t.key'] }));
 const keyedZip = arcadeFile('spf2t.zip', fbneoCatalog.games.spf2t[6]);
 // Old CPS2 sets FB Alpha 2012 CPS2 knows: a parent and a self-contained clone, both without .key.
-const fbaCatalog = JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'arcade-fba2012-cps2.json'), 'utf8'));
+const fbaCatalog = JSON.parse(fs.readFileSync(path.join(ARCADE_DATA, 'arcade-fba2012-cps2.json'), 'utf8'));
 const oldCps2Zip = arcadeFile('megaman2.zip', fbneoCatalog.games.megaman2[6].filter(([name]) => !name.endsWith('.key')));
 const oldCloneZip = arcadeFile('megaman2a.zip', fbaCatalog.games.megaman2a[6]);
 const snesRom = path.join(tmp, 'snes pad.sfc');
@@ -115,6 +130,23 @@ const fakePads = () => {
   window.__pads = [make(0, 'First Pad (STANDARD GAMEPAD Vendor: 0001 Product: 0001)'), make(1, 'Second Pad (STANDARD GAMEPAD Vendor: 0002 Product: 0002)')];
   window.__padsOn = false;
   Object.defineProperty(Navigator.prototype, 'getGamepads', { configurable: true, value: () => (window.top.__padsOn ? [window.top.__pads[0], window.top.__pads[1], null, null] : [null, null, null, null]) });
+};
+// The centre pixel of every frame the emulator uploads to WebGL (which way time runs in the colour-cycle cartridge).
+const frameColours = () => {
+  if (window === window.top) return;
+  window.__up = [];
+  const hook = proto => { const orig = proto.texSubImage2D; proto.texSubImage2D = function (...a) {
+    try {
+      const data = a[8], off = a[9] || 0;
+      if (data && data.BYTES_PER_ELEMENT) {
+        const w = a[4], h = a[5], px = Math.floor(h / 2) * w + Math.floor(w / 2);
+        // RGB565 frames come as bytes: both bytes of the pixel, so every hue stays distinct.
+        window.__up.push(data.BYTES_PER_ELEMENT === 1 ? data[off + px * 2] | (data[off + px * 2 + 1] << 8) : data[off + px]);
+      }
+    } catch {}
+    return orig.apply(this, a); }; };
+  if (window.WebGL2RenderingContext) hook(WebGL2RenderingContext.prototype);
+  hook(WebGLRenderingContext.prototype);
 };
 
 // ---- saves -----------------------------------------------------------------------------------------
@@ -386,8 +418,14 @@ await scenario('the performance meter measures the speed factor and normal play 
 
 // ---- arcade ----------------------------------------------------------------------------------------
 await scenario('an arcade zip is recognised by its set name, checked against FinalBurn Neo and started with it', async page => {
+  const pieces = [];
+  page.on('response', response => { const url = new URL(response.url()); if (url.pathname.startsWith('/assets/arcade')) pieces.push([url.pathname, Number(response.headers()['content-length'] || 0)]); });
   const text = await importFile(page, puckmanZip);
   assert.match(text, /Eklendi: puckman\.zip — Puck Man \(Japan, set 1\) · FinalBurn Neo · tam set/);
+  // Only small pieces of the lists are read (the full lists are not even served).
+  assert.ok(pieces.length > 3 && pieces.length < 60, `${pieces.length} pieces`);
+  assert.ok(pieces.every(([url]) => /^\/assets\/arcade\/(index|[a-z0-9_]+\/[sc]\d+)\.json$/.test(url)), pieces.map(([url]) => url).join(' '));
+  assert.ok(!fs.existsSync(path.join(DIST, 'assets', 'arcade-fbneo.json')));
   const state = await play(page, 'Puck Man');
   assert.match(state.status, /^Çalışıyor · EmulatorJS · Arcade · FinalBurn Neo/, state.error);
   const loaded = await page.evaluate(() => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; return { zip: gm.FS.analyzePath('/puckman.zip').exists, info: gm.functions.saveStateInfo() }; });
@@ -751,6 +789,172 @@ await scenario('phone: the touch pad is player 1 with the first controller; the 
   await page.waitForFunction(() => document.querySelector('#player-modal').classList.contains('pad-hidden'), null, { timeout: 3000 });
 }, { mobile: true, init: fakePads });
 
+await scenario('the library is the start screen: three tabs, one tap plays, ⋯ opens the page, names without set codes', async page => {
+  await page.waitForSelector('#empty-state .display-title');
+  assert.match(await page.evaluate(() => document.querySelector('#empty-state').textContent), /Oyunlarını ekle/);
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.bottom-nav a')].map(a => a.textContent.trim())), ['Kütüphane', 'Oyun ekle', 'Ayarlar']);
+  await importFile(page, twoPlayersRom);
+  await importFile(page, tekken3Zip);
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForSelector('#library-games .game-card');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#library-games .game-title')].map(el => el.textContent).sort()), ['Tekken 3', 'two players']);
+  // One tap on the cover plays.
+  await page.click('#library-games .game-card[data-play-id] .card-main >> nth=0');
+  await waitForPlayer(page);
+  await waitStatus(page, /^Çalışıyor/);
+  await closeGame(page);
+  // Back on the start screen: "Kaldığın yerden" leads.
+  await page.waitForSelector('.continue');
+  assert.match(await page.evaluate(() => document.querySelector('.continue .title').textContent), /^(two players|Tekken 3)$/);
+  // ⋯ opens the game's page; there the name is clean and the set codes sit underneath.
+  const tekken = await page.evaluate(() => [...document.querySelectorAll('#library-games .game-card')].find(card => card.textContent.includes('Tekken')).dataset.gameId);
+  await page.click(`#library-games .game-card[data-game-id="${tekken}"] .card-more`);
+  await page.waitForSelector(`.detail[data-game-id="${tekken}"]`);
+  const head = await page.evaluate(() => ({ title: document.querySelector('.detail .title').textContent, detail: document.querySelector('#title-detail')?.textContent || '' }));
+  assert.equal(head.title, 'Tekken 3');
+  assert.match(head.detail, /TET1/);
+  // Storage the browser keeps: asked again after adding games; Settings says which it is and can ask once more.
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#storage-persist');
+  const persisted = await page.evaluate(() => navigator.storage.persisted());
+  const text = await page.evaluate(() => document.querySelector('#storage-persist').textContent);
+  if (persisted) assert.match(text, /kalıcı olarak ayırdı/);
+  else {
+    assert.match(text, /yer darlığında silebilir/);
+    await page.click('#persist-storage');
+    await page.waitForFunction(() => /Depolama kalıcı oldu|henüz izin vermedi/.test(document.body.textContent), null, { timeout: 5000 });
+  }
+}, { mobile: true });
+
+await scenario('cover art: found by ROM checksum or name, fetched once, kept on the device, can be turned off or removed', async page => {
+  const ref = key => JSON.parse(fs.readFileSync(path.join(DIST, 'assets', 'covers', `${key}.json`), 'utf8')).ref;
+  const thumbs = 'https://raw.githubusercontent.com/libretro-thumbnails';
+  const expected = [
+    `${thumbs}/FBNeo_-_Arcade_Games/${ref('fbneo')}/Named_Boxarts/Puck%20Man%20(Japan%20set%201).png`,
+    `${thumbs}/Nintendo_-_Nintendo_Entertainment_System/${ref('nes')}/Named_Boxarts/Contra%20(USA).png`,
+    `${thumbs}/Nintendo_-_Nintendo_Entertainment_System/${ref('nes')}/Named_Boxarts/Super%20Mario%20Bros.%20(World).png`
+  ];
+  const before = coverRequests.length;
+  await importFile(page, [byChecksumRom, byNameRom, noCoverRom]);
+  await importFile(page, puckmanZip);
+  await page.evaluate(() => { location.hash = '#/'; });
+  const pictures = () => page.evaluate(() => [...document.querySelectorAll('#library-games .game-card')].filter(card => card.querySelector('[data-cover="picture"] img')).map(card => card.querySelector('.game-title').textContent).sort());
+  await waitFor(async () => (await pictures()).length === 3, { timeout: 20000 });
+  assert.deepEqual(await pictures(), ['Contra', 'Puck Man', 'my game']);
+  assert.deepEqual(coverRequests.slice(before).sort(), expected, 'one request per game with a cover, at the pinned commit; none for the game nothing matches');
+  // Kept small: 320 px wide, on the picture's own colour.
+  const shown = await page.evaluate(() => { const card = [...document.querySelectorAll('#library-games .game-card')].find(c => c.textContent.includes('Contra')); const img = card.querySelector('[data-cover="picture"] img'); return { w: img.naturalWidth, h: img.naturalHeight, bg: getComputedStyle(img.parentElement).backgroundColor, drawn: Boolean(card.querySelector('.cover .t')) }; });
+  assert.deepEqual([shown.w, shown.h, shown.drawn], [320, 448, false]);
+  assert.match(shown.bg, /^rgb\(\d+, \d+, \d+\)$/);
+  assert.notEqual(shown.bg, 'rgb(11, 12, 15)');
+  const stored = await page.evaluate(async () => { const cache = await caches.open('retroplay-covers-v1'); const out = []; for (const request of await cache.keys()) { const r = await cache.match(request); out.push([r.headers.get('content-type') || '', r.headers.get('x-retroplay-cover') === 'none' ? 'none' : 'picture', (await r.blob()).size]); } return out.sort(); });
+  assert.equal(stored.length, 4);
+  assert.equal(stored.filter(([, kind]) => kind === 'none').length, 1, 'the game without a cover is remembered');
+  for (const [type, kind, size] of stored.filter(([, kind]) => kind === 'picture')) { assert.match(type, /^image\/(webp|jpeg)$/); assert.ok(size > 0 && size < 60000, `${kind} ${size}`); }
+  // The library database is untouched: same version and stores as before.
+  assert.deepEqual(await page.evaluate(() => new Promise(resolve => { const r = indexedDB.open('retroplay-local-v1'); r.onsuccess = () => { resolve([r.result.version, [...r.result.objectStoreNames].sort()]); r.result.close(); }; })), [4, ['batterySaves', 'bios', 'games', 'saveStates']]);
+
+  // After a restart the pictures come from the device: no request at all.
+  const afterImport = coverRequests.length;
+  await page.reload({ waitUntil: 'networkidle' });
+  await waitFor(async () => (await pictures()).length === 3, { timeout: 10000 });
+  await page.waitForTimeout(500);
+  assert.equal(coverRequests.length, afterImport);
+
+  // Turned off: drawn covers, nothing fetched; on again: the pictures are back.
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.click('#setting-covers');
+  assert.equal(await page.getAttribute('#setting-covers', 'aria-checked'), 'false');
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForSelector('#library-games .game-card');
+  assert.deepEqual(await pictures(), []);
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.click('#setting-covers');
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(async () => (await pictures()).length === 3);
+
+  // A wrong cover can be removed from the game's page; it stays removed.
+  const contra = await gameId(page, 'Contra');
+  await page.evaluate(id => { location.hash = `#/game/${id}`; }, contra);
+  await page.waitForSelector(`.detail[data-game-id="${contra}"] [data-cover="picture"]`);
+  await page.click('.detail [aria-label="Diğer seçenekler"]');
+  await page.click('#remove-cover');
+  await page.waitForFunction(() => !document.querySelector('.detail [data-cover="picture"]'));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(async () => (await pictures()).length === 2);
+  await page.waitForTimeout(500);
+  assert.deepEqual(await pictures(), ['Puck Man', 'my game']);
+  assert.equal(coverRequests.length, afterImport, 'a removed cover is not fetched again');
+
+  // A game taken out of the library takes its picture with it.
+  const mario = await gameId(page, 'my game');
+  await page.evaluate(id => { location.hash = `#/game/${id}`; }, mario);
+  await page.waitForSelector(`.detail[data-game-id="${mario}"]`);
+  await page.click('.detail [aria-label="Diğer seçenekler"]');
+  await page.click('.popover .danger');
+  await answerDialog(page, true);
+  await waitFor(async () => (await page.evaluate(async () => (await (await caches.open('retroplay-covers-v1')).keys()).length)) === 3);
+});
+
+await scenario('fast forward and rewind on the real core: ⏩ and Space speed it up (up to 3×), ⏪ and Backspace held run time backwards', async page => {
+  await importFile(page, colourRom);
+  const state = await play(page, 'colour cycle');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  await page.waitForTimeout(1500);
+  const rate = () => page.evaluate(async () => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; const f = gm.getFrameNum(), t = performance.now(); await new Promise(r => setTimeout(r, 900)); return Math.round((gm.getFrameNum() - f) / ((performance.now() - t) / 1000)); });
+  const pressed = sel => page.evaluate(s => document.querySelector(s).getAttribute('aria-pressed'), sel);
+  const normal = await rate();
+  assert.ok(normal >= 40 && normal <= 75, `normal speed ${normal} fps`);
+  await page.click('#play-ff');
+  assert.equal(await pressed('#play-ff'), 'true');
+  const fast = await rate();
+  // (up to 3×; this container draws with a software GPU, which limits it)
+  assert.ok(fast > normal * 1.5, `fast forward ${fast} fps (normal ${normal})`);
+  await page.click('#play-ff');
+  assert.equal(await pressed('#play-ff'), 'false');
+  await page.keyboard.press('Space');
+  assert.equal(await pressed('#play-ff'), 'true', 'Space switches fast forward on');
+  await page.keyboard.press('Space');
+  assert.equal(await pressed('#play-ff'), 'false', 'and off');
+  // Rewind: the colours come back in reverse order.
+  const runs = list => list.filter((v, i) => i === 0 || v !== list[i - 1]);
+  const mark = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.__up.length);
+  const since = from => page.evaluate(n => document.querySelector('#player-screen iframe').contentWindow.__up.slice(n), from);
+  let at = await mark();
+  await page.waitForTimeout(1400);
+  const forward = runs(await since(at));
+  const box = await page.evaluate(() => { const r = document.querySelector('#play-rewind').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.move(box.x, box.y);
+  at = await mark();
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  assert.equal(await pressed('#play-rewind'), 'true', '⏪ shows it is rewinding');
+  await page.waitForTimeout(950);
+  await page.mouse.up();
+  const back = runs(await since(at));
+  assert.equal(await pressed('#play-rewind'), 'false');
+  const order = forward.slice(1, -1);
+  const steps = back.map(v => order.indexOf(v)).filter(i => i >= 0);
+  assert.ok(steps.length >= 3, `rewind went through ${steps.length} known colours (${back.join(',')} / forward ${forward.join(',')})`);
+  assert.ok(steps.every((v, i) => i === 0 || v < steps[i - 1]), `colours in reverse order: ${steps.join(',')}`);
+  // Backspace held does the same.
+  at = await mark();
+  await page.keyboard.down('Backspace');
+  await page.waitForTimeout(150);
+  assert.equal(await pressed('#play-rewind'), 'true', 'Backspace held rewinds');
+  await page.waitForTimeout(700);
+  await page.keyboard.up('Backspace');
+  assert.equal(await pressed('#play-rewind'), 'false');
+  const resumed = await mark();
+  const frameAt = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager.getFrameNum());
+  const f0 = await frameAt();
+  await page.waitForTimeout(1000);
+  const after = runs(await since(resumed));
+  const diag = JSON.stringify({ after, frames: (await frameAt()) - f0, status: await status(page), uploads: await mark() - resumed });
+  assert.ok(after.length >= 2, `the game runs on after rewinding ${diag}`);
+}, { init: frameColours, viewport: { width: 760, height: 560 } });
+
 await scenario('every console has its own pad: Super Nintendo diamond with L/R, Mega Drive A B C under X Y Z', async page => {
   await importFile(page, snesRom);
   let state = await play(page, 'snes pad');
@@ -900,8 +1104,8 @@ await scenario('with a controller the interface is navigable: A plays the focuse
   await page.waitForTimeout(200);
   assert.match(await page.evaluate(() => document.querySelector('.pad-legend')?.textContent || ''), /A\s*Oyna[\s\S]*Y\s*Ayrıntılar/);
   // Move focus onto the card (it sits below the chips and the sort bar).
-  for (let i = 0; i < 8 && !(await page.evaluate(() => document.activeElement?.classList.contains('game-card'))); i++) await press(13);
-  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('game-card')), true, 'the d-pad reaches the game card');
+  for (let i = 0; i < 8 && !(await page.evaluate(() => Boolean(document.activeElement?.closest('.game-card')))); i++) await press(13);
+  assert.equal(await page.evaluate(() => Boolean(document.activeElement?.closest('.game-card'))), true, 'the d-pad reaches the game card');
   assert.equal(await page.evaluate(() => document.documentElement.classList.contains('gp-nav')), true, 'focus is shown for controller use');
   await press(0);
   await waitForPlayer(page);
@@ -991,7 +1195,17 @@ const pressLength = (events, index) => {
 
 await scenario('desktop arcade: Jeton and Başla in the bar and on 5 / 1; a quick press lasts long enough; EmulatorJS\'s own keys are off', async page => {
   await importFile(page, puckmanZip);
+  // A fresh start (nothing loaded in memory): starting the game reads the small controls table and no game list.
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.reload();
+  await page.waitForSelector('#library-games .game-card');
+  const requests = [];
+  page.on('request', request => requests.push(new URL(request.url()).pathname));
   const state = await play(page, 'Puck Man');
+  assert.ok(requests.includes('/assets/arcade-input.json'), 'controls table loaded');
+  assert.ok(!requests.some(url => url.startsWith('/assets/arcade/')), `no game list at start: ${requests.filter(url => url.includes('arcade')).join(', ')}`);
+  assert.equal(await page.evaluate(() => document.querySelector('#play-rewind').hidden), true, 'no rewind on arcade boards');
+  assert.equal(await page.evaluate(() => document.querySelector('#play-ff').hidden), false);
   assert.match(state.status, /^Çalışıyor/, state.error);
   await page.waitForFunction(() => /^Jeton: 5 · Başla: 1/.test(document.querySelector('#player-notice-text')?.textContent || ''), null, { timeout: 5000 });
   // The hint's "Jeton at" cannot act on a paused game: the menu takes it away.

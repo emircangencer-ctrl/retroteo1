@@ -8,10 +8,9 @@
 
   const route = $derived(router.route);
   const counts = $derived(systemCounts(library.games));
-  const libView = $derived(route.name === 'library' ? (route.query.fav ? 'fav' : route.query.sort === 'recent' ? 'recent' : route.query.system ? `sys:${route.query.system}` : 'all') : '');
+  const libView = $derived(route.name === 'library' || route.name === 'home' ? (route.query.fav ? 'fav' : route.query.sort === 'recent' ? 'recent' : route.query.system ? `sys:${route.query.system}` : 'all') : '');
   const items = $derived([
-    { href: '#/', label: 'Ana ekran', icon: 'home', current: route.name === 'home' },
-    { href: '#/library', label: 'Kütüphane', icon: 'grid', current: route.name === 'game' || libView === 'all' || libView.startsWith('sys:') },
+    { href: '#/', label: 'Kütüphane', icon: 'grid', current: route.name === 'game' || libView === 'all' || libView.startsWith('sys:') },
     { href: '#/library?fav=1', label: 'Favoriler', icon: 'heart', current: libView === 'fav' },
     { href: '#/library?sort=recent', label: 'Son oynananlar', icon: 'clock', current: libView === 'recent' },
     { href: '#/import', label: 'Oyun ekle', icon: 'plus', current: route.name === 'import' },
@@ -20,7 +19,7 @@
 </script>
 
 <aside class="sidebar" aria-label="Kenar menüsü" data-nav-region="sidebar">
-  <a class="brand" href="#/" aria-label="RetroPlay ana ekran">
+  <a class="brand" href="#/" aria-label="RetroPlay kütüphane">
     <span class="mark" aria-hidden="true"></span><span>RETROPLAY</span>
   </a>
   <nav aria-label="Ana menü" class="nav">

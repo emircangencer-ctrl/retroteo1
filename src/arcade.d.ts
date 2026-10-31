@@ -1,9 +1,8 @@
-export interface ArcadeCore { id: string; label: string; systemId: string; catalog: string; opensParentZip?: boolean; supersedes?: string; requiresSimd?: boolean }
+export interface ArcadeCore { id: string; label: string; systemId: string; opensParentZip?: boolean; supersedes?: string; requiresSimd?: boolean }
 export const ARCADE_CORES: Readonly<Record<string, ArcadeCore>>;
 export const KNOWN_BIOS_LABELS: Readonly<Record<string, string>>;
 export interface ArcadeCatalog { games: Record<string, any[]> }
-export function loadCatalog(coreId: string, fetchImpl?: typeof fetch): Promise<ArcadeCatalog>;
-export function loadCatalogs(fetchImpl?: typeof fetch): Promise<Record<string, ArcadeCatalog>>;
+export const ARCADE_CORE_ORDER: readonly string[];
 export function biosOf(catalog: ArcadeCatalog, setName: string): string;
 export function onlyKeysMissing(arcade: { missing?: string[]; status?: string } | null | undefined): boolean;
 export function isCps2KeyMissing(catalog: unknown, setName: string, missing: string[]): boolean;
@@ -15,5 +14,7 @@ export function arcadeLayout(arcade: { bios?: string } | null | undefined): 'neo
 export function describeArcadeStatus(arcade: any, options?: { biosInstalled?: boolean; parentInstalled?: boolean }): string;
 export function missingSummary(arcade: any): string;
 export function arcadeInputInfo(arcade: any, catalogs: unknown): { buttons: number; ways: number; players: number } | null;
+export const ARCADE_INPUT_URL: string;
+export function loadArcadeInput(fetchImpl?: typeof fetch): Promise<Record<string, [number, number, number]>>;
 export function wasmSimdSupported(wasm?: { validate(bytes: Uint8Array): boolean }): boolean;
 export function arcadeCoreSupported(coreId: string, env?: { simd?: boolean }): boolean;

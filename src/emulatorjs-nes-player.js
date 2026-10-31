@@ -166,7 +166,7 @@ export class EmulatorJsPlayer {
     if (!CORES_BY_SYSTEM[systemId]?.has(coreId)) throw new TypeError(`Unsupported EmulatorJS core for ${systemId}: ${coreId}`);
     if (!Number.isSafeInteger(gameId) || gameId < 1) throw new TypeError('EmulatorJS game ID must be a positive safe integer.');
     this.container=container; this.onError=onError; this.onWarning=onWarning; this.onHotkey=onHotkey; this.gameId=gameId; this.systemId=systemId; this.systemLabel=systemLabel; this.coreId=coreId; this.documentOptions={ extraFiles, retroarchConfig, coreOptions, shader }; this.keyMap=keyboardMap(systemId); this.engineName=`EmulatorJS · ${systemLabel}`; this.romInfo=null;
-    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
+    this.frame=null; this.romUrl=null; this.started=false; this.destroyed=false; this.held=new Map(); this.pressedAt=new Map(); this.releaseTimers=new Map(); this.tapTimers=new Set(); this.keysDown=new Map(); this.fastForward=false; this.rewinding=false; this.rightCtrlDown=false; this.timer=null; this.resolveStart=null; this.rejectStart=null;
     this.boundMessage=event=>this.handleMessage(event); this.boundKeyDown=event=>this.handleKey(event,true); this.boundKeyUp=event=>this.handleKey(event,false); this.boundBlur=()=>{this.rightCtrlDown=false;this.releaseAllButtons();}; this.frameWindow=null; this.boundFrameLoad=()=>{const win=this.frame?.contentWindow;if(!win)return;win.removeEventListener('keydown',this.boundKeyDown,true);win.removeEventListener('keyup',this.boundKeyUp,true);this.frameWindow=win;win.addEventListener('keydown',this.boundKeyDown,true);win.addEventListener('keyup',this.boundKeyUp,true);};
     document.addEventListener('keydown',this.boundKeyDown); document.addEventListener('keyup',this.boundKeyUp); window.addEventListener('blur',this.boundBlur);
   }
@@ -327,8 +327,9 @@ export class EmulatorJsPlayer {
       try { this.onWarning(`Performans ölçülemedi: ${error?.message || error}`); } catch {}
       return null;
     } finally {
-      try { gm.toggleFastForward(0); } catch {}
       try { gm.setFastForwardRatio?.(3); } catch {}
+      // The player's own fast forward (if it was on) carries on after the measurement.
+      try { gm.toggleFastForward(this.fastForward ? 1 : 0); } catch {}
       try { gm.functions?.setVSync?.(1); } catch {}
       try { emu.setVolume?.(volume); } catch {}
     }
@@ -372,6 +373,29 @@ export class EmulatorJsPlayer {
     }
     return null;
   }
+  /**
+   * Fast forward (RetroArch's fastforward_ratio, 3× in EmulatorJS) on or off; false when the
+   * runtime cannot do it.
+   */
+  setFastForward(active) {
+    const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
+    if (!this.started || this.destroyed || typeof gm?.toggleFastForward !== 'function') return false;
+    gm.toggleFastForward(active ? 1 : 0);
+    this.fastForward = Boolean(active);
+    return true;
+  }
+  /** Whether this game was started with RetroArch's rewind buffer (light consoles only). */
+  supportsRewind() {
+    return this.documentOptions?.retroarchConfig?.rewind_enable === 'true';
+  }
+  /** Runs the game backwards while active (RetroArch rewind); false when it is not available. */
+  setRewind(active) {
+    const fn = this.frame?.contentWindow?.EJS_emulator?.gameManager?.functions?.toggleRewind;
+    if (!this.started || this.destroyed || !this.supportsRewind() || typeof fn !== 'function') return false;
+    fn(active ? 1 : 0);
+    this.rewinding = Boolean(active);
+    return true;
+  }
   /** Soft-resets the running game; battery-backed RAM is preserved by the core. */
   restartGame() {
     const gm = this.frame?.contentWindow?.EJS_emulator?.gameManager;
@@ -389,6 +413,15 @@ export class EmulatorJsPlayer {
     // and 1/2/3 save, load and change EmulatorJS's own state slots).
     if (inFrame) event.stopPropagation?.();
     if (event.code === 'ControlRight') this.rightCtrlDown = pressed;
+    // Space held: fast forward; Backspace held: rewind (outside both players' halves of the keyboard).
+    if ((event.code === 'Space' || event.code === 'Backspace') && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const targetTag = event.target?.tagName?.toLowerCase();
+      if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || event.target?.isContentEditable) return;
+      if (!inFrame && modal?.classList.contains('menu-open')) return;
+      event.preventDefault();
+      if (!event.repeat) { try { this.onHotkey(event.code === 'Space' ? 'FastForward' : 'Rewind', pressed); } catch {} }
+      return;
+    }
     if (event.code === 'Escape' && pressed && !event.repeat && inFrame) {
       // Inside the emulator frame the page never sees Escape; hand it to the app (menu).
       event.preventDefault();

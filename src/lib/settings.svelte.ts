@@ -17,6 +17,8 @@ export interface AppPrefs {
   accent: string;
   /** Keep where the player left off when leaving a game, and continue from there next time. */
   autoResume: boolean;
+  /** Box art from the RetroArch cover archive, fetched once and kept on the device. */
+  covers: boolean;
   layout: 'grid' | 'list';
   sort: SortKey;
   volume: number;
@@ -31,6 +33,7 @@ export function normalizePrefs(value: unknown): AppPrefs {
   return {
     accent: ACCENTS.some(a => a.value === raw.accent) ? (raw.accent as string) : ACCENTS[0].value,
     autoResume: typeof raw.autoResume === 'boolean' ? raw.autoResume : true,
+    covers: typeof raw.covers === 'boolean' ? raw.covers : true,
     layout: raw.layout === 'list' ? 'list' : 'grid',
     sort: normalizeSort(raw.sort),
     volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.7
