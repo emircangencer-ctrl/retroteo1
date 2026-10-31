@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, coverRequests, recordInputs, heldInputs, touchScreen, padGeometry, gameId } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom, tapCounterRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
 
@@ -29,6 +29,8 @@ const colourRom = path.join(tmp, 'colour cycle.nes');
 fs.writeFileSync(colourRom, colourCycleRom());
 const mdSramRom = path.join(tmp, 'md battery.md');
 fs.writeFileSync(mdSramRom, megaDriveSramRom());
+const tapRom = path.join(tmp, 'tap counter.nes');
+fs.writeFileSync(tapRom, tapCounterRom());
 // Cover art: a self-made cartridge that carries the No-Intro checksum of Super Mario Bros. (World)
 // under a meaningless file name, one named like a No-Intro release, and one nothing matches.
 const coverDir = path.join(tmp, 'covers');
@@ -659,6 +661,169 @@ await scenario('touch pad: the d-pad rolls through 8 directions without lifting,
   assert.ok(buzz.length >= 6 && buzz.every(ms => ms > 0 && ms <= 20), `short vibrations on presses (${buzz})`);
 }, { mobile: true, init: () => { window.__buzz = []; navigator.vibrate = ms => { window.__buzz.push(ms); return true; }; } });
 
+// The tap-counter cartridge keeps in its battery RAM what the game saw: A presses ($6000), A
+// releases ($6005).
+const tapCounts = async page => { const s = await liveSram(page); return { presses: s[0], releases: s[5] }; };
+const since = (before, after) => ({ presses: (after.presses - before.presses + 256) % 256, releases: (after.releases - before.releases + 256) % 256 });
+
+await scenario('a tap shorter than a frame reaches the game, also when it arrives while the phone draws a slow frame', async (page, context) => {
+  await importFile(page, tapRom);
+  await play(page, 'tap counter');
+  await page.waitForTimeout(800);
+  const cdp = await context.newCDPSession(page);
+  const A = (await padGeometry(page)).face.find(b => b.input === 'BUTTON_A');
+  const point = [{ x: A.x, y: A.y, id: 1, radiusX: 8, radiusY: 8, force: 1 }];
+  await page.evaluate(() => { window.__gaps = []; let down = 0; const root = document.querySelector('#touch-controls'); root.addEventListener('pointerdown', () => { down = performance.now(); }, true); root.addEventListener('pointerup', () => window.__gaps.push(performance.now() - down), true); });
+  // The page is busy for 40 ms (a slow frame); the finger goes down and up meanwhile, so both
+  // events arrive one after the other once the page is free (~1 ms apart).
+  const before = await tapCounts(page);
+  for (let i = 0; i < 20; i++) {
+    const busy = page.evaluate(() => { const t = performance.now(); while (performance.now() - t < 40); });
+    await page.waitForTimeout(5);
+    await Promise.all([cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point }), cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })]);
+    await busy;
+    await page.waitForTimeout(110);
+  }
+  await page.waitForTimeout(200);
+  const seen = since(before, await tapCounts(page));
+  const gaps = await page.evaluate(() => window.__gaps);
+  assert.ok(gaps.filter(ms => ms < 5).length >= 15, `the taps really were shorter than a frame (${gaps.map(ms => ms.toFixed(1))})`);
+  assert.deepEqual(seen, { presses: 20, releases: 20 }, 'every tap was seen by the game (before this build: 0 of 20)');
+}, { mobile: true });
+
+await scenario('Seri ateş and Basılı tut: chosen on the pad picture in the menu, remembered for the game, played by the real core', async (page, context) => {
+  await importFile(page, tapRom);
+  await play(page, 'tap counter');
+  await page.waitForTimeout(600);
+  const touch = await touchScreen(context, page);
+  const A = (await padGeometry(page)).face.find(b => b.input === 'BUTTON_A');
+  // Normal: one press for a held finger.
+  let before = await tapCounts(page);
+  await touch('touchStart', [[A.x, A.y, 1]]); await page.waitForTimeout(800); await touch('touchEnd', []);
+  await page.waitForTimeout(150);
+  assert.deepEqual(since(before, await tapCounts(page)), { presses: 1, releases: 1 });
+  // A → Seri ateş on the menu's pad picture.
+  await click(page, '#play-menu');
+  await click(page, '#touch-settings-open');
+  await page.waitForSelector('#button-modes [data-input="BUTTON_A"]');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#button-modes [data-input]')].map(b => b.dataset.input)), ['BUTTON_B', 'BUTTON_A'], 'the NES pad: B and A');
+  await click(page, '#button-modes [data-input="BUTTON_A"]');
+  await page.waitForFunction(() => document.querySelector('#button-modes [data-input="BUTTON_A"]').dataset.mode === 'turbo');
+  await click(page, '#play-menu');
+  await waitStatus(page, /^Çalışıyor/);
+  assert.equal(await page.evaluate(() => document.querySelector('#touch-controls .tc-face[data-input="BUTTON_A"]').dataset.mode), 'turbo', 'the pad shows the mark');
+  before = await tapCounts(page);
+  await touch('touchStart', [[A.x, A.y, 1]]); await page.waitForTimeout(1000); await touch('touchEnd', []);
+  await page.waitForTimeout(200);
+  let seen = since(before, await tapCounts(page));
+  assert.ok(seen.presses >= 10 && seen.presses <= 17 && seen.releases === seen.presses, `a held turbo A fires ~15 times a second (${seen.presses})`);
+  // Remembered for the game: close and play again.
+  await click(page, '#player-exit');
+  await page.waitForFunction(() => document.querySelector('#player-modal').classList.contains('hidden'));
+  await play(page, 'tap counter');
+  await page.waitForTimeout(600);
+  assert.equal(await page.evaluate(() => document.querySelector('#touch-controls .tc-face[data-input="BUTTON_A"]').dataset.mode), 'turbo', 'remembered');
+  // A → Basılı tut: one tap holds it down (lit), the next lets go.
+  await click(page, '#play-menu');
+  await click(page, '#touch-settings-open');
+  await page.waitForSelector('#button-modes [data-input="BUTTON_A"]');
+  await click(page, '#button-modes [data-input="BUTTON_A"]');
+  await page.waitForFunction(() => document.querySelector('#button-modes [data-input="BUTTON_A"]').dataset.mode === 'hold');
+  await click(page, '#play-menu');
+  await waitStatus(page, /^Çalışıyor/);
+  before = await tapCounts(page);
+  await touch('touchStart', [[A.x, A.y, 1]]); await touch('touchEnd', []);
+  await page.waitForTimeout(600);
+  seen = since(before, await tapCounts(page));
+  assert.deepEqual(seen, { presses: 1, releases: 0 }, 'still held after the finger left');
+  assert.match(await page.evaluate(() => document.querySelector('#touch-controls .tc-face[data-input="BUTTON_A"]').className), /is-locked/);
+  await touch('touchStart', [[A.x, A.y, 1]]); await touch('touchEnd', []);
+  await page.waitForTimeout(200);
+  assert.deepEqual(since(before, await tapCounts(page)), { presses: 1, releases: 1 }, 'the second tap lets go');
+  assert.doesNotMatch(await page.evaluate(() => document.querySelector('#touch-controls .tc-face[data-input="BUTTON_A"]').className), /is-locked/);
+  // Back to normal; stored with the game.
+  await click(page, '#play-menu');
+  await click(page, '#touch-settings-open');
+  await page.waitForSelector('#button-modes [data-input="BUTTON_A"]');
+  await click(page, '#button-modes [data-input="BUTTON_A"]');
+  await page.waitForFunction(() => !document.querySelector('#button-modes [data-input="BUTTON_A"]').dataset.mode);
+  const id = await gameId(page, 'tap counter');
+  await waitFor(async () => { const games = await appGames(page); return JSON.stringify(games.find(g => g.id === id)?.buttonModes) === '{}'; });
+}, { mobile: true });
+
+await scenario('Tuşları yerleştir: a finger drags the d-pad, two fingers resize the buttons; the pad plays there and is remembered per orientation', async (page, context) => {
+  await importFile(page, tapRom);
+  await play(page, 'tap counter');
+  await page.waitForTimeout(500);
+  const touch = await touchScreen(context, page);
+  const before = await padGeometry(page);
+  await click(page, '#play-menu');
+  await click(page, '#touch-settings-open');
+  await click(page, '#place-pad');
+  await page.waitForSelector('#place-bar');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#player-menu')).display), 'none', 'the menu steps aside');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#touch-controls .tc-frame')].map(f => f.dataset.group)), ['dpad', 'face', 'system']);
+  // Drag the d-pad up and to the right.
+  const d = before.dpad;
+  await touch('touchStart', [[d.x, d.y, 1]]);
+  for (let i = 1; i <= 5; i++) await touch('touchMove', [[d.x + i * 10, d.y - i * 8, 1]]);
+  await touch('touchEnd', []);
+  // Pinch the buttons 1.3×.
+  const [B, A] = before.face;
+  const mid = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 };
+  await touch('touchStart', [[mid.x, mid.y, 1]]);
+  await touch('touchStart', [[mid.x, mid.y, 1], [mid.x - 80, mid.y, 2]]);
+  for (let i = 1; i <= 4; i++) await touch('touchMove', [[mid.x, mid.y, 1], [mid.x - 80 - i * 6, mid.y, 2]]);
+  await touch('touchEnd', [[mid.x, mid.y, 1]]);
+  await touch('touchEnd', []);
+  assert.equal(await page.evaluate(() => document.querySelector('#place-scale').value), '130');
+  // Nothing reached the game while editing.
+  assert.deepEqual(since({ presses: 0, releases: 0 }, await tapCounts(page)), { presses: 0, releases: 0 });
+  await click(page, '#place-done');
+  await page.waitForFunction(() => !document.querySelector('#place-bar'));
+  await click(page, '#play-menu');
+  await waitStatus(page, /^Çalışıyor/);
+  const after = await padGeometry(page);
+  assert.ok(Math.abs(after.dpad.x - (d.x + 50)) < 2 && Math.abs(after.dpad.y - (d.y - 40)) < 2, `d-pad moved (${Math.round(after.dpad.x)},${Math.round(after.dpad.y)})`);
+  assert.ok(Math.abs(after.face[1].r / before.face[1].r - 1.3) < 0.02, 'buttons 1.3× larger');
+  // The moved pad plays: A at its new place, and the d-pad where it is now.
+  const A2 = after.face.find(b => b.input === 'BUTTON_A');
+  const counts = await tapCounts(page);
+  await touch('touchStart', [[A2.x, A2.y, 1]]); await touch('touchEnd', []);
+  await page.waitForTimeout(150);
+  assert.deepEqual(since(counts, await tapCounts(page)), { presses: 1, releases: 1 });
+  await recordInputs(page);
+  await touch('touchStart', [[after.dpad.x, after.dpad.y - after.dpad.r * 0.7, 3]]);
+  assert.equal(await heldInputs(page), 'UP');
+  await touch('touchEnd', []);
+  // Landscape has its own placement (RetroPlay's own until changed); portrait comes back as set.
+  await page.setViewportSize({ width: 873, height: 393 });
+  await page.waitForTimeout(500);
+  const land = await padGeometry(page);
+  await page.setViewportSize({ width: 393, height: 873 });
+  await page.waitForTimeout(500);
+  const back = await padGeometry(page);
+  assert.ok(Math.abs(back.dpad.x - after.dpad.x) < 2 && Math.abs(back.face[1].r - after.face[1].r) < 1, 'portrait placement kept');
+  assert.equal(land.orientation, 'landscape');
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-touch-settings')).layouts);
+  assert.deepEqual(Object.keys(stored), ['nes:portrait']);
+  // Android back closes the editor first (the menu comes back, the game stays open).
+  await click(page, '#play-menu');
+  await click(page, '#touch-settings-open');
+  await click(page, '#place-pad');
+  await page.waitForSelector('#place-bar');
+  await page.goBack();
+  await page.waitForFunction(() => !document.querySelector('#place-bar'));
+  assert.deepEqual(await page.evaluate(() => [document.querySelector('#player-modal').classList.contains('hidden'), getComputedStyle(document.querySelector('#player-menu')).display !== 'none']), [false, true]);
+  // Sıfırla puts RetroPlay's own placement back.
+  await click(page, '#place-pad');
+  await click(page, '#place-reset');
+  await click(page, '#place-done');
+  await click(page, '#play-menu');
+  const reset = await padGeometry(page);
+  assert.ok(Math.abs(reset.dpad.x - d.x) < 1 && Math.abs(reset.face[1].r - before.face[1].r) < 1, 'reset');
+}, { mobile: true });
+
 await scenario('the menu pauses the game and resumes it; the back button closes the menu, not the game; pad settings apply live and are remembered', async page => {
   await importFile(page, checkerRom);
   await play(page, 'checkerboard');
@@ -1009,8 +1174,12 @@ await scenario('fast forward and rewind on the real core: ⏩ and Space speed it
   assert.equal(await pressed('#play-rewind'), 'false');
   const order = forward.slice(1, -1);
   const steps = back.map(v => order.indexOf(v)).filter(i => i >= 0);
-  assert.ok(steps.length >= 3, `rewind went through ${steps.length} known colours (${back.join(',')} / forward ${forward.join(',')})`);
-  assert.ok(steps.every((v, i) => i === 0 || v < steps[i - 1]), `colours in reverse order: ${steps.join(',')}`);
+  // A fast machine can rewind past the start of the recorded window; the hues then repeat from the
+  // cycle before, so the order is checked up to that point (which must be the window's start).
+  const cut = steps.findIndex((v, i) => i > 0 && v >= steps[i - 1]);
+  const reversed = cut < 0 ? steps : steps.slice(0, cut);
+  assert.ok(reversed.length >= 3, `rewind went through ${reversed.length} known colours in reverse (${back.join(',')} / forward ${forward.join(',')})`);
+  assert.ok(cut < 0 || reversed.at(-1) <= 1, `colours in reverse order: ${steps.join(',')}`);
   // Backspace held does the same.
   at = await mark();
   await page.keyboard.down('Backspace');

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import TouchSettings from '../components/TouchSettings.svelte';
+  import ButtonModes from '../components/ButtonModes.svelte';
   import KeyHints from '../components/KeyHints.svelte';
   import { tv } from '../lib/tv.svelte.ts';
   import { player, slotName } from './session.svelte.ts';
@@ -172,7 +173,17 @@
           {/each}
           <p class="note" id="players-note">{player.controls.players.count < 2 ? 'Bu oyun tek oyunculu: bütün kontroller 1. oyuncuyu oynatır.' : `Kumandalar takıldıkları sırayla 1., 2. … oyuncu olur.${player.controls.touchPlay ? ' Dokunmatik tuşlar 1. oyuncudur.' : tv.active ? '' : ' Klavyede iki oyuncu birden oynar: 1. oyuncu sağda (ok tuşları), 2. oyuncu solda (WASD).'}${player.controls.isArcade ? ' Her oyuncu kendi Select tuşuyla jeton atar, Start ile başlar.' : ''}`}</p>
         </div>
+        {#if player.controls.modeButtons.length}
+          <div class="field" id="button-modes-field">
+            <span class="label">Düğmeler</span>
+            <ButtonModes />
+          </div>
+        {/if}
         {#if player.controls.touchPlay}
+          <div class="field place-field">
+            <button type="button" class="btn place-btn" id="place-pad" onclick={() => player.controls.beginEdit()}>Tuşları yerleştir</button>
+            <p class="note">Yön tuşunu, düğmeleri ve Select/Start sırasını parmağınla taşı; iki parmakla büyüt ya da küçült. Her konsolun tuşları, dik ve yatay ekran için ayrı hatırlanır.{player.controls.placed ? ' Bu düzen sana göre ayarlı.' : ''}</p>
+          </div>
           <div class="touch-settings" id="touch-settings">
             <TouchSettings prefix="ts" compact arcade={player.platform === 'ARCADE'} fourWay={player.controls.fourWay} />
           </div>

@@ -635,3 +635,100 @@ test('Space held fast-forwards and Backspace held rewinds (as hotkeys, never gam
     restore();
   }
 });
+
+/** A player whose core counts frames; `step()` runs one core frame and the display-frame work. */
+function framedPlayer(calls, options) {
+  const player = makePlayer(calls, options);
+  let frame = 50;
+  const ticks = [];
+  player.frame.contentWindow.EJS_emulator.gameManager.getFrameNum = () => frame;
+  player.latch.schedule = fn => ticks.push(fn);
+  player.started = true;
+  const step = (n = 1) => { for (let i = 0; i < n; i++) { frame += 1; for (const fn of ticks.splice(0)) fn(); } };
+  return { player, step };
+}
+
+test('a touch tap shorter than a frame reaches the core: the release waits two core frames', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    const rig = framedPlayer(calls);
+    player = rig.player;
+    player.pressButton('BUTTON_A', 'touch');
+    player.releaseButton('BUTTON_A', 'touch');
+    assert.deepEqual(calls, [[0, 8, 1]], 'down at once, up held back');
+    rig.step(1);
+    assert.deepEqual(calls, [[0, 8, 1]]);
+    rig.step(1);
+    assert.deepEqual(calls, [[0, 8, 1], [0, 8, 0]]);
+    // A long press is let go at once.
+    calls.length = 0;
+    player.pressButton('BUTTON_B', 'touch'); rig.step(5); player.releaseButton('BUTTON_B', 'touch');
+    assert.deepEqual(calls, [[0, 0, 1], [0, 0, 0]]);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('Seri ateş: a held turbo button fires on whole core frames, for every player', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  let player;
+  try {
+    const rig = framedPlayer(calls);
+    player = rig.player;
+    player.setButtonModes({ BUTTON_A: 'turbo', BUTTON_START: 'turbo', BUTTON_UP: 'hold' });
+    assert.deepEqual(player.buttonModes, { BUTTON_A: 'turbo' }, 'directions, Select and Start keep their normal press');
+    player.pressButton('BUTTON_A', 'touch');
+    rig.step(8);
+    assert.deepEqual(calls, [[0, 8, 1], [0, 8, 0], [0, 8, 1], [0, 8, 0], [0, 8, 1]]);
+    player.releaseButton('BUTTON_A', 'touch');
+    rig.step(4);
+    assert.deepEqual(calls.at(-1), [0, 8, 0]);
+    calls.length = 0;
+    player.pressButton('BUTTON_A', 'gamepad', 1);
+    rig.step(2);
+    assert.deepEqual(calls, [[1, 8, 1], [1, 8, 0]], 'player 2 too');
+    player.releaseButton('BUTTON_A', 'gamepad', 1);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});
+
+test('Basılı tut: one press holds the button, the next lets go; the menu lets go of everything', () => {
+  const restore = installFakeBrowser();
+  const calls = [];
+  const locks = [];
+  let player;
+  try {
+    const rig = framedPlayer(calls, { onLocks: names => locks.push(names.join('+') || '-') });
+    player = rig.player;
+    player.setButtonModes({ BUTTON_B: 'hold' });
+    player.pressButton('BUTTON_B', 'touch'); rig.step(3); player.releaseButton('BUTTON_B', 'touch');
+    rig.step(10);
+    assert.deepEqual(calls, [[0, 0, 1]], 'still held after the finger left');
+    assert.deepEqual(player.lockedButtons(), ['BUTTON_B']);
+    player.pressButton('BUTTON_B', 'touch'); rig.step(3); player.releaseButton('BUTTON_B', 'touch');
+    assert.deepEqual(calls, [[0, 0, 1], [0, 0, 0]]);
+    assert.deepEqual(player.lockedButtons(), []);
+    // Held again, then the menu opens: everything is let go and the pad hears about it.
+    player.pressButton('BUTTON_B', 'touch'); player.releaseButton('BUTTON_B', 'touch');
+    rig.step(3);
+    player.releaseAllButtons();
+    assert.deepEqual(calls.at(-1), [0, 0, 0]);
+    assert.deepEqual(locks, ['-', 'BUTTON_B', '-', 'BUTTON_B', '-']);
+    // Switching the mode off lets go of a held button.
+    player.pressButton('BUTTON_B', 'touch'); player.releaseButton('BUTTON_B', 'touch');
+    rig.step(3);
+    player.setButtonModes({});
+    rig.step(3);
+    assert.deepEqual(calls.at(-1), [0, 0, 0]);
+    assert.deepEqual(player.lockedButtons(), []);
+  } finally {
+    try { player?.destroy(); } catch {}
+    restore();
+  }
+});

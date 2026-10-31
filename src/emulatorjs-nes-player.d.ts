@@ -6,12 +6,18 @@ export const KEYBOARD_PLAYERS: readonly KeyboardPlayerKeys[];
 export const BUTTON_BLOCKS: Readonly<Record<string, { bottom: readonly string[]; top: readonly string[] }>>;
 export function keyboardMap(systemId?: string): Readonly<Record<string, readonly [number, string]>>;
 export const MIN_SYSTEM_PRESS_MS: number;
+export type ButtonMode = 'turbo' | 'hold';
+export type ButtonModes = Partial<Record<string, ButtonMode>>;
+export const MODE_BUTTONS: readonly string[];
+export function normalizeButtonModes(value: unknown): ButtonModes;
 export const EMULATORJS_PLAYERS: number;
 export function buildEmulatorDocument(gameUrl: string, gameName: string, systemId?: string, gameId?: number, coreId?: string, options?: Record<string, unknown>): string;
 export interface EmulatorJsPlayerOptions {
   onError?: (error: Error) => void;
   onWarning?: (message: string) => void;
   onHotkey?: (key: string, pressed?: boolean) => void;
+  /** Buttons Basılı tut holds down right now (player 1). */
+  onLocks?: (names: string[]) => void;
   gameId?: number;
   systemId?: string;
   systemLabel?: string;
@@ -52,6 +58,8 @@ export class EmulatorJsPlayer {
   pressButton(name: string, source?: string, player?: number): void;
   releaseButton(name: string, source?: string, player?: number): void;
   tapButton(name: string, ms?: number, player?: number): boolean;
+  setButtonModes(modes: ButtonModes | null | undefined): void;
+  lockedButtons(): string[];
   releaseAllButtons(): void;
   destroy(): void;
 }

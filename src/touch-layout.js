@@ -25,8 +25,46 @@ export const DEFAULT_TOUCH_SETTINGS = Object.freeze({
   diagonal: 'normal',  // az | normal | cok
   floating: false,     // the d-pad centres itself where the thumb lands
   hideWithGamepad: true,
-  arcadeButtons: 'game' // 'game': only the buttons the cabinet had (FinalBurn Neo) | 'all'
+  arcadeButtons: 'game', // 'game': only the buttons the cabinet had (FinalBurn Neo) | 'all'
+  layouts: Object.freeze({}) // "Tuşları yerleştir": moved/resized groups per pad and orientation (see adjustLayout)
 });
+
+/** Groups of the pad the player can move and resize ("Tuşları yerleştir"). */
+export const LAYOUT_GROUPS = Object.freeze(['dpad', 'face', 'system']);
+export const LAYOUT_SCALE = Object.freeze({ min: 0.7, max: 1.5 });
+const MAX_LAYOUTS = 48;
+export const layoutKey = (padId, orientation) => `${padId}:${orientation}`;
+
+/**
+ * One pad's placement: per group an offset (x, y as a share of the screen's width and height, so
+ * it survives small size changes such as the browser bar coming and going) and a size factor s.
+ */
+export function normalizeAdjust(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const out = {};
+  for (const group of LAYOUT_GROUPS) {
+    const g = raw[group] && typeof raw[group] === 'object' ? raw[group] : {};
+    const num = (v, fallback, min, max) => (Number.isFinite(Number(v)) ? clamp(Number(v), min, max) : fallback);
+    out[group] = {
+      x: Math.round(num(g.x, 0, -1, 1) * 10000) / 10000,
+      y: Math.round(num(g.y, 0, -1, 1) * 10000) / 10000,
+      s: group === 'system' ? 1 : Math.round(num(g.s, 1, LAYOUT_SCALE.min, LAYOUT_SCALE.max) * 100) / 100
+    };
+  }
+  return out;
+}
+const isIdentity = a => LAYOUT_GROUPS.every(group => !a[group].x && !a[group].y && a[group].s === 1);
+
+function normalizeLayouts(value) {
+  const out = {};
+  if (!value || typeof value !== 'object') return out;
+  for (const [key, adjust] of Object.entries(value).slice(0, MAX_LAYOUTS)) {
+    if (!/^[a-z0-9]{1,24}:(portrait|landscape)$/.test(key)) continue;
+    const clean = normalizeAdjust(adjust);
+    if (!isIdentity(clean)) out[key] = clean;
+  }
+  return out;
+}
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const round = value => Math.round(value * 10) / 10;
@@ -42,7 +80,8 @@ export function normalizeTouchSettings(value = {}) {
     diagonal: Object.prototype.hasOwnProperty.call(DIAGONAL_WIDTH, raw.diagonal) ? raw.diagonal : DEFAULT_TOUCH_SETTINGS.diagonal,
     floating: typeof raw.floating === 'boolean' ? raw.floating : DEFAULT_TOUCH_SETTINGS.floating,
     hideWithGamepad: typeof raw.hideWithGamepad === 'boolean' ? raw.hideWithGamepad : DEFAULT_TOUCH_SETTINGS.hideWithGamepad,
-    arcadeButtons: raw.arcadeButtons === 'all' ? 'all' : 'game'
+    arcadeButtons: raw.arcadeButtons === 'all' ? 'all' : 'game',
+    layouts: normalizeLayouts(raw.layouts)
   };
 }
 
@@ -258,6 +297,8 @@ function portrait(W, H, inset, aspect, spec, s) {
   const system = systemButtons(spec, spec.system.map((_, i) => ({ x: Math.round((W - rowW) / 2 + i * (sysW + gap)), y: systemY, w: sysW, h: systemH })));
   return {
     orientation: 'portrait', overlay: false, width: W, height: H, screen,
+    // Where a moved group may go: below the picture, inside the safe area.
+    bounds: { x: inset.left + 6, y: top, w: W - inset.left - inset.right - 12, h: H - inset.bottom - 6 - top },
     dpad: { ...dpad, zone: { cx: dpad.cx, cy: dpad.cy, r: round(dpad.r * 1.75) }, area: { x: 0, y: top, w: half, h: bottom - top } },
     face, faceArea: { x: half, y: top, w: W - half, h: bottom - top },
     shoulders, system,
@@ -309,9 +350,91 @@ function landscape(W, H, inset, aspect, spec, s) {
   }
   return {
     orientation: 'landscape', overlay, width: W, height: H, screen,
+    bounds: { x: inset.left + 6, y: topChrome, w: W - inset.left - inset.right - 12, h: H - inset.bottom - 6 - topChrome },
     dpad: { ...dpad, zone: { cx: dpad.cx, cy: dpad.cy, r: round(dpad.r * 1.75) }, area: { x: 0, y: topChrome, w: Math.max(side, W * 0.3), h: H - topChrome } },
     face, faceArea: { x: Math.min(W - side, W * 0.7), y: topChrome, w: W - Math.min(W - side, W * 0.7), h: H - topChrome },
     shoulders, system: systemButtons(spec, positions),
     chrome: { bar: { x: 0, y: 0, w: W, h: 0, padTop: inset.top } }
   };
+}
+
+
+const boxOf = items => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of items) {
+    if ('r' in b) { x0 = Math.min(x0, b.cx - b.r); y0 = Math.min(y0, b.cy - b.r); x1 = Math.max(x1, b.cx + b.r); y1 = Math.max(y1, b.cy + b.r); }
+    else { x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+};
+/** How far (px) a box at `box` may move by `d` along one axis and stay within [lo, hi]. */
+const keepInside = (start, size, d, lo, hi) => (size > hi - lo ? lo + (hi - lo - size) / 2 - start : clamp(start + d, lo, hi - size) - start);
+const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/**
+ * The layout with the player's own placement ("Tuşları yerleştir") applied: the d-pad, the face
+ * buttons and the Select/Start row moved and (d-pad, buttons) resized, kept inside `layout.bounds`
+ * (in portrait never over the picture). Returns the new layout with `adjust` set to the placement
+ * that was actually used (a group pushed against an edge stops there).
+ */
+export function adjustLayout(layout, adjust) {
+  if (!adjust || !layout.bounds) return { ...layout, adjust: normalizeAdjust(null) };
+  const a = normalizeAdjust(adjust);
+  const { width: W, height: H, bounds: B } = layout;
+  const used = normalizeAdjust(null);
+  // D-pad
+  const d = layout.dpad, r = round(d.r * a.dpad.s);
+  const dx = keepInside(d.cx - r, r * 2, a.dpad.x * W, B.x, B.x + B.w);
+  const dy = keepInside(d.cy - r, r * 2, a.dpad.y * H, B.y, B.y + B.h);
+  const dpad = { ...d, cx: round(d.cx + dx), cy: round(d.cy + dy), r, zone: { cx: round(d.cx + dx), cy: round(d.cy + dy), r: round(r * 1.75) } };
+  used.dpad = { x: dx / W, y: dy / H, s: a.dpad.s };
+  // Face buttons: resized around the cluster's centre, then moved.
+  let face = layout.face, faceArea = layout.faceArea;
+  if (face.length) {
+    const box = boxOf(face), fx = box.x + box.w / 2, fy = box.y + box.h / 2, k = a.face.s;
+    const sized = face.map(b => ({ ...b, cx: fx + (b.cx - fx) * k, cy: fy + (b.cy - fy) * k, r: b.r * k }));
+    const sbox = boxOf(sized);
+    const mx = keepInside(sbox.x, sbox.w, a.face.x * W, B.x, B.x + B.w);
+    const my = keepInside(sbox.y, sbox.h, a.face.y * H, B.y, B.y + B.h);
+    face = sized.map(b => ({ ...b, cx: round(b.cx + mx), cy: round(b.cy + my), r: round(b.r) }));
+    used.face = { x: mx / W, y: my / H, s: k };
+    // A touch that starts near the buttons belongs to them, wherever they are now.
+    const reach = Math.max(...face.map(b => b.r)) * 0.9;
+    const near = { x: sbox.x + mx - reach, y: sbox.y + my - reach, w: sbox.w + reach * 2, h: sbox.h + reach * 2 };
+    const x0 = Math.min(faceArea.x, near.x), y0 = Math.min(faceArea.y, near.y);
+    faceArea = { x: x0, y: y0, w: Math.max(faceArea.x + faceArea.w, near.x + near.w) - x0, h: Math.max(faceArea.y + faceArea.h, near.y + near.h) - y0 };
+  }
+  // Select / Start row
+  let system = layout.system;
+  if (system.length) {
+    const box = boxOf(system);
+    const sx = keepInside(box.x, box.w, a.system.x * W, B.x, B.x + B.w);
+    const sy = keepInside(box.y, box.h, a.system.y * H, B.y, B.y + B.h);
+    system = system.map(b => ({ ...b, x: Math.round(b.x + sx), y: Math.round(b.y + sy) }));
+    used.system = { x: sx / W, y: sy / H, s: 1 };
+  }
+  // Each part on its own (the landscape Select/Start pair sits on both sides of the picture).
+  const parts = [{ x: dpad.cx - dpad.r, y: dpad.cy - dpad.r, w: dpad.r * 2, h: dpad.r * 2 }, ...face.map(b => boxOf([b])), ...system.map(b => boxOf([b]))];
+  const overlay = layout.orientation === 'landscape' && (layout.overlay || parts.some(g => overlaps(g, layout.screen)));
+  for (const group of LAYOUT_GROUPS) { used[group].x = Math.round(used[group].x * 10000) / 10000; used[group].y = Math.round(used[group].y * 10000) / 10000; }
+  return { ...layout, dpad, face, faceArea, system, overlay, adjust: used };
+}
+
+/**
+ * The groups the player can move (for the editor), in layout px: `box` around the whole group and
+ * `parts`, the boxes to frame and to take it by (the Select/Start pair, which sits on both sides of
+ * the picture in landscape, is framed button by button when they are far apart).
+ */
+export function layoutGroups(layout) {
+  const out = [];
+  const d = layout.dpad;
+  const dbox = { x: d.cx - d.r, y: d.cy - d.r, w: d.r * 2, h: d.r * 2 };
+  out.push({ group: 'dpad', box: dbox, parts: [dbox] });
+  if (layout.face.length) { const box = boxOf(layout.face); out.push({ group: 'face', box, parts: [box] }); }
+  if (layout.system.length) {
+    const box = boxOf(layout.system);
+    const apart = box.w > layout.system.reduce((sum, b) => sum + b.w, 0) * 2;
+    out.push({ group: 'system', box, parts: apart ? layout.system.map(b => boxOf([b])) : [box] });
+  }
+  return out;
 }

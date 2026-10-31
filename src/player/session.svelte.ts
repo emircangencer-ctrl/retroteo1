@@ -4,7 +4,7 @@
 // created; FCEUmm offered, never switched to silently). Two parts live in their own files:
 //   controls.svelte.ts  touch pad and layout, physical controllers and players, keyboard hints;
 //   battery.ts          in-game saves (SRAM) kept by the app.
-import { EmulatorJsPlayer } from '../emulatorjs-nes-player.js';
+import { EmulatorJsPlayer, normalizeButtonModes } from '../emulatorjs-nes-player.js';
 import { getEmulatedSystem, supportsRomExtension } from '../emulator-systems.js';
 import { inspectNesRom, diagnoseSuperMarioBros3Rom, isSuperMarioBros3LaunchAllowed } from '../nes-rom.js';
 import { emulatorGameId } from '../save-data.js';
@@ -219,6 +219,7 @@ class PlayerSession {
     this.controls.touchPlay = this.controls.isTouchPlay();
     gamepadUI.suspend(true);
     this.controls.updateGamepadStatus();
+    this.controls.setButtonModes(game.buttonModes);
     this.controls.renderPad(game.platform, game);
     this.controls.startGamepad();
     this.#screen?.replaceChildren();
@@ -307,6 +308,7 @@ class PlayerSession {
         extraFiles: launch.extraFiles,
         // Non-fatal runtime messages (for example a denied screen wake lock) are logged only.
         onWarning: (message: string) => console.warn('[RetroPlay] EmulatorJS uyarısı:', message),
+        onLocks: (names: string[]) => this.controls.setLocked(names),
         onHotkey: (key: string, pressed?: boolean) => {
           if (key === 'Escape') this.toggleMenu();
           else if (key === 'FastForward' && pressed) this.toggleFastForward();
@@ -357,6 +359,7 @@ class PlayerSession {
       this.coreId = used.coreId;
       this.coreName = used.name;
       player.setVolume?.(settings.prefs.volume);
+      player.setButtonModes?.(game.buttonModes);
       // Where to begin: a chosen slot, the resume point, or the beginning.
       const canStates = player.supportsStates?.() !== false && typeof player.saveState === 'function';
       this.canSave = canStates;
@@ -636,6 +639,28 @@ class PlayerSession {
     }
   }
 
+  /**
+   * A button's mode for this game: "turbo" (Seri ateş), "hold" (Basılı tut) or null (normal). It is
+   * stored with the game and works at once for every input.
+   */
+  setButtonMode(input: string, mode: 'turbo' | 'hold' | null): Promise<void> {
+    const id = this.gameId;
+    if (!id || !library.get(id)) return Promise.resolve();
+    // The modes on screen are the truth; writes go one after the other, so quick taps on several
+    // buttons all end up stored.
+    const modes = { ...this.controls.buttonModes };
+    if (mode) modes[input] = mode; else delete modes[input];
+    const clean = normalizeButtonModes(modes);
+    this.controls.setButtonModes(clean);
+    this.#emulator?.setButtonModes?.(clean);
+    this.#modeWrite = this.#modeWrite.then(() => library.patch(id, { buttonModes: clean })).then(() => {}, error => {
+      console.warn('[RetroPlay] Düğme ayarı kaydedilemedi:', error);
+      this.showNotice('Düğme ayarı bu cihazda saklanamadı', { timeout: 3000 });
+    });
+    return this.#modeWrite;
+  }
+  #modeWrite: Promise<void> = Promise.resolve();
+
   togglePause() { return this.paused ? this.#resume() : this.#pause(); }
 
   openMenu() {
@@ -665,11 +690,13 @@ class PlayerSession {
 
   /** B / back: a sub-panel goes back to the menu, the menu closes. */
   menuBack() {
+    if (this.controls.editing) { this.controls.endEdit(); return; }
     if (this.panel !== 'main') { this.panel = 'main'; return; }
     void this.closeMenu();
   }
 
   #closeMenuNow() {
+    this.controls.endEdit();
     this.#menuTicket++;
     this.menuOpen = false;
     this.panel = 'main';
@@ -742,6 +769,7 @@ class PlayerSession {
   /** Browser back while playing: the menu closes first, then the game. */
   handlePopState(): boolean {
     if (!this.open) return false;
+    if (this.controls.editing) { this.controls.endEdit(); pushOverlayState('player'); return true; }
     if (this.menuOpen) { void this.closeMenu(); pushOverlayState('player'); return true; }
     void this.close({ viaHistory: true });
     return true;

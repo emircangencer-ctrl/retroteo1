@@ -2,7 +2,8 @@
 // physical controllers with their players, and the keyboard hints of the current game. The session
 // (session.svelte.ts) owns the emulator; it hands this part what it needs through ControlsHost.
 import { TouchController } from '../touch-controller.js';
-import { computeTouchLayout, padSpecFor } from '../touch-layout.js';
+import { computeTouchLayout, padSpecFor, adjustLayout, layoutKey, normalizeAdjust, LAYOUT_SCALE } from '../touch-layout.js';
+import { normalizeButtonModes, type ButtonModes } from '../emulatorjs-nes-player.js';
 import { GamepadPoller, speedShortcut } from '../gamepad-input.js';
 import { PadPlayers, playerCount, padName, type PadPlayer } from '../players.js';
 import { inspectGamepads, describeGamepads } from '../gamepad-status.js';
@@ -45,6 +46,16 @@ export class PlayerControls {
   keyHintRows = $state.raw<KeyHint[][]>([]);
   /** Several players: how many the game has, and the connected controllers with their players (0 = player 1). */
   players = $state.raw<{ count: number; pads: PadPlayer[] }>({ count: 2, pads: [] });
+  /** This game's button modes (Seri ateş / Basılı tut), shown on the pad and in the menu. */
+  buttonModes = $state.raw<ButtonModes>({});
+  /** The face and shoulder buttons of the current pad, placed as on the pad (button-mode chooser). */
+  modeButtons = $state.raw<ModeButton[]>([]);
+  /** "Tuşları yerleştir" is open; the group whose size the slider sets, and that size. */
+  editing = $state(false);
+  editGroup = $state<'dpad' | 'face' | 'system'>('face');
+  editScale = $state(1);
+  /** The current pad and orientation have a placement of their own. */
+  placed = $state(false);
   gamepadState = $state('unknown');
   gamepadText = $state('Gamepad durumu kontrol ediliyor…');
 
@@ -59,6 +70,9 @@ export class PlayerControls {
   #padSource: { platform: string; game: Game | null; arcade: ArcadePad | null } = { platform: 'NES', game: null, arcade: null };
   #padAspect = 4 / 3;
   #layoutFrame = 0;
+  #layout: ReturnType<typeof adjustLayout> | null = null;
+  #liveAdjust: ReturnType<typeof normalizeAdjust> | null = null;
+  #editBase: ReturnType<typeof normalizeAdjust> | null = null;
   #touchQuery: MediaQueryList | null = typeof matchMedia === 'function' ? matchMedia('(hover: none) and (pointer: coarse)') : null;
 
   constructor(host: ControlsHost) { this.#host = host; }
@@ -119,6 +133,7 @@ export class PlayerControls {
     const systemId = platform === 'MD' ? 'segaMD' : platform.toLowerCase();
     this.keyHints = keyHints(this.#padSpec, { arcade: this.isArcade, systemId });
     this.keyHintRows = this.#playerCount > 1 ? [this.keyHints, keyHints(this.#padSpec, { arcade: this.isArcade, systemId, player: 1 })] : [this.keyHints];
+    this.modeButtons = modeButtonsFor(this.#padSpec);
     const root = this.#touchRoot;
     if (root) { root.dataset.platform = platform; root.dataset.layout = this.#padSpec.id; }
     this.applyLayout();
@@ -132,7 +147,13 @@ export class PlayerControls {
     this.touchPlay = touch;
     const width = touch ? modal.clientWidth || innerWidth : 393;
     const height = touch ? modal.clientHeight || innerHeight : 873;
-    const layout = computeTouchLayout({ width, height, safe: touch ? readSafeArea() : {}, aspect: this.#padAspect, spec: this.#padSpec, settings: settings.touch, padHidden: touch && this.padInUse && settings.touch.hideWithGamepad });
+    const base = computeTouchLayout({ width, height, safe: touch ? readSafeArea() : {}, aspect: this.#padAspect, spec: this.#padSpec, settings: settings.touch, padHidden: touch && this.padInUse && settings.touch.hideWithGamepad });
+    // The player's own placement for this pad and orientation ("Tuşları yerleştir").
+    const stored = settings.touch.layouts[layoutKey(this.#padSpec.id, base.orientation)] || null;
+    const layout = adjustLayout(base, this.#liveAdjust || stored);
+    this.#layout = layout;
+    this.placed = Boolean(stored);
+    if (this.editing) this.editScale = layout.adjust[this.editGroup].s;
     if (touch) {
       const vars: Record<string, number> = { '--scr-x': layout.screen.x, '--scr-y': layout.screen.y, '--scr-w': layout.screen.w, '--scr-h': layout.screen.h, '--bar-h': layout.chrome.bar.h, '--bar-pad': layout.chrome.bar.padTop };
       for (const [name, value] of Object.entries(vars)) modal.style.setProperty(name, `${value}px`);
@@ -142,8 +163,76 @@ export class PlayerControls {
       this.padHidden = false;
     }
     this.#touch.setSettings(settings.touch);
+    this.#touch.setModes(this.buttonModes);
     this.#touch.render(layout);
-    requestAnimationFrame(() => this.#host.fitPicture());
+    if (!this.#liveAdjust) requestAnimationFrame(() => this.#host.fitPicture());
+  }
+
+  // ---- button modes (Seri ateş / Basılı tut) ---------------------------------------------------------
+  /** Shows this game's button modes on the pad. */
+  setButtonModes(modes: ButtonModes | null | undefined) {
+    this.buttonModes = normalizeButtonModes(modes);
+    this.#touch?.setModes(this.buttonModes);
+  }
+
+  /** Buttons Basılı tut holds right now (they stay lit on the pad). */
+  setLocked(names: string[]) { this.#touch?.setLocked(names); }
+
+  // ---- "Tuşları yerleştir" -----------------------------------------------------------------------
+  /** Opens the placement editor over the paused game (the menu steps aside). */
+  beginEdit() {
+    if (!this.touchPlay || !this.#touch || this.editing) return;
+    this.editing = true;
+    this.#touch.startEdit({
+      selected: this.editGroup,
+      begin: group => { this.editGroup = group as 'dpad' | 'face' | 'system'; this.#editBase = this.#layout?.adjust || normalizeAdjust(null); },
+      move: (group, { dx, dy, scale }) => {
+        const base = this.#editBase || normalizeAdjust(null);
+        const width = this.#layout?.width || 1, height = this.#layout?.height || 1;
+        const g = group as 'dpad' | 'face' | 'system';
+        const next = normalizeAdjust({ ...base, [g]: { x: base[g].x + dx / width, y: base[g].y + dy / height, s: base[g].s * scale } });
+        this.#liveAdjust = next;
+        this.applyLayout();
+      },
+      end: () => { this.#storePlacement(this.#layout?.adjust || null); }
+    });
+    this.applyLayout();
+  }
+
+  /** Closes the editor (each change was already stored). */
+  endEdit() {
+    if (!this.editing) return;
+    this.editing = false;
+    this.#liveAdjust = null;
+    this.#editBase = null;
+    this.#touch?.stopEdit();
+    this.applyLayout();
+  }
+
+  /** Size of the selected group (slider in the editor). */
+  setEditScale(value: number) {
+    const current = this.#layout?.adjust || normalizeAdjust(null);
+    const group = this.editGroup === 'system' ? 'face' : this.editGroup;
+    const s = Math.min(LAYOUT_SCALE.max, Math.max(LAYOUT_SCALE.min, value));
+    this.#storePlacement(normalizeAdjust({ ...current, [group]: { ...current[group], s } }));
+  }
+
+  /** Puts this pad back where RetroPlay places it (this orientation). */
+  resetPlacement() {
+    if (!this.#layout) return;
+    const key = layoutKey(this.#padSpec.id, this.#layout.orientation);
+    const layouts = { ...settings.touch.layouts };
+    delete layouts[key];
+    this.#liveAdjust = null;
+    settings.setTouch({ layouts });
+    this.applyLayout();
+  }
+
+  #storePlacement(adjust: ReturnType<typeof normalizeAdjust> | null) {
+    this.#liveAdjust = null;
+    this.#editBase = null;
+    if (adjust && this.#layout) settings.setTouch({ layouts: { ...settings.touch.layouts, [layoutKey(this.#padSpec.id, this.#layout.orientation)]: adjust } });
+    this.applyLayout();
   }
 
   scheduleLayout() {
@@ -226,6 +315,26 @@ export class PlayerControls {
     this.updateGamepadStatus();
     this.scheduleLayout();
   }
+}
+
+/** A button of the pad in the button-mode chooser: where it sits (button diameters) and how it looks. */
+export interface ModeButton { input: string; label: string; aria: string; tone: string; kind: 'face' | 'shoulder'; x: number; y: number; size: number; side?: string }
+
+/** The pad's face and shoulder buttons for the button-mode chooser (Seri ateş / Basılı tut). */
+export function modeButtonsFor(spec: { face: any[]; shoulders: any[] }): ModeButton[] {
+  const seen = new Set<string>();
+  const out: ModeButton[] = [];
+  for (const b of spec.face) {
+    if (seen.has(b.input)) continue;
+    seen.add(b.input);
+    out.push({ input: b.input, label: b.label || '', aria: b.aria || b.label || b.input, tone: b.tone || '', kind: 'face', x: b.x, y: b.y, size: b.size || 1 });
+  }
+  for (const b of spec.shoulders) {
+    if (seen.has(b.input)) continue;
+    seen.add(b.input);
+    out.push({ input: b.input, label: b.label || '', aria: b.label || b.input, tone: '', kind: 'shoulder', x: 0, y: 0, size: 1, side: b.side });
+  }
+  return out;
 }
 
 /** Connected controllers (the TV app's bridge included). */

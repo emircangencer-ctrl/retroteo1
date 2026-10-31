@@ -2,6 +2,8 @@
 // battery-test.nes — MMC1 with battery-backed WRAM:
 //   on every reset it increments $6002 (a boot counter), then increments $6000/$6001 forever,
 //   so SRAM changes constantly and a restored save is observable after a soft reset.
+import { assemble } from './asm6502.mjs';
+
 const PRG_BANK = 16384;
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
@@ -209,5 +211,45 @@ export function megaDriveSramRom() {
   rom[0x280] = 0x4E; rom[0x281] = 0x73; // rte
   let sum = 0; for (let i = 0x200; i < rom.length; i += 2) sum = (sum + ((rom[i] << 8) | rom[i + 1])) & 0xffff;
   rom[0x18E] = sum >> 8; rom[0x18F] = sum & 255;
+  return rom;
+}
+
+/**
+ * tap-counter.nes — MMC1 with battery RAM, so the test reads what the game saw from its SRAM. Every
+ * frame (NMI) it reads pad 1: A newly pressed → $6000 += 1 and the frame number in $6001/$6002;
+ * A let go → $6005 += 1; the frame number always in $6003/$6004. The backdrop is red while A is down.
+ */
+export function tapCounterRom() {
+  const { bytes, labels } = assemble([
+    ['SEI'], ['CLD'], ['LDX#', 0xff], ['TXS'],
+    ['LDA#', 0x80], ['STA', 0x8000],                                   // MMC1 reset
+    ['LDA#', 0x00], ['STA', 0xe000], ['STA', 0xe000], ['STA', 0xe000], ['STA', 0xe000], ['STA', 0xe000], // PRG-RAM on
+    ['LDA#', 0x00], ['STA', 0x2000], ['STA', 0x2001],                  // rendering off
+    ':vb1', ['BIT', 0x2002], ['BPL', 'vb1'], ':vb2', ['BIT', 0x2002], ['BPL', 'vb2'],
+    ['LDA#', 0x00], ['STA', 0x10], ['STA', 0x11], ['STA', 0x12],
+    ['STA', 0x6000], ['STA', 0x6001], ['STA', 0x6002], ['STA', 0x6005],
+    ['LDA#', 0x80], ['STA', 0x2000],                                   // NMI on
+    ':idle', ['JMP', 'idle'],
+    ':nmi', ['PHA'],
+    ['INC', 0x10], ['BNE', 'nocarry'], ['INC', 0x11], ':nocarry',      // frame counter
+    ['LDA#', 0x01], ['STA', 0x4016], ['LDA#', 0x00], ['STA', 0x4016],  // strobe pad 1
+    ['LDX#', 0x08], ':read', ['LDA', 0x4016], ['LSR'], ['ROL', 0x13], ['DEX'], ['BNE', 'read'], // A ends in bit 7
+    ['LDA', 0x13], ['EOR', 0x12], ['AND', 0x13], ['BPL', 'nopress'],
+    ['INC', 0x6000], ['LDA', 0x10], ['STA', 0x6001], ['LDA', 0x11], ['STA', 0x6002], ':nopress',
+    ['LDA', 0x13], ['EOR', 0x12], ['AND', 0x12], ['BPL', 'norelease'], ['INC', 0x6005], ':norelease',
+    ['LDA', 0x13], ['STA', 0x12],
+    ['LDA', 0x10], ['STA', 0x6003], ['LDA', 0x11], ['STA', 0x6004],
+    ['LDY#', 0x0f], ['LDA', 0x13], ['BPL', 'black'], ['LDY#', 0x16], ':black',
+    ['LDA#', 0x3f], ['STA', 0x2006], ['LDA#', 0x00], ['STA', 0x2006], ['STY', 0x2007],
+    ['LDA#', 0x00], ['STA', 0x2006], ['STA', 0x2006],
+    ['PLA'], ['RTI']
+  ], 0xc000);
+  const prg = new Uint8Array(PRG_BANK).fill(0xea);
+  prg.set(bytes, 0);
+  prg.set([labels.nmi & 0xff, labels.nmi >> 8, 0x00, 0xc0, labels.nmi & 0xff, labels.nmi >> 8], 0x3ffa);
+  const rom = new Uint8Array(16 + 2 * PRG_BANK + 8192);
+  rom.set([0x4e, 0x45, 0x53, 0x1a, 2, 1, 0x12, 0x00], 0); // iNES, 32 KiB PRG, 8 KiB CHR, mapper 1, battery
+  rom.set(prg, 16);
+  rom.set(prg, 16 + PRG_BANK);
   return rom;
 }

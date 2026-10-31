@@ -59,6 +59,7 @@
   class:settings-view={player.menuOpen && player.panel === 'controls'}
   class:pad-hidden={player.controls.padHidden}
   class:pad-in-use={player.controls.padInUse}
+  class:placing={player.controls.editing}
   class:is-vertical={player.vertical}
   class:is-fallback={player.fullscreenFallback}
   class:tv={tv.active}
@@ -101,6 +102,26 @@
   </div>
 
   <div class="touch-controls" id="touch-controls" aria-label="Dokunmatik oyun kontrolleri" bind:this={touchRoot}></div>
+
+  {#if player.controls.editing}
+    <div class="place-bar" id="place-bar" role="dialog" aria-label="Tuşları yerleştir">
+      <div class="place-head">
+        <strong>Tuşları yerleştir</strong>
+        <span>Sürükle: taşı · iki parmak: büyüt / küçült</span>
+      </div>
+      {#if player.controls.editGroup !== 'system'}
+        <label class="place-size">
+          <span>{player.controls.editGroup === 'dpad' ? 'Yön tuşu' : 'Düğmeler'} boyutu</span>
+          <input type="range" id="place-scale" min="70" max="150" step="5" value={Math.round(player.controls.editScale * 100)} oninput={e => player.controls.setEditScale(Number((e.currentTarget as HTMLInputElement).value) / 100)} />
+          <output for="place-scale">%{Math.round(player.controls.editScale * 100)}</output>
+        </label>
+      {/if}
+      <div class="place-actions">
+        <button type="button" class="btn" id="place-reset" onclick={() => player.controls.resetPlacement()}>Sıfırla</button>
+        <button type="button" class="btn btn-primary" id="place-done" onclick={() => player.controls.endEdit()}>Bitti</button>
+      </div>
+    </div>
+  {/if}
 
   {#if player.notice}
     {#key player.notice.id}

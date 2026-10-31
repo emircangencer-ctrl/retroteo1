@@ -156,6 +156,33 @@
 .tc-system { display: grid; place-items: center; border: 1px solid #4b566b; border-radius: 999px; background: linear-gradient(180deg, #3b4456, #20262f); color: #d3dbe8; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 1.2px; box-shadow: 0 3px 0 #0d1117; }
 .tc-system.is-on { transform: translateY(2px); box-shadow: 0 1px 0 #0d1117; }
 .tc-dpad { transform-origin: 50% 50%; transition: transform 45ms ease-out; }
+/* Button modes for this game: Seri ateş (turbo) and Basılı tut (held while lit). */
+.tc-btn[data-mode]::after { position: absolute; left: 50%; bottom: -15px; transform: translateX(-50%); font: 700 9px/1 var(--mono); letter-spacing: 0.6px; color: #ffd36b; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); white-space: nowrap; pointer-events: none; }
+.tc-btn[data-mode='turbo']::after { content: 'SERİ'; }
+.tc-btn[data-mode='hold']::after { content: 'BASILI'; }
+.tc-btn[data-mode='turbo'] { outline: 2px dashed rgba(255, 211, 107, 0.7); outline-offset: 3px; }
+.tc-btn[data-mode='hold'] { outline: 2px solid rgba(255, 211, 107, 0.45); outline-offset: 3px; }
+.tc-btn.is-locked { outline-color: #ffd36b; }
+.tc-btn.is-locked::after { color: #fff; }
+.tc-shoulder[data-mode]::after { bottom: -13px; }
+/* "Tuşları yerleştir": the menu steps aside, each group the finger can take is framed. */
+.player.placing .player-menu, .player.placing .play-menu-backdrop { display: none; }
+.player.placing .play-bar { visibility: hidden; }
+#touch-controls.is-editing .tc-dpad, #touch-controls.is-editing .tc-btn { opacity: 1; }
+.tc-frame { position: absolute; box-sizing: border-box; border: 2px dashed rgba(126, 158, 255, 0.55); border-radius: 18px; pointer-events: none; }
+.tc-frame span { position: absolute; left: 10px; top: -10px; padding: 2px 7px; border-radius: 999px; background: #1b2232; color: #c9d6f2; font: 700 10px/1.2 var(--font); white-space: nowrap; }
+.tc-frame.is-selected { border-style: solid; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.tc-frame.is-selected span { background: var(--accent); color: var(--on-accent); }
+.place-bar { position: absolute; z-index: 55; left: 10px; right: 10px; top: max(8px, calc(env(safe-area-inset-top) + 6px)); display: grid; gap: 10px; padding: 12px 14px; border: 1px solid #2E323C; border-radius: var(--r-lg); background: rgba(16, 18, 24, 0.95); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55); }
+.player[data-orientation='landscape'] .place-bar { left: calc(var(--scr-x) + 8px); right: auto; width: calc(var(--scr-w) - 16px); }
+.place-head { display: flex; flex-direction: column; gap: 2px; }
+.place-head strong { font-size: 15px; }
+.place-head span { font-size: 12px; color: var(--text-2); }
+.place-size { display: grid; grid-template-columns: auto minmax(0, 1fr) 3.2em; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
+.place-size output { font: 600 12px/1 var(--mono); color: var(--text); text-align: right; }
+.place-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.place-actions .btn { min-height: 44px; }
+.player-menu .place-btn { min-height: 44px; }
 @media (prefers-reduced-motion: no-preference) { .tc-face, .tc-shoulder, .tc-system { transition: transform 40ms, filter 40ms, box-shadow 40ms; } }
 
 /* ---- the pause menu ---- */
