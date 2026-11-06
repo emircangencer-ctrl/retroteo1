@@ -129,14 +129,20 @@ try {
 
   await step('the remote moves the focus (the app sends its d-pad to the page)', async () => {
     await page.waitForFunction(() => typeof window.RetroPlayTVHost?.remote === 'function', null, { timeout: 30_000 });
+    // The screen shows where the remote is from the start.
+    await page.waitForFunction(() => document.activeElement && document.activeElement !== document.body, null, { timeout: 5_000 });
+    const start = await page.evaluate(() => document.activeElement.outerHTML.slice(0, 60));
+    // From the sidebar's second item down and up always have somewhere to go.
+    await page.evaluate(() => { const items = [...document.querySelectorAll('.sidebar a[href], .sidebar button')].filter(el => el.getClientRects().length); items[1]?.focus(); });
     const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');
     await key('DPAD_DOWN');
-    await key('DPAD_DOWN');
     const after = await page.evaluate(() => ({ html: document.activeElement?.outerHTML.slice(0, 60) || '', ring: getComputedStyle(document.activeElement).outlineStyle }));
-    if (after.html === before || after.ring === 'none') throw new Error(`focus did not move (${after.html})`);
+    if (after.html === before || after.ring === 'none') throw new Error(`focus did not move from ${before} (${after.html}, ring ${after.ring})`);
     const last = await page.evaluate(() => JSON.parse(window.RetroPlayTV.keyLog()).keys.at(-1));
     if (last?.key !== 'DPAD_DOWN' || last.route !== 'arayüz') throw new Error(`key log: ${JSON.stringify(last)}`);
-    return `${after.html.replace(/\s+/g, ' ')} · ${last.key} → ${last.route} (${last.device}, ${last.source})`;
+    await key('DPAD_UP');
+    if (await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '') !== before) throw new Error('up did not come back');
+    return `starts on ${start.replace(/\s+/g, ' ')} · down to ${after.html.replace(/\s+/g, ' ')} and back · ${last.key} → ${last.route} (${last.device}, ${last.source})`;
   });
   await snap('focus');
 
@@ -224,22 +230,31 @@ try {
 
   await step('search: OK opens the on-screen keyboard, typing filters, Back closes the keyboard, the d-pad moves on', async () => {
     const field = () => page.evaluate(() => { const el = document.querySelector('#search-input'); return { focused: document.activeElement === el, readOnly: el.readOnly, value: el.value }; });
-    const shown = async () => /mInputShown=true|isInputShown=true|mIsInputViewShown=true/.test((await device.shell('dumpsys input_method')).toString());
+    // The keyboard's state as the input method service has it (Android 13: mInputShown; 14 also mImeWindowVis).
+    let imeLines = '';
+    const shown = async () => {
+      const dump = (await device.shell('dumpsys input_method')).toString();
+      imeLines = [...new Set(dump.split('\n').map(line => line.trim()).filter(line => /mInputShown=|mImeWindowVis=|mIsInputViewShown=|mWindowVisible=|mShowInputRequested=/.test(line)))].join(' ; ').slice(0, 400);
+      const vis = /mImeWindowVis=(0x)?([0-9a-f]+)/i.exec(dump);
+      return /mInputShown=true/.test(dump) || Boolean(vis && parseInt(vis[2], vis[1] ? 16 : 10) & 1);
+    };
+    const initially = await shown();
+    const initialLines = imeLines;
     await page.evaluate(() => document.querySelector('#library-games .card-main').focus());
     for (let i = 0; i < 10 && !(await field()).focused; i++) await key('DPAD_UP');
     const reached = await field();
     if (!reached.focused || !reached.readOnly) throw new Error(`search ${JSON.stringify(reached)}`);
-    if (await shown()) throw new Error('the keyboard opened just for passing by');
+    if (await shown()) throw new Error(`the keyboard opened just for passing by (${imeLines}) — before the step: ${initially ? 'shown' : 'hidden'} (${initialLines})`);
     await key('DPAD_CENTER');
     await sleep(1200);
-    if (!(await shown())) throw new Error('OK did not open the keyboard');
+    if (!(await shown())) throw new Error(`OK did not open the keyboard (${imeLines})`);
     await snap('keyboard');
     await device.shell('input text con');
     await sleep(1000);
     const typed = await field();
     await key('BACK');
     await sleep(800);
-    if (await shown()) throw new Error('Back did not close the keyboard');
+    if (await shown()) throw new Error(`Back did not close the keyboard (${imeLines}; ${JSON.stringify(await field())})`);
     const route = await page.evaluate(() => location.hash);
     await key('DPAD_DOWN');
     const after = await field();
