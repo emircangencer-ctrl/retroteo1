@@ -14,10 +14,12 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
 import android.webkit.ServiceWorkerClient;
@@ -30,6 +32,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.graphics.Bitmap;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -65,6 +68,13 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
     private boolean pageLoaded = false;
     /** The display mode asked for so games run at 60 Hz (0: none asked; see DisplayModes). */
     private volatile int requestedMode = 0;
+    /**
+     * Who takes the remote's keys: "off" until the page says it handles them (an older page, the
+     * offline page), "ui" on the page's screens, "game" while a game has the keys.
+     */
+    static final String MODE_OFF = "off", MODE_UI = "ui", MODE_GAME = "game";
+    private volatile String remoteMode = MODE_OFF;
+    private final KeyLog keyLog = new KeyLog();
 
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     @Override
@@ -165,27 +175,86 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
     }
 
     // ---- input -------------------------------------------------------------------------------------
+    /**
+     * Every key passes here before the WebView (after the on-screen keyboard, which keeps the keys
+     * while it is shown). KeyRoute says where it goes: controller keys to the bridge, the remote's
+     * d-pad on screens straight to the page, OK to the WebView and to the page, Back and Menu to the
+     * page's handlers, everything else (typing, a game played with the remote) to the WebView.
+     */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        // Controllers: every button goes to the bridge (never as arrow keys or Back).
-        if (GamepadBridge.wants(event)) return gamepads.onKey(event);
         int code = event.getKeyCode();
-        boolean down = event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0;
-        switch (code) {
-            case KeyEvent.KEYCODE_BACK:
-            case KeyEvent.KEYCODE_ESCAPE:
-                if (down) back();
+        int action = event.getAction();
+        int deviceId = event.getDeviceId();
+        InputDevice device = event.getDevice();
+        int source = event.getSource();
+        boolean controllerSource = GamepadBridge.isControllerSource(source);
+        boolean sticks = GamepadBridge.hasSticks(device);
+        if (controllerSource && action == KeyEvent.ACTION_DOWN && KeyRoute.isControllerButton(code)) gamepads.sawButton(deviceId);
+        boolean pressed = gamepads.pressedButtons(deviceId);
+        String mode = remoteMode;
+        int route = KeyRoute.route(code, controllerSource, sticks, pressed, !MODE_OFF.equals(mode), MODE_GAME.equals(mode));
+        boolean first = action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0;
+        if (first) {
+            String entry = keyLog.add(System.currentTimeMillis(), KeyLog.keyName(KeyEvent.keyCodeToString(code), code), device != null ? device.getName() : "", source, controllerSource, sticks, pressed, mode, route);
+            Log.d(TAG, "key " + entry);
+        }
+        if (route != KeyRoute.GAMEPAD && web != null && !web.hasFocus()) web.requestFocus();
+        switch (route) {
+            case KeyRoute.GAMEPAD:
+                if (gamepads.onKey(event)) return true;
+                return super.dispatchKeyEvent(event);
+            case KeyRoute.BACK:
+                if (first) back();
                 return true;
-            case KeyEvent.KEYCODE_MENU:
-            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-            case KeyEvent.KEYCODE_MEDIA_PLAY:
-            case KeyEvent.KEYCODE_MEDIA_PAUSE:
-                if (down) runJs("window.RetroPlayTVHost && window.RetroPlayTVHost.menu()");
+            case KeyRoute.MENU:
+                if (first) runJs("window.RetroPlayTVHost && window.RetroPlayTVHost.menu()");
+                return true;
+            case KeyRoute.REMOTE: {
+                String dir = KeyRoute.direction(code);
+                if (action == KeyEvent.ACTION_DOWN) remote(dir, "down", event.getRepeatCount());
+                else if (action == KeyEvent.ACTION_UP) remote(dir, "up", 0);
+                return true;
+            }
+            case KeyRoute.OK:
+                // A real key press reaches the page (it counts as the user's action, which choosing a
+                // file needs); the page is also told, and presses the focused item itself if the
+                // WebView did not pass the key on (some TVs do not).
+                super.dispatchKeyEvent(event);
+                if (first) remote("ok", "down", 0);
+                else if (action == KeyEvent.ACTION_UP) remote("ok", "up", 0);
                 return true;
             default:
-                // The remote's d-pad and OK reach the page as arrow keys and Enter.
                 return super.dispatchKeyEvent(event);
         }
+    }
+
+    private void remote(String key, String phase, int repeat) {
+        runJs("window.RetroPlayTVHost && window.RetroPlayTVHost.remote && window.RetroPlayTVHost.remote('" + key + "','" + phase + "'," + repeat + ")");
+    }
+
+    /** Keyboards, remotes and controllers the TV knows, for the remote test in Settings. */
+    String inputDevicesJson() {
+        StringBuilder out = new StringBuilder("[");
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(id);
+            if (device == null) continue;
+            int sources = device.getSources();
+            boolean keys = (sources & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD || (sources & InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD;
+            boolean controllerSource = GamepadBridge.isControllerSource(sources);
+            if (!keys && !controllerSource) continue;
+            boolean sticks = GamepadBridge.hasSticks(device);
+            String kind = controllerSource && (sticks || gamepads.pressedButtons(id)) ? "kontrolcü"
+                : (sources & InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD ? "kumanda"
+                : device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC ? "klavye" : "tuşlar";
+            if (out.length() > 1) out.append(',');
+            out.append("{\"name\":").append(Json.quote(device.getName()))
+                .append(",\"kind\":").append(Json.quote(kind))
+                .append(",\"source\":").append(Json.quote("0x" + Integer.toHexString(sources)))
+                .append(",\"virtual\":").append(device.isVirtual())
+                .append(",\"sticks\":").append(sticks).append('}');
+        }
+        return out.append(']').toString();
     }
 
     @Override
@@ -302,6 +371,12 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
         }
 
         @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            // A new page has not said yet that it takes the remote's keys.
+            remoteMode = MODE_OFF;
+        }
+
+        @Override
         public void onPageFinished(WebView view, String url) {
             if (origin.equals(originOf(Uri.parse(url)))) pageLoaded = true;
         }
@@ -404,6 +479,44 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
             main.post(() -> moveTaskToBack(true));
         }
 
+        /** "ui": the page takes the remote's keys on its screens; "game": a game has them; else off. */
+        @JavascriptInterface
+        public void setRemoteMode(String mode) {
+            String next = MODE_UI.equals(mode) ? MODE_UI : MODE_GAME.equals(mode) ? MODE_GAME : MODE_OFF;
+            if (!next.equals(remoteMode)) Log.i(TAG, "remote " + next);
+            remoteMode = next;
+        }
+
+        /** The on-screen keyboard for the text field the page has just focused (search). */
+        @JavascriptInterface
+        public void showKeyboard() {
+            main.postDelayed(() -> showKeyboardNow(true), 120);
+        }
+
+        @JavascriptInterface
+        public void hideKeyboard() {
+            main.post(() -> {
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null && web != null) imm.hideSoftInputFromWindow(web.getWindowToken(), 0);
+            });
+        }
+
+        /** The last key presses and where they went (JSON, see KeyLog). */
+        @JavascriptInterface
+        public String keyLog() {
+            return keyLog.json();
+        }
+
+        /** The TV's keyboards, remotes and controllers (JSON). */
+        @JavascriptInterface
+        public String inputDevices() {
+            try {
+                return inputDevicesJson();
+            } catch (RuntimeException e) {
+                return "[]";
+            }
+        }
+
         /** The TV's display mode, the one asked for and the ones it offers (JSON). */
         @JavascriptInterface
         public String display() {
@@ -494,6 +607,19 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
     }
 
     // ---- helpers -----------------------------------------------------------------------------------
+    private void showKeyboardNow(boolean retry) {
+        if (web == null) return;
+        if (!web.hasFocus()) web.requestFocus();
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm == null) return;
+        boolean shown = imm.showSoftInput(web, 0);
+        Log.i(TAG, "keyboard " + (shown ? "shown" : "not shown"));
+        if (!shown && retry) {
+            imm.restartInput(web);
+            main.postDelayed(() -> showKeyboardNow(false), 250);
+        }
+    }
+
     private void runJs(String script) {
         main.post(() -> {
             if (web != null) web.evaluateJavascript(script, null);

@@ -11,6 +11,7 @@
   import { systemLook, gameLook } from '../lib/systems.ts';
   import { gamepadUI } from '../lib/gamepad-ui.svelte.ts';
   import { player } from '../player/session.svelte.ts';
+  import { tv } from '../lib/tv.svelte.ts';
 
   const PAGE_SIZE = 48;
 
@@ -41,6 +42,12 @@
 
   const counts = $derived(systemCounts(library.games));
   const savedIds = $derived(library.savedIds());
+  const sortLabel = $derived(SORTS.find(sort => sort.key === settings.prefs.sort)?.label || SORTS[0].label);
+  function nextSort() {
+    const index = SORTS.findIndex(sort => sort.key === settings.prefs.sort);
+    settings.setPrefs({ sort: SORTS[(index + 1) % SORTS.length].key });
+    limit = PAGE_SIZE;
+  }
   const filtered = $derived(sortGames(filterGames(library.games, { query, system, favorites, withSaves, saveIds: savedIds }), settings.prefs.sort));
   const visible = $derived(filtered.slice(0, limit));
   const favoriteCount = $derived(library.games.filter(g => g.favorite).length);
@@ -62,7 +69,7 @@
 
   // Controller: A plays the focused game, Y opens it, X favourites it, L/R change the system.
   onMount(() => gamepadUI.push({
-    root: () => document.getElementById('app-shell') || document.body,
+    root: () => document.body,
     onAction: (action, focused) => {
       const card = focused?.closest<HTMLElement>('.game-card');
       if (action.type === 'confirm' && card?.dataset.playId) { void player.start(card.dataset.playId); return true; }
@@ -117,13 +124,20 @@
     </div>
 
     <div class="bar">
-      <label class="sort">
-        <Icon name="sort" size={18} />
-        <span class="sr-only">Sıralama</span>
-        <select id="sort-select" value={settings.prefs.sort} onchange={e => { settings.setPrefs({ sort: (e.currentTarget as HTMLSelectElement).value as SortKey }); limit = PAGE_SIZE; }}>
-          {#each SORTS as sort (sort.key)}<option value={sort.key}>{sort.label}</option>{/each}
-        </select>
-      </label>
+      {#if tv.active}
+        <!-- A remote cannot open a drop-down list: OK goes to the next order. -->
+        <button type="button" class="sort sort-cycle" id="sort-cycle" aria-label="Sıralama: {sortLabel}. Değiştirmek için OK" onclick={nextSort}>
+          <Icon name="sort" size={18} /><span>{sortLabel}</span><span class="sort-next" aria-hidden="true">›</span>
+        </button>
+      {:else}
+        <label class="sort">
+          <Icon name="sort" size={18} />
+          <span class="sr-only">Sıralama</span>
+          <select id="sort-select" value={settings.prefs.sort} onchange={e => { settings.setPrefs({ sort: (e.currentTarget as HTMLSelectElement).value as SortKey }); limit = PAGE_SIZE; }}>
+            {#each SORTS as sort (sort.key)}<option value={sort.key}>{sort.label}</option>{/each}
+          </select>
+        </label>
+      {/if}
       <div class="view-toggle" role="group" aria-label="Görünüm">
         <button type="button" aria-label="Izgara görünümü" aria-pressed={settings.prefs.layout === 'grid'} data-layout="grid" onclick={() => settings.setPrefs({ layout: 'grid' })}><Icon name="grid" size={18} /></button>
         <button type="button" aria-label="Liste görünümü" aria-pressed={settings.prefs.layout === 'list'} data-layout="list" onclick={() => settings.setPrefs({ layout: 'list' })}><Icon name="list" size={18} /></button>
@@ -200,6 +214,9 @@
   .sort select { appearance: none; -webkit-appearance: none; height: 44px; padding: 0 22px 0 0; border: 0; background: transparent; color: var(--text); font-weight: 600; font-size: 14px; cursor: pointer; }
   .sort::after { content: ''; position: absolute; right: 4px; top: 19px; width: 6px; height: 6px; border-right: 2px solid var(--text-2); border-bottom: 2px solid var(--text-2); transform: rotate(45deg); pointer-events: none; }
   .sort select option { background: #14161B; color: var(--text); }
+  .sort-cycle { border: 0; background: transparent; padding: 0 10px; border-radius: var(--r-sm); cursor: pointer; font-family: inherit; }
+  .sort-cycle::after { display: none; }
+  .sort-cycle .sort-next { color: var(--text-2); font-size: 20px; line-height: 1; }
   .view-toggle { display: flex; gap: 4px; padding: 3px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
   .view-toggle button { width: 40px; height: 36px; border-radius: 9px; border: 0; background: transparent; color: var(--text-2); display: grid; place-items: center; padding: 0; }
   .view-toggle button[aria-pressed='true'] { background: var(--line); color: var(--text); }

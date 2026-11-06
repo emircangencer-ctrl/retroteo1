@@ -16,7 +16,21 @@ export interface TvBridge {
   display?(): string;
   /** Opens the live site ('live') or a pull request's deploy preview (its number) (app 1.2+). */
   openSite?(which: string): boolean;
+  /** App 1.3+: 'ui' the page takes the remote's keys on its screens, 'game' a game has them. */
+  setRemoteMode?(mode: 'ui' | 'game' | 'off'): void;
+  /** App 1.3+: the on-screen keyboard for the focused text field. */
+  showKeyboard?(): void;
+  hideKeyboard?(): void;
+  /** App 1.3+: the last key presses and where they went (JSON, see TvKeyLog). */
+  keyLog?(): string;
+  /** App 1.3+: the TV's keyboards, remotes and controllers (JSON, see TvInputDevice). */
+  inputDevices?(): string;
 }
+
+/** A key press as the TV app saw it: route is where it went ("arayüz", "kontrolcü", "geri", "menü", "sayfa"). */
+export interface TvKey { n: number; t: number; key: string; device: string; source: string; gamepadSource: boolean; sticks: boolean; buttons: boolean; mode: string; route: string }
+export interface TvKeyLog { n: number; keys: TvKey[] }
+export interface TvInputDevice { name: string; kind: string; source: string; virtual: boolean; sticks: boolean }
 
 export interface TvInfo { app: string; versionName: string; versionCode: number; sdk: number; model: string; device: string; address: string | null; filePicker: boolean; preview?: number; sites?: boolean }
 /** mode "3840x2160@60.00"; requested: the mode the app asked for so games run at 60 Hz ('' if none). */

@@ -2,6 +2,7 @@
   import { tick, untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import TouchSettings from '../components/TouchSettings.svelte';
+  import TvRemoteTest from '../components/TvRemoteTest.svelte';
   import { settings, ACCENTS } from '../lib/settings.svelte.ts';
   import { library } from '../lib/library.svelte.ts';
   import { router } from '../lib/router.svelte.ts';
@@ -29,6 +30,13 @@
     const number = previewNumber(previewText);
     if (!number) { showToast('Bir PR numarası yaz (örneğin 9).', 'error'); return; }
     if (!tv.openSite(number)) showToast('Önizleme açılamadı.', 'error');
+  }
+  // The PR number with the remote: digit buttons (no on-screen keyboard), or the remote's own digits.
+  const DIGITS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+  function typeDigit(digit: string) { if (previewText.length < 6) previewText += digit; }
+  function digitKey(event: KeyboardEvent) {
+    if (/^[0-9]$/.test(event.key)) { event.preventDefault(); typeDigit(event.key); }
+    else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); previewText = previewText.slice(0, -1); }
   }
 
   const scales = Object.entries(DISPLAY_SCALES) as Array<[DisplayScale, { label: string; hint: string }]>;
@@ -243,6 +251,7 @@
         <p class="hint">Oyun eklemek için Oyun ekle → Telefondan gönder. Kontrolcüyü TV'nin Bluetooth ayarlarından eşle; düğmeler konumlarına göre eşlenir. Oyun menüsü: kumandanın Geri tuşu. Kütüphane ve kayıtlar bu TV'de saklanır.</p>
         <div class="inline"><button type="button" class="btn btn-sm" id="tv-exit" onclick={() => tv.exit()}>Uygulamadan çık</button></div>
       </div>
+      {#if tv.keyLog()}<TvRemoteTest />{/if}
       <div class="row stack">
         <span class="label">Oyun görüntüsü</span>
         <div class="seg" role="group" aria-label="Oyun görüntüsü" id="tv-picture">
@@ -267,9 +276,12 @@
           {:else}
             <span class="label">Önizleme sürümü</span>
             <p class="hint">Bir değişikliği canlıya almadan TV'de denemek için PR numarasını yaz. Önizlemenin kütüphanesi ayrı; oyunu Oyun ekle → Telefondan gönder ile ekle.</p>
-            <div class="inline">
-              <input type="text" inputmode="numeric" maxlength="6" class="preview-number" id="tv-preview-number" placeholder="PR no" aria-label="PR numarası" bind:value={previewText} onkeydown={event => { if (event.key === 'Enter') openPreview(); }} />
-              <button type="button" class="btn btn-sm" id="tv-preview-open" onclick={openPreview}>Aç</button>
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <div class="digits" role="group" aria-label="PR numarası" id="tv-preview-digits" onkeydown={digitKey}>
+              <output class="preview-number" id="tv-preview-number" class:empty={!previewText} aria-live="polite">{previewText ? `#${previewText}` : 'PR no'}</output>
+              {#each DIGITS as digit (digit)}<button type="button" class="digit" data-digit={digit} onclick={() => typeDigit(digit)}>{digit}</button>{/each}
+              <button type="button" class="digit" id="tv-preview-erase" aria-label="Sil" onclick={() => (previewText = previewText.slice(0, -1))}>⌫</button>
+              <button type="button" class="btn btn-sm btn-primary" id="tv-preview-open" onclick={openPreview}>Aç</button>
             </div>
           {/if}
         </div>
@@ -330,7 +342,10 @@
   .plain { font-size: 13px; color: var(--text-3); line-height: 1.5; }
   .perf-history { margin: 0; padding: 10px 12px; max-height: 180px; overflow: auto; border-radius: var(--r); background: var(--bg); border: 1px solid var(--line-faint); font-family: var(--mono); font-size: 12px; line-height: 1.6; color: #C2C7D0; white-space: pre-wrap; }
   .inline { display: flex; gap: 8px; }
-  .preview-number { width: 120px; min-height: 40px; padding: 0 12px; border-radius: var(--r); border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-family: var(--mono); }
+  .digits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .preview-number { display: inline-flex; align-items: center; min-width: 96px; min-height: 40px; padding: 0 12px; border-radius: var(--r); border: 1px solid var(--line); background: var(--bg); color: var(--text); font-family: var(--mono); font-weight: 700; }
+  .preview-number.empty { color: var(--text-3, var(--text-2)); font-weight: 500; }
+  .digit { min-width: 40px; min-height: 40px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface-2, #1C1F26); color: var(--text); font-family: var(--mono); font-size: 16px; font-weight: 700; cursor: pointer; }
   .about { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 4px; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
   @media (min-width: 960px) { .settings { max-width: 820px; } }
 </style>

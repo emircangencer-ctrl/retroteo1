@@ -26,11 +26,18 @@ export function focusables(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(visible);
 }
 
+/** Called before the focus moves to an item (the TV makes text fields read-only until OK). */
+let prepareFocus: ((el: HTMLElement) => void) | null = null;
+export function setFocusPreparer(fn: ((el: HTMLElement) => void) | null) {
+  prepareFocus = fn;
+}
+
 /** Moves focus from the focused control to its neighbour in `dir` inside `root`. */
 export function moveFocus(root: HTMLElement, dir: NavDirection): HTMLElement | null {
   const items = focusables(root);
   if (!items.length) return null;
-  const current = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
+  const active = document.activeElement;
+  const current = active instanceof HTMLElement && active !== document.body && active !== root && root.contains(active) ? active : null;
   let next: HTMLElement | null = null;
   if (!current) {
     // Start where the screen's main action is, then in the content, then anywhere.
@@ -39,13 +46,21 @@ export function moveFocus(root: HTMLElement, dir: NavDirection): HTMLElement | n
     next = preferred || (content ? items.find(el => content.contains(el)) : undefined) || items[0];
   } else {
     const others = items.filter(el => el !== current);
-    // Up and down stay in the same column (the sidebar or the page); left and right cross between them.
+    const from = current.getBoundingClientRect();
+    // Up and down stay in the same column (the sidebar or the page); left and right cross between
+    // them. Past the end of its column the focus goes on to whatever lies that way (a banner).
     const region = dir === 'up' || dir === 'down' ? current.closest('[data-nav-region]') : null;
     const pool = region ? others.filter(el => region.contains(el)) : others;
-    const index = pickNeighbor(current.getBoundingClientRect(), pool.map(el => el.getBoundingClientRect()), dir);
+    let index = pickNeighbor(from, pool.map(el => el.getBoundingClientRect()), dir);
     next = index >= 0 ? pool[index] : null;
+    if (!next && region) {
+      const outside = others.filter(el => !region.contains(el) && !el.closest('[data-nav-region]'));
+      index = pickNeighbor(from, outside.map(el => el.getBoundingClientRect()), dir);
+      next = index >= 0 ? outside[index] : null;
+    }
   }
   if (next) {
+    prepareFocus?.(next);
     next.focus({ preventScroll: true });
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
@@ -126,6 +141,18 @@ class GamepadUI {
       if (index >= 0) this.#scopes.splice(index, 1);
       this.#reader.reset();
     };
+  }
+
+  /**
+   * The TV: nothing is focused (the app just opened, the focused item went away with its screen):
+   * the screen's starting item takes the focus, so the remote always shows where it is.
+   */
+  restoreFocus(): boolean {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body && active.isConnected) return false;
+    const scope = this.#scopes[this.#scopes.length - 1];
+    const root = scope?.root() || document.body;
+    return Boolean(moveFocus(root, 'down'));
   }
 
   /** Navigation from another source (the TV remote); true when something handled it. */

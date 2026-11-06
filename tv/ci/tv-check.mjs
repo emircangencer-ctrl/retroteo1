@@ -3,7 +3,8 @@
 // controller bridge, the upload page (a real HTTP upload from this machine) and the inbox, the game's
 // cover from the cover archive, a game started in the TV's WebView, a controller's R2 switching fast
 // forward, Back opening the game menu, and Back on the home screen; the display mode and deploy
-// previews (app 1.2).
+// previews (app 1.2); the remote's keys sent to the page by the app, also from remotes that report
+// the gamepad source, OK pressing once, and the on-screen keyboard for search (app 1.3).
 // Usage (repo root, emulator running): node tv/ci/tv-check.mjs RetroPlayTV.apk
 import fs from 'node:fs';
 import path from 'node:path';
@@ -106,15 +107,38 @@ try {
   }, { critical: false });
 
 
-  await step('the remote moves the focus', async () => {
+  await step('the remote moves the focus (the app sends its d-pad to the page)', async () => {
+    await page.waitForFunction(() => typeof window.RetroPlayTVHost?.remote === 'function', null, { timeout: 30_000 });
     const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');
     await key('DPAD_DOWN');
     await key('DPAD_DOWN');
     const after = await page.evaluate(() => ({ html: document.activeElement?.outerHTML.slice(0, 60) || '', ring: getComputedStyle(document.activeElement).outlineStyle }));
     if (after.html === before || after.ring === 'none') throw new Error(`focus did not move (${after.html})`);
-    return after.html.replace(/\s+/g, ' ');
+    const last = await page.evaluate(() => JSON.parse(window.RetroPlayTV.keyLog()).keys.at(-1));
+    if (last?.key !== 'DPAD_DOWN' || last.route !== 'arayüz') throw new Error(`key log: ${JSON.stringify(last)}`);
+    return `${after.html.replace(/\s+/g, ' ')} · ${last.key} → ${last.route} (${last.device}, ${last.source})`;
   });
   await snap('focus');
+
+  // Remotes that report the gamepad source (the Android TV remote app, TV IR receivers, many
+  // Bluetooth remotes): their d-pad must still move the focus and their Back stay Back.
+  await step('a remote that calls itself a gamepad moves the focus too (gamepad and d-pad sources)', async () => {
+    const focused = () => page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');
+    // From the sidebar's second item, up and down always have somewhere to go.
+    await page.evaluate(() => { const items = [...document.querySelectorAll('.sidebar a[href], .sidebar button')].filter(el => el.getClientRects().length); items[1]?.focus(); });
+    const moves = [];
+    for (const [source, code] of [['gamepad', 'DPAD_UP'], ['gamepad', 'DPAD_DOWN'], ['dpad', 'DPAD_UP'], ['dpad', 'DPAD_DOWN']]) {
+      const before = await focused();
+      await device.shell(`input ${source} keyevent ${code}`);
+      await sleep(500);
+      const after = await focused();
+      const last = await page.evaluate(() => JSON.parse(window.RetroPlayTV.keyLog()).keys.at(-1));
+      if (after === before) throw new Error(`${source} ${code} did not move the focus (${last?.route}, ${last?.source})`);
+      if (last?.route !== 'arayüz') throw new Error(`${source} ${code} went to ${last?.route}`);
+      moves.push(`${source} ${code} (${last.source}) → ${last.route}`);
+    }
+    return moves.join(' · ');
+  });
 
   await step('a controller reaches the page through the app (gamepad key events)', async () => {
     await device.shell('input gamepad keyevent KEYCODE_BUTTON_A');
@@ -166,6 +190,44 @@ try {
   }, { critical: false });
   await snap('cover');
 
+  await step('OK on a button presses it once (the real key and the app\'s message do not both count)', async () => {
+    await page.waitForSelector('#sort-cycle', { timeout: 20_000 });
+    await page.evaluate(() => document.querySelector('#sort-cycle').focus());
+    const label = () => page.evaluate(() => document.querySelector('#sort-cycle span').textContent.trim());
+    const seen = [await label()];
+    for (let i = 0; i < 3; i++) { await key('DPAD_CENTER'); await sleep(700); seen.push(await label()); }
+    const order = ['Son oynanan', 'Son eklenen', 'İsme göre', 'Sisteme göre'];
+    const steps = seen.slice(1).map((value, i) => (order.indexOf(value) - order.indexOf(seen[i]) + order.length) % order.length);
+    if (steps.some(n => n !== 1)) throw new Error(`orders ${seen.join(' → ')}`);
+    return seen.join(' → ');
+  }, { critical: false });
+
+  await step('search: OK opens the on-screen keyboard, typing filters, Back closes the keyboard, the d-pad moves on', async () => {
+    const field = () => page.evaluate(() => { const el = document.querySelector('#search-input'); return { focused: document.activeElement === el, readOnly: el.readOnly, value: el.value }; });
+    const shown = async () => /mInputShown=true|isInputShown=true|mIsInputViewShown=true/.test((await device.shell('dumpsys input_method')).toString());
+    await page.evaluate(() => document.querySelector('#library-games .card-main').focus());
+    for (let i = 0; i < 10 && !(await field()).focused; i++) await key('DPAD_UP');
+    const reached = await field();
+    if (!reached.focused || !reached.readOnly) throw new Error(`search ${JSON.stringify(reached)}`);
+    if (await shown()) throw new Error('the keyboard opened just for passing by');
+    await key('DPAD_CENTER');
+    await sleep(1200);
+    if (!(await shown())) throw new Error('OK did not open the keyboard');
+    await snap('keyboard');
+    await device.shell('input text con');
+    await sleep(1000);
+    const typed = await field();
+    await key('BACK');
+    await sleep(800);
+    if (await shown()) throw new Error('Back did not close the keyboard');
+    const route = await page.evaluate(() => location.hash);
+    await key('DPAD_DOWN');
+    const after = await field();
+    if (after.focused || !after.readOnly) throw new Error(`still in the field ${JSON.stringify(after)}`);
+    await page.evaluate(() => { const el = document.querySelector('#search-input'); el.readOnly = false; el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); el.readOnly = true; });
+    return `typed "${typed.value}" · Back kept the screen (${route || '#/'}) · moved on`;
+  }, { critical: false });
+
   await step('a game starts in the TV WebView', async () => {
     await openGame(page, 'Contra');
     await page.evaluate(() => document.querySelector('.detail [data-play]').click());
@@ -204,6 +266,8 @@ try {
     await snap('menu');
     await key('BACK');
     await page.waitForFunction(() => /^Çalışıyor/.test(document.querySelector('#player-status').textContent), null, { timeout: 10_000 });
+    const backs = await page.evaluate(() => JSON.parse(window.RetroPlayTV.keyLog()).keys.filter(k => k.key === 'BACK').slice(-2).map(k => `${k.mode}→${k.route}`));
+    return `Back in the game: ${backs.join(', ')}`;
   });
 
   await step('leaving the game saves a resume point; Back on the home screen leaves the app', async () => {
@@ -220,6 +284,12 @@ try {
     return top.trim().slice(0, 100);
   }, { critical: false });
   await snap('left-app');
+  await step('Kumanda testi: the TV\'s input devices as the app sees them', async () => {
+    await device.shell(`am start -W -n ${PKG}/.MainActivity`);
+    await sleep(1500);
+    const devices = await page.evaluate(() => JSON.parse(window.RetroPlayTV.inputDevices()));
+    return devices.map(d => `${d.kind}: ${d.name} (${d.source}${d.virtual ? ', virtual' : ''})`).join(' · ') || 'none';
+  }, { critical: false });
   // Last: opening a site reloads the WebView, and Playwright's page can be replaced by a new one.
   await step('a deploy preview opens by its PR number, nothing else', async () => {
     // The step before sent the app to the background; bring it back (singleTask: the same WebView).

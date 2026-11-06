@@ -14,10 +14,13 @@ class AppState {
   /** Mirrors the player (the update banner never appears over a running game). */
   playerOpen = $state(false);
   persisted = $state<boolean | null>(null);
+  /** When the page started (performance.now()): the TV applies an update found right after it opens. */
+  startedAt = 0;
   #worker: ServiceWorker | null = null;
   #registration: ServiceWorkerRegistration | null = null;
 
   start() {
+    this.startedAt = performance.now();
     addEventListener('online', () => { this.online = true; });
     addEventListener('offline', () => { this.online = false; });
     void this.#register();

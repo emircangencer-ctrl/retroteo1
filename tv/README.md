@@ -16,6 +16,28 @@ with Google TV or Android TV built in.
   to its TV layout: content inside the TV safe area, focus always shown, the remote's d-pad moves
   the focus to the nearest item, OK selects, Back goes back (in a game Back opens the game menu;
   on the home screen it leaves the app), the player is always full screen.
+- **The remote (app 1.3)**: TV makers' WebViews do not all pass the remote's d-pad on to a page,
+  and many remotes report themselves as gamepads (the Android TV remote app, TVs' IR receivers,
+  Bluetooth remotes with game keys). So the app decides itself (`KeyRoute`): a device is a
+  controller only if it has sticks or a hat or has pressed a controller button; every other
+  d-pad is a remote, and on the screens its arrows go straight to the page
+  (`RetroPlayTVHost.remote`), not through the WebView. OK goes both ways — as a real key press
+  (choosing a file needs one) and as a message, and the page presses the focused item itself when
+  the real press does not arrive, never twice. A remote's Back is always Back. In a game the keys
+  go to the WebView as before (the remote can play). The page tells the app which applies
+  (`setRemoteMode('ui' | 'game')`); before it does (an older site, the offline page) everything
+  goes to the WebView as in 1.2.
+- **Text fields** (search) are passed over like any item: read-only until OK, so the on-screen
+  keyboard does not open — and take the remote's keys — just because the focus went by. OK opens
+  the keyboard (`showKeyboard`), OK again or the keyboard's Done closes it, moving on with the d-pad
+  too. No drop-down lists on the TV (the sort order is a button that steps through the orders; the
+  PR number is typed with digit buttons or the remote's digits).
+- **Updates**: a new version of the site found right after the app opens loads at once (the TV
+  always runs the newest one); found later, the *Yeni sürüm hazır* banner takes the focus (OK =
+  *Yenile*), and the remote reaches it from the page too.
+- **Kumanda testi** (Settings → Google TV): the TV's input devices as the app sees them (remote,
+  controller, keyboard; source bits) and the last keys with where each went. The same lines are in
+  `adb logcat -s RetroPlayTV`. A photo of it says why a remote does not work on some TV.
 - **Controllers**: the app reads Bluetooth/USB controllers natively and the page polls them as
   standard gamepads (`navigator.getGamepads()` is replaced in the page). Controller buttons never
   arrive as arrow keys or Back, so nothing is pressed twice. Buttons by position (bottom = B,
@@ -94,18 +116,21 @@ uninstall (which deletes the app's data on the TV).
 
 ## Building
 
-GitHub Actions (`.github/workflows/tv.yml`) runs the unit tests (`DisplayModes`, `Sites`), builds it with Gradle 8.11 / AGP 8.7 (JDK 17), checks
+GitHub Actions (`.github/workflows/tv.yml`) runs the unit tests (`DisplayModes`, `Sites`, `KeyRoute`), builds it with Gradle 8.11 / AGP 8.7 (JDK 17), checks
 the APK (signature, `leanback-launchable-activity`), publishes it as the `tv-latest` release (from
 `main` only; a pull request's build goes to `tv-test`, which the site's `/tv-test` address points to,
 for trying a change of the app itself on the TV before it goes live) and runs it on Android TV emulators (Google TV API 34 and Android TV API 33) against
-the deploy of the same commit: install, the TV layout, the remote, a controller key event, a real
-HTTP upload into the inbox, the import, the game's cover from GitHub, a game started in the
-WebView, R2 switching fast forward, Back opening the game menu, Back on the home screen.
+the deploy of the same commit: install, the TV layout, the remote (keyboard, d-pad and gamepad
+sources: each must move the focus through the app's route), a controller key event, a real HTTP
+upload into the inbox, the import, the game's cover from GitHub, OK pressing a button exactly once,
+the on-screen keyboard for search (opens on OK, not on focus; Back closes it), a game started in
+the WebView, R2 switching fast forward, Back opening the game menu, Back on the home screen.
 Screenshots and results of `main` runs are attached to the release as `ci-*` files.
 
 Locally: `gradle -p tv/android assembleRelease -PretroplayUrl=https://…/` with the Android SDK.
 
 ## Not verified by the emulator
 
-Speed on a real TV (the emulator draws with a software GPU), real Bluetooth controllers, the TV
-remote's feel, sound, and sideloading on the owner's TV.
+Speed on a real TV (the emulator draws with a software GPU), real Bluetooth controllers, a real
+remote (the emulator injects keys from a virtual device; the routing rules for real remotes are
+unit-tested in `KeyRouteTest`), sound, and sideloading on the owner's TV.

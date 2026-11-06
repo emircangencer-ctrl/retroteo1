@@ -137,7 +137,7 @@ jobs:
           # For trying a change of the app itself on the TV before it goes live: the site's /tv-test
           # address points here (Downloader). It opens the pull request's deploy preview; signed like
           # tv-latest once the permanent key exists, so tv-latest installs over it later.
-          NOTES="RetroPlay TV 1.2.${{ github.run_number }} (deneme) · ${GITHUB_REF_NAME} · ${GITHUB_SHA::7} · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Canlı sürüm değil: TV'de Downloader'a sitenin /tv-test adresini yaz."
+          NOTES="RetroPlay TV 1.3.${{ github.run_number }} (deneme) · ${GITHUB_REF_NAME} · ${GITHUB_SHA::7} · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Canlı sürüm değil: TV'de Downloader'a sitenin /tv-test adresini yaz."
           if gh release view tv-test >/dev/null 2>&1; then gh release edit tv-test --notes "$NOTES"
           else gh release create tv-test --prerelease --title "RetroPlay TV (deneme)" --notes "$NOTES" --target "$GITHUB_SHA"; fi
           gh release upload tv-test RetroPlayTV.apk --clobber
@@ -154,7 +154,7 @@ jobs:
           # by the permanently signed one (a single reinstall); a permanent one is never replaced
           # by a per-run one.
           SOURCE=$(git ls-files -s tv/android | sha256sum | cut -c1-16)
-          NOTES="RetroPlay TV 1.2.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
+          NOTES="RetroPlay TV 1.3.${{ github.run_number }} · ${GITHUB_SHA::7} · kaynak $SOURCE · imza $TV_SIGNING · açtığı site: $RETROPLAY_URL. Kurulum: TV'de Downloader uygulamasına sitenin /tv adresini yaz (ayrıntı: tv/README.md)."
           if gh release view tv-latest >/dev/null 2>&1; then
             BODY=$(gh release view tv-latest --json body -q .body)
             HAS_APK=$(gh release view tv-latest --json assets -q '.assets[].name' | grep -cx RetroPlayTV.apk || true)
@@ -171,7 +171,7 @@ jobs:
             gh release create tv-latest --prerelease --title "RetroPlay TV" --notes "$NOTES" --target "$GITHUB_SHA"
           fi
           gh release upload tv-latest RetroPlayTV.apk --clobber
-          echo "::notice title=TV release::Published RetroPlay TV 1.2.${{ github.run_number }} (source $SOURCE)."
+          echo "::notice title=TV release::Published RetroPlay TV 1.3.${{ github.run_number }} (source $SOURCE)."
 
   emulator:
     name: Run on an Android TV emulator

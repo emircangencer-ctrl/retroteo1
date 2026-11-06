@@ -271,8 +271,13 @@ the latest APK (`tv-latest` release, built by `.github/workflows/tv.yml`, which 
 on Google TV and Android TV emulators); `/tv-test` to the build of an open pull request.
 The app (1.2) asks the TV for 60 Hz (games advance one frame per refresh; 50 Hz plays them a sixth
 slower), the picture is drawn at most 1080 lines high, and Settings can open a pull request's
-deploy preview to try a change on the TV first. A secret phrase (`TV_SIGNING_SEED`) gives every
-build the same signing key, so updates keep the TV's library.
+deploy preview to try a change on the TV first. The app 1.3 sends the remote's d-pad to the page
+itself (TV makers' WebViews do not all pass it on, and many remotes report themselves as
+gamepads), OK presses once, text fields open the on-screen keyboard only on OK, there are no
+drop-down lists on the TV, an update found right after the app opens loads at once, and Settings →
+*Kumanda testi* shows what the remote sends. An E2E check walks every screen, dialog and the game
+menu with the remote and fails on any item it cannot reach. A secret phrase (`TV_SIGNING_SEED`)
+gives every build the same signing key, so updates keep the TV's library.
 
 ## Arcade sets and BIOS files
 

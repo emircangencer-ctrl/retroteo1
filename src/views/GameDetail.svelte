@@ -17,6 +17,7 @@
   import { importer } from '../lib/importer.svelte.ts';
   import { tv } from '../lib/tv.svelte.ts';
   import { coverArt } from '../lib/cover-art.svelte.ts';
+  import { gamepadUI } from '../lib/gamepad-ui.svelte.ts';
   import { player, slotName } from '../player/session.svelte.ts';
   import { SYSTEM_CORE_LABELS, CONSOLE_CORES, consoleCoreOrder } from '../player/launch.ts';
   import { crc32, diagnoseSuperMarioBros3Rom, inspectNesRom } from '../nes-rom.js';
@@ -36,6 +37,20 @@
   const hasSram = $derived(game ? library.saveIds.has(game.id) : false);
   let slots = $state<SlotInfo[]>([]);
   let menuOpen = $state(false);
+  let moreButton = $state<HTMLButtonElement>();
+  let popover = $state<HTMLElement>();
+  // The ⋯ menu with a remote or a controller: it takes the focus like a dialog, Back closes it.
+  $effect(() => {
+    const box = popover;
+    if (!box) return;
+    box.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+    const pop = gamepadUI.push({ root: () => box, modal: true, onAction: action => { if (action.type === 'back') { menuOpen = false; return true; } return false; } });
+    return () => {
+      pop();
+      const active = document.activeElement;
+      if (!active || active === document.body || !active.isConnected) untrack(() => moreButton)?.focus({ preventScroll: true });
+    };
+  });
   let sheet = $state<SlotInfo | null>(null);
   let dump = $state<'verified' | 'unverified' | null>(null);
   /** A PAL (50 Hz) cartridge, read from its header (or its file name). */
@@ -151,9 +166,9 @@
           <Icon name={game.favorite ? 'heart-fill' : 'heart'} />
         </button>
         <div class="more-wrap">
-          <button type="button" class="icon-btn" aria-label="Diğer seçenekler" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}><Icon name="more" /></button>
+          <button type="button" class="icon-btn" id="detail-more" aria-label="Diğer seçenekler" aria-expanded={menuOpen} bind:this={moreButton} onclick={() => (menuOpen = !menuOpen)}><Icon name="more" /></button>
           {#if menuOpen}
-            <div class="popover" role="menu">
+            <div class="popover" role="menu" id="detail-menu" bind:this={popover}>
               {#if game.blob && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; exportRom(game); }}><Icon name="download" size={18} />ROM'u indir</button>{/if}
               {#if hasSram && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; void exportSram(game); }}><Icon name="save" size={18} />Oyun içi kaydı indir (.srm)</button>{/if}
               {#if coverArt.picture(game.id)}<button type="button" role="menuitem" id="remove-cover" onclick={() => { menuOpen = false; void coverArt.remove(game.id).then(() => showToast('Kapak resmi kaldırıldı; bu oyun için yeniden aranmayacak.')); }}><Icon name="close" size={18} />Kapak resmini kaldır</button>{/if}
