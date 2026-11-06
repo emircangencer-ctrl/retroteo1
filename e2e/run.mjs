@@ -1759,6 +1759,14 @@ await scenario('TV app 1.3: the remote reaches every item of every screen, dialo
   await tvRemote(page, 'down');
   assert.notEqual(await focusedName(page), 'search-input');
   assert.deepEqual(await page.evaluate(() => [document.querySelector('#search-input').readOnly, window.__tv.keyboard.at(-1)]), [true, 'hide'], 'leaving the field closes the keyboard');
+  // Back while typing (when the keyboard passes it on) ends typing: the search and the screen stay.
+  await tvRemote(page, 'up');
+  assert.equal(await focusedName(page), 'search-input');
+  await tvRemote(page, 'ok');
+  await page.waitForFunction(() => document.querySelector('#search-input').dataset.tvEditing === '1');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  assert.deepEqual(await search(), { focused: true, readOnly: true, editing: false });
+  assert.deepEqual(await page.evaluate(() => [window.__tv.keyboard.at(-1), document.querySelector('#search-input').value, document.querySelectorAll('#library-games .game-card').length, location.hash]), ['hide', 'check', 1, '#/']);
   await page.evaluate(() => { const el = document.querySelector('#search-input'); el.readOnly = false; el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); el.readOnly = true; });
   await page.waitForFunction(() => document.querySelectorAll('#library-games .game-card').length === 2);
   // The sort order is a button on the TV (a remote cannot open a drop-down list).

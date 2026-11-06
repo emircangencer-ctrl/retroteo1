@@ -11,6 +11,9 @@ const okGate = new OkGate();
 
 /** The remote's Back: menu in a game, closes what is open, previous screen; false on the home screen. */
 export function tvBack(): boolean {
+  // Typing: Back closes the on-screen keyboard (if it did not take the key itself) and ends typing.
+  const active = document.activeElement;
+  if (isTyping(active)) { stopTyping(active); return true; }
   if (player.open && !player.menuOpen && !player.blocked && !player.consent && !(player.error && !player.running)) {
     if (player.running) player.openMenu(); else void player.close();
     return true;

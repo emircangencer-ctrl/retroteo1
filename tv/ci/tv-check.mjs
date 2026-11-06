@@ -29,19 +29,39 @@ const note = (ok, label, detail = '') => {
 // "Target page, context or browser has been closed" at random steps while the app kept running).
 // A step that hits that finds the WebView again and runs once more; a dead app still fails.
 const closed = error => /Target page, context or browser has been closed|Target closed|has been closed/.test(String(error?.message || error));
+// On Google TV API 34 the emulator's memory daemon (lmkd) sometimes restarts and takes every app
+// down with it ("app died, no saved state" with Play services). Then the app is started again —
+// unless it crashed by itself, which fails the check.
+let restarts = 0;
+async function ownCrash() {
+  try {
+    const crash = execFileSync('adb', ['logcat', '-d', '-b', 'crash'], { maxBuffer: 16 * 1024 * 1024 }).toString();
+    return /Process: app\.retroplay\.tv|FATAL EXCEPTION[^\n]*\n[^\n]*app\.retroplay\.tv|>>> app\.retroplay\.tv <<</.test(crash);
+  } catch { return false; }
+}
 async function reattach() {
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
+      if (attempt === 3 && !(await device.shell(`pidof ${PKG}`)).toString().trim()) {
+        if (await ownCrash()) throw new Error('the app crashed (crash buffer)');
+        restarts++;
+        console.log('(the app was not running any more: started again)');
+        await device.shell(`am start -W -n ${PKG}/.MainActivity`);
+      }
       const view = await device.webView({ pkg: PKG }, { timeout: 15_000 });
       page = await view.page();
       page.setDefaultTimeout(90_000);
-      await page.waitForFunction(() => Boolean(document.querySelector('#app-shell')), null, { timeout: 30_000 });
+      await page.waitForFunction(() => Boolean(document.querySelector('#app-shell')) && typeof window.RetroPlayTVHost?.remote === 'function', null, { timeout: 30_000 });
       return true;
-    } catch { await sleep(2000); }
+    } catch (error) {
+      if (/crashed/.test(String(error?.message))) throw error;
+      await sleep(2000);
+    }
   }
   return false;
 }
 const step = async (label, fn, { critical = true } = {}) => {
+  const before = restarts;
   try {
     let detail;
     try {
@@ -51,7 +71,7 @@ const step = async (label, fn, { critical = true } = {}) => {
       if (!closed(error) || !(await reattach())) throw error;
       console.log(`(WebView handle dropped during "${label}"; found it again, running the step once more)`);
       detail = await fn();
-      detail = `${typeof detail === 'string' ? detail : ''} (after the WebView handle was found again)`.trim();
+      detail = `${typeof detail === 'string' ? detail : ''} (${restarts > before ? 'after the system had stopped the app and it was started again' : 'after the WebView handle was found again'})`.trim();
     }
     note(true, label, typeof detail === 'string' ? detail : '');
     return true;
@@ -333,7 +353,10 @@ try {
     } catch {}
   }
   fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(results, null, 2));
-  for (const r of results) console.log(`${r.ok ? '::notice' : '::error'} title=TV ${r.ok ? 'ok' : 'FAIL'}::${r.label}${r.detail ? ` — ${r.detail}` : ''}`);
+  // GitHub shows at most 10 notices per step: all results in one, failures each on their own.
+  const line = r => `${r.ok ? 'ok' : 'FAIL'} ${r.label}${r.detail ? ` — ${r.detail}` : ''}`;
+  console.log(`::notice title=TV results (${results.filter(r => r.ok).length}/${results.length} ok)::${results.map(line).join(' ‖ ').replace(/\r?\n/g, ' ').slice(0, 60000)}`);
+  for (const r of results.filter(r => !r.ok)) console.log(`::error title=TV FAIL::${line(r)}`);
   try { await device?.close(); } catch {}
   process.exit(results.some(r => !r.ok) ? 1 : 0);
 }
