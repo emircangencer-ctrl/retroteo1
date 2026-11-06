@@ -236,7 +236,7 @@ try {
       const dump = (await device.shell('dumpsys input_method')).toString();
       imeLines = [...new Set(dump.split('\n').map(line => line.trim()).filter(line => /mInputShown=|mImeWindowVis=|mIsInputViewShown=|mWindowVisible=|mShowInputRequested=/.test(line)))].join(' ; ').slice(0, 400);
       const vis = /mImeWindowVis=(0x)?([0-9a-f]+)/i.exec(dump);
-      return /mInputShown=true/.test(dump) || Boolean(vis && parseInt(vis[2], vis[1] ? 16 : 10) & 1);
+      return /mInputShown=true/.test(dump) || Boolean(vis && parseInt(vis[2], vis[1] ? 16 : 10) & 2); // IME_VISIBLE = 0x2 (0x1: active only)
     };
     const initially = await shown();
     const initialLines = imeLines;
