@@ -2,7 +2,9 @@
 // Playwright's Android support (the app's WebView is debuggable): the TV layout, the remote, the
 // controller bridge, the upload page (a real HTTP upload from this machine) and the inbox, the game's
 // cover from the cover archive, a game started in the TV's WebView, a controller's R2 switching fast
-// forward, Back opening the game menu, and Back on the home screen.
+// forward, Back opening the game menu, and Back on the home screen; the display mode and deploy
+// previews (app 1.2); the remote's keys sent to the page by the app, also from remotes that report
+// the gamepad source, OK pressing once, and the on-screen keyboard for search (app 1.3).
 // Usage (repo root, emulator running): node tv/ci/tv-check.mjs RetroPlayTV.apk
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,9 +25,54 @@ const note = (ok, label, detail = '') => {
   results.push({ ok, label, detail });
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${detail ? ` — ${detail}` : ''}`);
 };
-const step = async (label, fn, { critical = true } = {}) => {
+// Playwright's handle on the app's WebView can be dropped by the emulator (seen on Google TV API 34:
+// "Target page, context or browser has been closed" at random steps while the app kept running).
+// A step that hits that finds the WebView again and runs once more; a dead app still fails.
+const closed = error => /Target page, context or browser has been closed|Target closed|has been closed/.test(String(error?.message || error));
+// On Google TV API 34 the emulator's memory daemon (lmkd) sometimes restarts and takes every app
+// down with it ("app died, no saved state" with Play services). Then the app is started again —
+// unless it crashed by itself, which fails the check.
+let restarts = 0;
+async function ownCrash() {
   try {
-    const detail = await fn();
+    const crash = execFileSync('adb', ['logcat', '-d', '-b', 'crash'], { maxBuffer: 16 * 1024 * 1024 }).toString();
+    return /Process: app\.retroplay\.tv|FATAL EXCEPTION[^\n]*\n[^\n]*app\.retroplay\.tv|>>> app\.retroplay\.tv <<</.test(crash);
+  } catch { return false; }
+}
+async function reattach() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      if (attempt === 3 && !(await device.shell(`pidof ${PKG}`)).toString().trim()) {
+        if (await ownCrash()) throw new Error('the app crashed (crash buffer)');
+        restarts++;
+        console.log('(the app was not running any more: started again)');
+        await device.shell(`am start -W -n ${PKG}/.MainActivity`);
+      }
+      const view = await device.webView({ pkg: PKG }, { timeout: 15_000 });
+      page = await view.page();
+      page.setDefaultTimeout(90_000);
+      await page.waitForFunction(() => Boolean(document.querySelector('#app-shell')) && typeof window.RetroPlayTVHost?.remote === 'function', null, { timeout: 30_000 });
+      return true;
+    } catch (error) {
+      if (/crashed/.test(String(error?.message))) throw error;
+      await sleep(2000);
+    }
+  }
+  return false;
+}
+const step = async (label, fn, { critical = true } = {}) => {
+  const before = restarts;
+  try {
+    let detail;
+    try {
+      if (page && page.isClosed()) await reattach();
+      detail = await fn();
+    } catch (error) {
+      if (!closed(error) || !(await reattach())) throw error;
+      console.log(`(WebView handle dropped during "${label}"; found it again, running the step once more)`);
+      detail = await fn();
+      detail = `${typeof detail === 'string' ? detail : ''} (${restarts > before ? 'after the system had stopped the app and it was started again' : 'after the WebView handle was found again'})`.trim();
+    }
     note(true, label, typeof detail === 'string' ? detail : '');
     return true;
   } catch (error) {
@@ -72,15 +119,52 @@ try {
     if (found) throw new Error(`found: ${found}`);
   }, { critical: false });
 
-  await step('the remote moves the focus', async () => {
+  await step('the app reports the display mode (and asks for 60 Hz only when the TV is not at 60 Hz)', async () => {
+    const screen = await page.evaluate(() => JSON.parse(window.RetroPlayTV.display()));
+    if (!(Math.abs(screen.refresh - 60) < 1.5) || !Array.isArray(screen.modes) || !screen.modes.length) throw new Error(JSON.stringify(screen));
+    if (screen.requested) throw new Error(`asked for ${screen.requested} although the screen is at ${screen.refresh} Hz`);
+    return `${screen.mode} · modes ${screen.modes.join(', ')}`;
+  }, { critical: false });
+
+
+  await step('the remote moves the focus (the app sends its d-pad to the page)', async () => {
+    await page.waitForFunction(() => typeof window.RetroPlayTVHost?.remote === 'function', null, { timeout: 30_000 });
+    // The screen shows where the remote is from the start.
+    await page.waitForFunction(() => document.activeElement && document.activeElement !== document.body, null, { timeout: 5_000 });
+    const start = await page.evaluate(() => document.activeElement.outerHTML.slice(0, 60));
+    // From the sidebar's second item down and up always have somewhere to go.
+    await page.evaluate(() => { const items = [...document.querySelectorAll('.sidebar a[href], .sidebar button')].filter(el => el.getClientRects().length); items[1]?.focus(); });
     const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');
     await key('DPAD_DOWN');
-    await key('DPAD_DOWN');
     const after = await page.evaluate(() => ({ html: document.activeElement?.outerHTML.slice(0, 60) || '', ring: getComputedStyle(document.activeElement).outlineStyle }));
-    if (after.html === before || after.ring === 'none') throw new Error(`focus did not move (${after.html})`);
-    return after.html.replace(/\s+/g, ' ');
+    if (after.html === before || after.ring === 'none') throw new Error(`focus did not move from ${before} (${after.html}, ring ${after.ring})`);
+    const last = await page.evaluate(() => JSON.parse(window.RetroPlayTV.keyLog()).keys.at(-1));
+    if (last?.key !== 'DPAD_DOWN' || last.route !== 'arayüz') throw new Error(`key log: ${JSON.stringify(last)}`);
+    await key('DPAD_UP');
+    if (await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '') !== before) throw new Error('up did not come back');
+    return `starts on ${start.replace(/\s+/g, ' ')} · down to ${after.html.replace(/\s+/g, ' ')} and back · ${last.key} → ${last.route} (${last.device}, ${last.source})`;
   });
   await snap('focus');
+
+  // Remotes that report the gamepad source (the Android TV remote app, TV IR receivers, many
+  // Bluetooth remotes): their d-pad must still move the focus and their Back stay Back.
+  await step('a remote that calls itself a gamepad moves the focus too (gamepad and d-pad sources)', async () => {
+    const focused = () => page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60) || '');
+    // From the sidebar's second item, up and down always have somewhere to go.
+    await page.evaluate(() => { const items = [...document.querySelectorAll('.sidebar a[href], .sidebar button')].filter(el => el.getClientRects().length); items[1]?.focus(); });
+    const moves = [];
+    for (const [source, code] of [['gamepad', 'DPAD_UP'], ['gamepad', 'DPAD_DOWN'], ['dpad', 'DPAD_UP'], ['dpad', 'DPAD_DOWN']]) {
+      const before = await focused();
+      await device.shell(`input ${source} keyevent ${code}`);
+      await sleep(500);
+      const after = await focused();
+      const last = await page.evaluate(() => JSON.parse(window.RetroPlayTV.keyLog()).keys.at(-1));
+      if (after === before) throw new Error(`${source} ${code} did not move the focus (${last?.route}, ${last?.source})`);
+      if (last?.route !== 'arayüz') throw new Error(`${source} ${code} went to ${last?.route}`);
+      moves.push(`${source} ${code} (${last.source}) → ${last.route}`);
+    }
+    return moves.join(' · ');
+  });
 
   await step('a controller reaches the page through the app (gamepad key events)', async () => {
     await device.shell('input gamepad keyevent KEYCODE_BUTTON_A');
@@ -132,6 +216,53 @@ try {
   }, { critical: false });
   await snap('cover');
 
+  await step('OK on a button presses it once (the real key and the app\'s message do not both count)', async () => {
+    await page.waitForSelector('#sort-cycle', { timeout: 20_000 });
+    await page.evaluate(() => document.querySelector('#sort-cycle').focus());
+    const label = () => page.evaluate(() => document.querySelector('#sort-cycle span').textContent.trim());
+    const seen = [await label()];
+    for (let i = 0; i < 3; i++) { await key('DPAD_CENTER'); await sleep(700); seen.push(await label()); }
+    const order = ['Son oynanan', 'Son eklenen', 'İsme göre', 'Sisteme göre'];
+    const steps = seen.slice(1).map((value, i) => (order.indexOf(value) - order.indexOf(seen[i]) + order.length) % order.length);
+    if (steps.some(n => n !== 1)) throw new Error(`orders ${seen.join(' → ')}`);
+    return seen.join(' → ');
+  }, { critical: false });
+
+  await step('search: OK opens the on-screen keyboard, typing filters, Back closes the keyboard, the d-pad moves on', async () => {
+    const field = () => page.evaluate(() => { const el = document.querySelector('#search-input'); return { focused: document.activeElement === el, readOnly: el.readOnly, value: el.value }; });
+    // The keyboard's state as the input method service has it (Android 13: mInputShown; 14 also mImeWindowVis).
+    let imeLines = '';
+    const shown = async () => {
+      const dump = (await device.shell('dumpsys input_method')).toString();
+      imeLines = [...new Set(dump.split('\n').map(line => line.trim()).filter(line => /mInputShown=|mImeWindowVis=|mIsInputViewShown=|mWindowVisible=|mShowInputRequested=/.test(line)))].join(' ; ').slice(0, 400);
+      const vis = /mImeWindowVis=(0x)?([0-9a-f]+)/i.exec(dump);
+      return /mInputShown=true/.test(dump) || Boolean(vis && parseInt(vis[2], vis[1] ? 16 : 10) & 2); // IME_VISIBLE = 0x2 (0x1: active only)
+    };
+    const initially = await shown();
+    const initialLines = imeLines;
+    await page.evaluate(() => document.querySelector('#library-games .card-main').focus());
+    for (let i = 0; i < 10 && !(await field()).focused; i++) await key('DPAD_UP');
+    const reached = await field();
+    if (!reached.focused || !reached.readOnly) throw new Error(`search ${JSON.stringify(reached)}`);
+    if (await shown()) throw new Error(`the keyboard opened just for passing by (${imeLines}) — before the step: ${initially ? 'shown' : 'hidden'} (${initialLines})`);
+    await key('DPAD_CENTER');
+    await sleep(1200);
+    if (!(await shown())) throw new Error(`OK did not open the keyboard (${imeLines})`);
+    await snap('keyboard');
+    await device.shell('input text con');
+    await sleep(1000);
+    const typed = await field();
+    await key('BACK');
+    await sleep(800);
+    if (await shown()) throw new Error(`Back did not close the keyboard (${imeLines}; ${JSON.stringify(await field())})`);
+    const route = await page.evaluate(() => location.hash);
+    await key('DPAD_DOWN');
+    const after = await field();
+    if (after.focused || !after.readOnly) throw new Error(`still in the field ${JSON.stringify(after)}`);
+    await page.evaluate(() => { const el = document.querySelector('#search-input'); el.readOnly = false; el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); el.readOnly = true; });
+    return `typed "${typed.value}" · Back kept the screen (${route || '#/'}) · moved on`;
+  }, { critical: false });
+
   await step('a game starts in the TV WebView', async () => {
     await openGame(page, 'Contra');
     await page.evaluate(() => document.querySelector('.detail [data-play]').click());
@@ -170,6 +301,8 @@ try {
     await snap('menu');
     await key('BACK');
     await page.waitForFunction(() => /^Çalışıyor/.test(document.querySelector('#player-status').textContent), null, { timeout: 10_000 });
+    const backs = await page.evaluate(() => JSON.parse(window.RetroPlayTV.keyLog()).keys.filter(k => k.key === 'BACK').slice(-2).map(k => `${k.mode}→${k.route}`));
+    return `Back in the game: ${backs.join(', ')}`;
   });
 
   await step('leaving the game saves a resume point; Back on the home screen leaves the app', async () => {
@@ -186,12 +319,59 @@ try {
     return top.trim().slice(0, 100);
   }, { critical: false });
   await snap('left-app');
+  await step('Kumanda testi: the TV\'s input devices as the app sees them', async () => {
+    await device.shell(`am start -W -n ${PKG}/.MainActivity`);
+    await sleep(1500);
+    const devices = await page.evaluate(() => JSON.parse(window.RetroPlayTV.inputDevices()));
+    return devices.map(d => `${d.kind}: ${d.name} (${d.source}${d.virtual ? ', virtual' : ''})`).join(' · ') || 'none';
+  }, { critical: false });
+  // Last: opening a site reloads the WebView, and Playwright's page can be replaced by a new one.
+  await step('a deploy preview opens by its PR number, nothing else', async () => {
+    // The step before sent the app to the background; bring it back (singleTask: the same WebView).
+    await device.shell(`am start -W -n ${PKG}/.MainActivity`);
+    await sleep(1500);
+    const refused = await page.evaluate(() => ['abc', '0', '9--evil.example', '1234567'].map(value => window.RetroPlayTV.openSite(value)));
+    if (refused.some(Boolean)) throw new Error(`accepted: ${refused}`);
+    const number = Number(/deploy-preview-(\d+)--/.exec(process.env.RETROPLAY_URL || '')?.[1] || 0);
+    if (!number) return 'refused bad values (live build: no preview to reopen)';
+    await page.evaluate(n => window.RetroPlayTV.openSite(String(n)), number).catch(() => {});
+    let opened = '';
+    for (let attempt = 0; attempt < 30 && !opened; attempt++) {
+      await sleep(2000);
+      try {
+        const view = await device.webView({ pkg: PKG }, { timeout: 10_000 });
+        page = await view.page();
+        opened = await page.evaluate(n => document.documentElement.classList.contains('tv') && Boolean(document.querySelector('#app-shell')) && JSON.parse(window.RetroPlayTV.info()).preview === n && Boolean(document.querySelector('#tv-preview-badge')) ? document.querySelector('#tv-preview-badge').textContent : '', number);
+      } catch {}
+    }
+    if (!opened) throw new Error('the preview did not open with its badge');
+    return `refused bad values; preview #${number} opened (${opened})`;
+  }, { critical: false });
+  await snap('preview');
 } catch (error) {
   console.log(`stopped: ${error?.message || error}`);
 } finally {
   try { execFileSync('adb', ['logcat', '-d', '-s', 'RetroPlayTV:I', 'chromium:I'], { stdio: ['ignore', fs.openSync(path.join(out, 'logcat.txt'), 'w'), 'ignore'] }); } catch {}
+  // A failure where the WebView page went away: say why on the run (renderer crash, low memory).
+  if (results.some(r => !r.ok)) {
+    try {
+      const log = execFileSync('adb', ['logcat', '-d', '-v', 'brief'], { maxBuffer: 64 * 1024 * 1024 }).toString();
+      const all = log.split('\n');
+      const app = all.filter(line => !/Watchdog|SystemServerTiming/.test(line) && /FATAL EXCEPTION|Fatal signal|SIGSEGV|SIGABRT|AndroidRuntime.*(app\.retroplay|Exception|Caused by)|app\.retroplay\.tv.*(died|crash)|has died|app died/.test(line)).slice(0, 5);
+      // The crash buffer holds native and Java crash reports (the first lines say what and where).
+      const crash = execFileSync('adb', ['logcat', '-d', '-b', 'crash'], { maxBuffer: 16 * 1024 * 1024 }).toString().split('\n').filter(line => /Fatal signal|Cmdline|Abort message|signal \d+|#0[0-5] pc|FATAL EXCEPTION|Process:|Exception|Caused by|at app\.retroplay/.test(line)).slice(0, 12);
+      for (const line of crash) console.log(`::warning title=TV crash::${line.trim().slice(0, 300)}`);
+      const memory = all.filter(line => /lowmemorykiller|lmkd.*[Kk]ill|Low on memory|kill.*app\.retroplay|Renderer process (crashed|was killed)/.test(line)).slice(-4);
+      for (const line of [...app, ...memory]) console.log(`::warning title=TV logcat::${line.trim().slice(0, 300)}`);
+      const mem = execFileSync('adb', ['shell', 'cat', '/proc/meminfo']).toString().split('\n').filter(line => /MemTotal|MemAvailable/.test(line)).join(' · ').replace(/\s+/g, ' ');
+      console.log(`::warning title=TV memory::${mem}`);
+    } catch {}
+  }
   fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(results, null, 2));
-  for (const r of results) console.log(`${r.ok ? '::notice' : '::error'} title=TV ${r.ok ? 'ok' : 'FAIL'}::${r.label}${r.detail ? ` — ${r.detail}` : ''}`);
+  // GitHub shows at most 10 notices per step: all results in one, failures each on their own.
+  const line = r => `${r.ok ? 'ok' : 'FAIL'} ${r.label}${r.detail ? ` — ${r.detail}` : ''}`;
+  console.log(`::notice title=TV results (${results.filter(r => r.ok).length}/${results.length} ok)::${results.map(line).join(' ‖ ').replace(/\r?\n/g, ' ').slice(0, 60000)}`);
+  for (const r of results.filter(r => !r.ok)) console.log(`::error title=TV FAIL::${line(r)}`);
   try { await device?.close(); } catch {}
   process.exit(results.some(r => !r.ok) ? 1 : 0);
 }

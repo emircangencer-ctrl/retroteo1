@@ -6,3 +6,5 @@ export function deviceSummary(nav?: unknown): Record<string, unknown>;
 export function loadHistory(storage?: Storage): any[];
 export function addToHistory(entry: unknown, storage?: Storage): any[];
 export function historyReport(history: unknown[]): string;
+export function refreshNote(refresh: number | undefined): string;
+export function nominalRate(normalFps: number | null, fps: number): 50 | 60;

@@ -1,7 +1,7 @@
 // App-wide state: offline readiness (service worker and cached emulator cores), network, updates.
 import { watchServiceWorkerUpdates, activateUpdate, summarizeRuntimeCache } from '../sw-update.js';
 
-export const RUNTIME_CACHE_NAME = 'retroplay-emulatorjs-4.2.3-v1';
+export const RUNTIME_CACHE_NAME = 'retroplay-emulatorjs-4.2.3-v2';
 export const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-dev';
 
 class AppState {
@@ -14,10 +14,13 @@ class AppState {
   /** Mirrors the player (the update banner never appears over a running game). */
   playerOpen = $state(false);
   persisted = $state<boolean | null>(null);
+  /** When the page started (performance.now()): the TV applies an update found right after it opens. */
+  startedAt = 0;
   #worker: ServiceWorker | null = null;
   #registration: ServiceWorkerRegistration | null = null;
 
   start() {
+    this.startedAt = performance.now();
     addEventListener('online', () => { this.online = true; });
     addEventListener('offline', () => { this.online = false; });
     void this.#register();

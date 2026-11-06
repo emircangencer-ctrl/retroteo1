@@ -21,6 +21,7 @@
   import { player } from './player/session.svelte.ts';
   import { tv } from './lib/tv.svelte.ts';
   import { coverArt } from './lib/cover-art.svelte.ts';
+  import { gameHasKeys } from './lib/tv-host.ts';
 
   const route = $derived(router.route);
   const scrollMemory = new Map<string, number>();
@@ -31,6 +32,8 @@
   $effect(() => { if (library.ready) void coverArt.sync(library.games); });
   // On the TV the screen stays on while a game runs (no screensaver over the game).
   $effect(() => { if (tv.bridge) tv.keepScreenOn(player.running && !player.paused); });
+  // The TV app 1.3+ sends the remote's keys to the page on screens, to the game while it has them.
+  $effect(() => { if (tv.bridge) tv.setRemoteMode(gameHasKeys() ? 'game' : 'ui'); });
   $effect(() => {
     app.playerOpen = player.open;
     document.documentElement.classList.toggle('player-open', player.open);
@@ -48,8 +51,9 @@
     void library.init();
     app.start();
     gamepadUI.start();
+    // The whole page: the screen and what floats over it (the update banner).
     const pop = gamepadUI.push({
-      root: () => document.getElementById('app-shell'),
+      root: () => document.body,
       onAction: action => {
         if (action.type === 'back' && route.name !== 'home') { router.back('home'); return true; }
         return false;
@@ -108,6 +112,7 @@
   </main>
   <BottomNav />
 </div>
+{#if tv.preview}<div class="tv-preview-badge" id="tv-preview-badge" role="status">ÖNİZLEME #{tv.preview}</div>{/if}
 <Player />
 <Dialog />
 <Toast />
@@ -115,5 +120,7 @@
 
 <style>
   .app-content { min-height: 100vh; min-height: 100dvh; overflow-x: clip; }
+  /* A deploy preview on the TV never passes for the live site. */
+  .tv-preview-badge { position: fixed; top: 18px; right: 28px; z-index: 950; padding: 4px 10px; border-radius: 8px; background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-fg); font-family: var(--mono); font-size: 13px; font-weight: 700; pointer-events: none; }
   @media (min-width: 960px) { .app-content.with-sidebar { margin-left: var(--sidebar-w); } }
 </style>

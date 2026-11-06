@@ -17,11 +17,13 @@
   import { importer } from '../lib/importer.svelte.ts';
   import { tv } from '../lib/tv.svelte.ts';
   import { coverArt } from '../lib/cover-art.svelte.ts';
+  import { gamepadUI } from '../lib/gamepad-ui.svelte.ts';
   import { player, slotName } from '../player/session.svelte.ts';
   import { SYSTEM_CORE_LABELS, CONSOLE_CORES, consoleCoreOrder } from '../player/launch.ts';
   import { crc32, diagnoseSuperMarioBros3Rom, inspectNesRom } from '../nes-rom.js';
   import { ARCADE_CORES, describeArcadeStatus, onlyKeysMissing, missingSummary } from '../arcade.js';
   import { displayLabel } from '../display-modes.js';
+  import { isPalGame } from '../lib/region.ts';
   import { SLOT_IDS, type SlotId, type SlotInfo } from '../lib/types.ts';
 
   const game = $derived(library.get(router.route.id));
@@ -35,8 +37,24 @@
   const hasSram = $derived(game ? library.saveIds.has(game.id) : false);
   let slots = $state<SlotInfo[]>([]);
   let menuOpen = $state(false);
+  let moreButton = $state<HTMLButtonElement>();
+  let popover = $state<HTMLElement>();
+  // The ⋯ menu with a remote or a controller: it takes the focus like a dialog, Back closes it.
+  $effect(() => {
+    const box = popover;
+    if (!box) return;
+    box.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+    const pop = gamepadUI.push({ root: () => box, modal: true, onAction: action => { if (action.type === 'back') { menuOpen = false; return true; } return false; } });
+    return () => {
+      pop();
+      const active = document.activeElement;
+      if (!active || active === document.body || !active.isConnected) untrack(() => moreButton)?.focus({ preventScroll: true });
+    };
+  });
   let sheet = $state<SlotInfo | null>(null);
   let dump = $state<'verified' | 'unverified' | null>(null);
+  /** A PAL (50 Hz) cartridge, read from its header (or its file name). */
+  let palGame = $state<boolean | null>(null);
   let biosInput: HTMLInputElement | null = $state(null);
 
   $effect(() => {
@@ -53,11 +71,13 @@
     const blob = gameBlob;
     const g = untrack(() => library.get(gameId));
     dump = null;
+    palGame = null;
     if (!g || !blob || g.platform === 'ARCADE' || blob.size > 16 * 1024 * 1024) return;
     let alive = true;
     blob.arrayBuffer().then(buffer => {
       if (!alive) return;
       const bytes = new Uint8Array(buffer);
+      palGame = isPalGame(g.platform, bytes, g.fileName || g.title);
       if (g.platform === 'NES') {
         const d = diagnoseSuperMarioBros3Rom(bytes, `${g.fileName || ''} ${g.title}`, inspectNesRom(bytes)) as { status: string } | null;
         dump = d ? (d.status === 'reference-match' ? 'verified' : 'unverified') : null;
@@ -70,6 +90,10 @@
   const slotMap = $derived(new Map(slots.map(s => [s.slot, s])));
   const used = $derived(slots.length);
   const coreLabel = $derived(!game ? '' : CONSOLE_CORES[game.platform] ? (CONSOLE_CORES[game.platform].find(core => core.coreId === consoleCoreOrder(game)[0])?.name || '—') : game.platform === 'ARCADE' ? ((ARCADE_CORES as Record<string, { label: string }>)[game.arcade?.core || '']?.label || 'Arcade') : SYSTEM_CORE_LABELS[game.platform] || '—');
+  // Consoles with two cores: the player picks one per game (remembered like a core chosen after a failure).
+  const coreChoices = $derived(game && CONSOLE_CORES[game.platform]?.length > 1 ? CONSOLE_CORES[game.platform] : null);
+  const activeCore = $derived(game && coreChoices ? consoleCoreOrder(game)[0] : '');
+  const activeNote = $derived(coreChoices?.find(core => core.coreId === activeCore)?.note || '');
   const titleParts = $derived(splitTitle(game?.title || ''));
   const meta = $derived(!game || !look ? '' : [look.label, game.year, game.arcade?.manufacturer, game.arcade?.set ? `${game.arcade.set}.zip` : ''].filter(Boolean).join(' · '));
   const biosMissing = $derived(Boolean(game?.arcade?.bios && !library.biosIds.has(`${game.arcade.bios}.zip`)));
@@ -78,6 +102,17 @@
   const mapper = $derived(game?.romValidation && Number.isInteger(game.romValidation.mapper) ? ` · Mapper ${game.romValidation.mapper}` : '');
 
   function play(options: { fresh?: boolean; slot?: SlotId } = {}) { if (game) void player.start(game.id, options); }
+
+  function setSixtyHz(on: boolean) {
+    if (!game || Boolean(game.sixtyHz) === on) return;
+    void library.patch(game.id, { sixtyHz: on }).catch(error => showToast(`Kaydedilemedi: ${(error as Error)?.message || error}`, 'error'));
+  }
+
+  function chooseCore(coreId: string) {
+    if (!game || coreId === activeCore) return;
+    void library.patch(game.id, game.platform === 'NES' ? { consoleCore: coreId, nesCore: coreId } : { consoleCore: coreId })
+      .catch(error => showToast(`Kaydedilemedi: ${(error as Error)?.message || error}`, 'error'));
+  }
 
   async function remove() {
     if (!game) return;
@@ -131,9 +166,9 @@
           <Icon name={game.favorite ? 'heart-fill' : 'heart'} />
         </button>
         <div class="more-wrap">
-          <button type="button" class="icon-btn" aria-label="Diğer seçenekler" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}><Icon name="more" /></button>
+          <button type="button" class="icon-btn" id="detail-more" aria-label="Diğer seçenekler" aria-expanded={menuOpen} bind:this={moreButton} onclick={() => (menuOpen = !menuOpen)}><Icon name="more" /></button>
           {#if menuOpen}
-            <div class="popover" role="menu">
+            <div class="popover" role="menu" id="detail-menu" bind:this={popover}>
               {#if game.blob && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; exportRom(game); }}><Icon name="download" size={18} />ROM'u indir</button>{/if}
               {#if hasSram && !tv.bridge}<button type="button" role="menuitem" onclick={() => { menuOpen = false; void exportSram(game); }}><Icon name="save" size={18} />Oyun içi kaydı indir (.srm)</button>{/if}
               {#if coverArt.picture(game.id)}<button type="button" role="menuitem" id="remove-cover" onclick={() => { menuOpen = false; void coverArt.remove(game.id).then(() => showToast('Kapak resmi kaldırıldı; bu oyun için yeniden aranmayacak.')); }}><Icon name="close" size={18} />Kapak resmini kaldır</button>{/if}
@@ -243,9 +278,28 @@
           <span class="hint break">{game.fileName || '—'}</span>
           <span class="value">{formatBytes(game.size)}{game.crc32 ? ` · CRC32 ${game.crc32}` : ''}{mapper}</span>
         </div>
+        {#if coreChoices && (palGame || game.sixtyHz)}
+          <div class="row stack" id="region-row">
+            <span class="label">Bölge: Avrupa (PAL)</span>
+            <div class="seg" role="group" aria-label="Oyun hızı" id="sixty-hz">
+              <button type="button" data-hz="50" aria-pressed={!game.sixtyHz} onclick={() => setSixtyHz(false)}>50 Hz · orijinal</button>
+              <button type="button" data-hz="60" aria-pressed={Boolean(game.sixtyHz)} onclick={() => setSixtyHz(true)}>60 Hz · tam hız</button>
+            </div>
+            <span class="hint">{game.sixtyHz ? 'Oyun 60 Hz\'te, ABD sürümünün hızında çalışır. Bir oyun bölge uyarısı gösterir ya da tuhaf davranırsa 50 Hz\'e dön.' : 'Avrupa sürümleri orijinalinde 50 Hz çalışır: oyun ve müzik ABD sürümünden %17 yavaştır. 60 Hz çoğu oyunda sorunsuzdur.'}</span>
+          </div>
+        {/if}
         <div class="row stack">
           <span class="label">Emülatör</span>
-          <span class="hint">{coreLabel} · EmulatorJS 4.2.3{game.arcade ? ` · ${describeArcadeStatus(game.arcade, { biosInstalled: !biosMissing, parentInstalled: !parentMissing })}` : ''}</span>
+          {#if coreChoices}
+            <div class="seg" role="group" aria-label="Emülatör" id="core-choice">
+              {#each coreChoices as core (core.coreId)}
+                <button type="button" data-core={core.coreId} aria-pressed={core.coreId === activeCore} onclick={() => chooseCore(core.coreId)}>{core.name}</button>
+              {/each}
+            </div>
+            <span class="hint">{coreLabel}: {activeNote} · EmulatorJS 4.2.3 · kayıt noktaları alındıkları emülatörde yüklenir</span>
+          {:else}
+            <span class="hint">{coreLabel} · EmulatorJS 4.2.3{game.arcade ? ` · ${describeArcadeStatus(game.arcade, { biosInstalled: !biosMissing, parentInstalled: !parentMissing })}` : ''}</span>
+          {/if}
         </div>
       </div>
     </section>

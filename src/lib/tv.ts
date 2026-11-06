@@ -12,9 +12,64 @@ export interface TvBridge {
   stopUpload(): void;
   setKeepScreenOn(on: boolean): void;
   exit(): void;
+  /** The TV's display mode (app 1.2+): JSON, see TvDisplay. */
+  display?(): string;
+  /** Opens the live site ('live') or a pull request's deploy preview (its number) (app 1.2+). */
+  openSite?(which: string): boolean;
+  /** App 1.3+: 'ui' the page takes the remote's keys on its screens, 'game' a game has them. */
+  setRemoteMode?(mode: 'ui' | 'game' | 'off'): void;
+  /** App 1.3+: the on-screen keyboard for the focused text field. */
+  showKeyboard?(): void;
+  hideKeyboard?(): void;
+  /** App 1.3+: the last key presses and where they went (JSON, see TvKeyLog). */
+  keyLog?(): string;
+  /** App 1.3+: the TV's keyboards, remotes and controllers (JSON, see TvInputDevice). */
+  inputDevices?(): string;
 }
 
-export interface TvInfo { app: string; versionName: string; versionCode: number; sdk: number; model: string; device: string; address: string | null; filePicker: boolean }
+/** A key press as the TV app saw it: route is where it went ("arayüz", "kontrolcü", "geri", "menü", "sayfa"). */
+export interface TvKey { n: number; t: number; key: string; device: string; source: string; gamepadSource: boolean; sticks: boolean; buttons: boolean; mode: string; route: string }
+export interface TvKeyLog { n: number; keys: TvKey[] }
+export interface TvInputDevice { name: string; kind: string; source: string; virtual: boolean; sticks: boolean }
+
+export interface TvInfo { app: string; versionName: string; versionCode: number; sdk: number; model: string; device: string; address: string | null; filePicker: boolean; preview?: number; sites?: boolean }
+/** mode "3840x2160@60.00"; requested: the mode the app asked for so games run at 60 Hz ('' if none). */
+export interface TvDisplay { mode: string; refresh: number; width: number; height: number; requested: string; modes: string[] }
+
+/** The emulator advances one frame per screen refresh: how much slower than 60 Hz games play (0–1). */
+export function refreshSlowdown(refresh: number): number {
+  if (!Number.isFinite(refresh) || refresh <= 0 || Math.abs(refresh - 60) <= 0.5) return 0;
+  return refresh < 60 ? 1 - refresh / 60 : 0;
+}
+
+/** Picture heights the TV can draw the game at (lines), largest first. */
+export const TV_PICTURE_LINES: readonly number[] = Object.freeze([1080, 720, 480]);
+export type TvPicture = 'auto' | '1080' | '720' | '480';
+
+/** Lines the TV draws: the player's choice, else this TV's measured best, else 1080. */
+export function tvPictureLines(choice: string, measured: number): number {
+  if (choice === '1080' || choice === '720' || choice === '480') return Number(choice);
+  return TV_PICTURE_LINES.includes(measured) ? measured : 1080;
+}
+
+/**
+ * This TV's best picture height from the speed test at each height: the largest that runs a 60 Hz
+ * game with 1.3× headroom; if none does, the fastest (a larger one when within 5 % of it).
+ */
+export function chooseTvPicture(results: ReadonlyArray<{ lines: number; fps: number }>, rate = 60): number {
+  const valid = results.filter(r => TV_PICTURE_LINES.includes(r.lines) && Number.isFinite(r.fps) && r.fps > 0);
+  if (!valid.length) return 0;
+  const enough = valid.filter(r => r.fps >= rate * 1.3).sort((a, b) => b.lines - a.lines);
+  if (enough.length) return enough[0].lines;
+  const best = Math.max(...valid.map(r => r.fps));
+  return valid.filter(r => r.fps >= best * 0.95).sort((a, b) => b.lines - a.lines)[0].lines;
+}
+
+/** A pull request number typed on the TV (1–999999), or '' if it is not one. */
+export function previewNumber(text: string): string {
+  const value = String(text ?? '').trim();
+  return /^[1-9]\d{0,5}$/.test(value) ? value : '';
+}
 export interface InboxFile { id: string; name: string; size: number; time: number }
 export interface UploadInfo { url: string; address: string; port: number; code: string }
 

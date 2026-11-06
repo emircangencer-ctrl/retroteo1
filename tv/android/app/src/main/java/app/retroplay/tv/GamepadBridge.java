@@ -15,7 +15,7 @@ import java.util.Map;
  * The Activity sees every controller event before the WebView. Controller buttons, the d-pad and
  * the sticks are consumed here (so a controller d-pad never also arrives as arrow keys, and an
  * unhandled B never turns into Back), and the page polls the state through {@link #json()}.
- * The TV remote is not a controller: its keys go on to the WebView as ordinary keys.
+ * The TV remote is not a controller: KeyRoute decides which device is which.
  */
 final class GamepadBridge {
     static final int BUTTONS = 17;
@@ -72,23 +72,24 @@ final class GamepadBridge {
     }
 
     /**
-     * A key event this bridge takes over. Gamepad buttons always; the d-pad and Back only from a
-     * device that is really a controller, because some TV remotes (and virtual devices) carry the
-     * gamepad source bit too and their Back must stay Back.
+     * Sticks or a hat switch: a controller. Remotes have neither, even those that report the
+     * gamepad source or claim A and B keys (see KeyRoute).
      */
-    static boolean wants(KeyEvent event) {
-        int code = event.getKeyCode();
-        if (buttonFor(code) < 0 || !isControllerSource(event.getSource())) return false;
-        if (KeyEvent.isGamepadButton(code)) return true;
-        return looksLikeController(event.getDevice());
+    static boolean hasSticks(InputDevice device) {
+        if (device == null || device.isVirtual()) return false;
+        return device.getMotionRange(MotionEvent.AXIS_X, InputDevice.SOURCE_JOYSTICK) != null
+            || device.getMotionRange(MotionEvent.AXIS_HAT_X, InputDevice.SOURCE_JOYSTICK) != null;
     }
 
-    /** Sticks or A/B buttons: a controller, not a remote. */
-    static boolean looksLikeController(InputDevice device) {
-        if (device == null || device.isVirtual()) return false;
-        if (device.getMotionRange(MotionEvent.AXIS_X, InputDevice.SOURCE_JOYSTICK) != null) return true;
-        boolean[] keys = device.hasKeys(KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B);
-        return keys.length == 2 && keys[0] && keys[1];
+    /** Devices that have pressed a controller button (KeyRoute.isControllerButton). */
+    private final java.util.Set<Integer> buttonDevices = new java.util.HashSet<>();
+
+    synchronized void sawButton(int deviceId) {
+        buttonDevices.add(deviceId);
+    }
+
+    synchronized boolean pressedButtons(int deviceId) {
+        return buttonDevices.contains(deviceId);
     }
 
     /**
@@ -100,6 +101,7 @@ final class GamepadBridge {
     }
 
     synchronized void deviceRemoved(int deviceId) {
+        buttonDevices.remove(deviceId);
         if (pads.remove(deviceId) != null) changed();
     }
 

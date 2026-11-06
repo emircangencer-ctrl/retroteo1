@@ -29,7 +29,10 @@ export function startServer(port = 0) {
   return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}/` })));
 }
 
-export async function newPage(browser, base, { mobile = false, serviceWorkers = 'block', init = null, viewport = null } = {}) {
+// render: 'full' unless a scenario tests the picture size limit. CI draws WebGL in software
+// (SwiftShader), where RetroPlay limits the picture to 480 lines ('auto'); real phones and TVs draw
+// with their GPU at full resolution, which is what the picture scenarios check.
+export async function newPage(browser, base, { mobile = false, serviceWorkers = 'block', init = null, viewport = null, render = 'full' } = {}) {
   const context = await browser.newContext({
     viewport: viewport || (mobile ? { width: 393, height: 873 } : { width: 1280, height: 860 }),
     deviceScaleFactor: mobile ? 2.75 : 1, isMobile: mobile, hasTouch: mobile,
@@ -43,6 +46,7 @@ export async function newPage(browser, base, { mobile = false, serviceWorkers = 
     coverRequests.push(route.request().url());
     return route.fulfill({ status: 200, headers: { 'content-type': 'image/png', 'access-control-allow-origin': '*' }, body: COVER_PNG });
   });
+  await context.addInitScript(value => { try { localStorage.setItem('retroplay-render', value); } catch {} }, render);
   if (init) await context.addInitScript(init);
   const page = await context.newPage();
   page.on('dialog', dialog => dialog.accept());

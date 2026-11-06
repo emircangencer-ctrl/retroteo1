@@ -1,0 +1,296 @@
+From 51f76671407a497dcf372e82d273f01a642263ed Mon Sep 17 00:00:00 2001
+From: BinBashBanana <51469593+BinBashBanana@users.noreply.github.com>
+Date: Mon, 17 Nov 2025 14:02:06 -0800
+Subject: [PATCH] Fix emscripten
+
+---
+ Makefile.libretro                             |  1 +
+ cpu/cz80/cz80.c                               |  2 +-
+ cpu/cz80/cz80macro.h                          |  2 +-
+ pico/32x/memory.c                             |  8 ++--
+ pico/memory.c                                 | 38 +++++++++++--------
+ pico/memory.h                                 | 24 ++++++++----
+ pico/z80if.c                                  |  2 +-
+ .../libretro/libretro-common/include/memmap.h |  2 +-
+ 8 files changed, 48 insertions(+), 31 deletions(-)
+
+diff --git a/Makefile.libretro b/Makefile.libretro
+index 2a80397..9a24ebf 100644
+--- a/Makefile.libretro
++++ b/Makefile.libretro
+@@ -443,6 +443,7 @@ else ifneq (,$(findstring armv,$(platform)))
+ else ifeq ($(platform), emscripten) 
+ 	TARGET := $(TARGET_NAME)_libretro_$(platform).bc
+ 	ARCH = unknown
++	NO_ALIGN_FUNCTIONS = 1
+ 	STATIC_LINKING_LINK = 1
+ 	STATIC_LINKING = 1
+ 
+diff --git a/cpu/cz80/cz80.c b/cpu/cz80/cz80.c
+index 888478e..25e1081 100644
+--- a/cpu/cz80/cz80.c
++++ b/cpu/cz80/cz80.c
+@@ -221,7 +221,7 @@ static inline unsigned char picodrive_read(unsigned short a)
+ {
+ 	uptr v = z80_read_map[a >> Z80_MEM_SHIFT];
+ 	if (map_flag_set(v))
+-		return ((z80_read_f *)(v << 1))(a);
++		return ((z80_read_f *)(map_to_function(v)))(a);
+ 	return *(unsigned char *)((v << 1) + a);
+ }
+ #endif
+diff --git a/cpu/cz80/cz80macro.h b/cpu/cz80/cz80macro.h
+index edd6d9d..b789b42 100644
+--- a/cpu/cz80/cz80macro.h
++++ b/cpu/cz80/cz80macro.h
+@@ -67,7 +67,7 @@
+ 	unsigned char d = D; \
+ 	uptr v = z80_write_map[a >> Z80_MEM_SHIFT]; \
+ 	if (map_flag_set(v)) \
+-		((z80_write_f *)(v << 1))(a, d); \
++		((z80_write_f *)(map_to_function(v)))(a, d); \
+ 	else \
+ 		*(unsigned char *)((v << 1) + a) = d; \
+ }
+diff --git a/pico/32x/memory.c b/pico/32x/memory.c
+index 7e5f38a..241299e 100644
+--- a/pico/32x/memory.c
++++ b/pico/32x/memory.c
+@@ -1928,7 +1928,7 @@ u32 REGPARM(2) p32x_sh2_read8(u32 a, SH2 *sh2)
+   if (!map_flag_set(p))
+     return *(s8 *)((p << 1) + MEM_BE2(a & sh2_map->mask));
+   else
+-    return ((sh2_read_handler *)(p << 1))(a, sh2);
++    return ((sh2_read_handler *)(map_to_function(p)))(a, sh2);
+ }
+ 
+ u32 REGPARM(2) p32x_sh2_read16(u32 a, SH2 *sh2)
+@@ -1941,7 +1941,7 @@ u32 REGPARM(2) p32x_sh2_read16(u32 a, SH2 *sh2)
+   if (!map_flag_set(p))
+     return *(s16 *)((p << 1) + (a & sh2_map->mask));
+   else
+-    return ((sh2_read_handler *)(p << 1))(a, sh2);
++    return ((sh2_read_handler *)(map_to_function(p)))(a, sh2);
+ }
+ 
+ u32 REGPARM(2) p32x_sh2_read32(u32 a, SH2 *sh2)
+@@ -1955,7 +1955,7 @@ u32 REGPARM(2) p32x_sh2_read32(u32 a, SH2 *sh2)
+     u32 *pd = (u32 *)((p << 1) + (a & sh2_map->mask));
+     return CPU_BE2(*pd);
+   } else
+-    return ((sh2_read_handler *)(p << 1))(a, sh2);
++    return ((sh2_read_handler *)(map_to_function(p)))(a, sh2);
+ }
+ 
+ void REGPARM(3) p32x_sh2_write8(u32 a, u32 d, SH2 *sh2)
+@@ -2299,7 +2299,7 @@ static void get_bios(void)
+ }
+ 
+ #define MAP_MEMORY(m) ((uptr)(m) >> 1)
+-#define MAP_HANDLER(h) ( ((uptr)(h) >> 1) | ((uptr)1 << (sizeof(uptr) * 8 - 1)) )
++#define MAP_HANDLER(h) ( ((uptr)(h) >> MAP_FUNCTION_SHIFT) | ((uptr)1 << (sizeof(uptr) * 8 - 1)) )
+ 
+ static sh2_memmap msh2_read8_map[0x80], msh2_read16_map[0x80],  msh2_read32_map[0x80];
+ static sh2_memmap ssh2_read8_map[0x80], ssh2_read16_map[0x80],  ssh2_read32_map[0x80];
+diff --git a/pico/memory.c b/pico/memory.c
+index 2526012..371da60 100644
+--- a/pico/memory.c
++++ b/pico/memory.c
+@@ -41,18 +41,26 @@ static void xmap_set(uptr *map, int shift, u32 start_addr, u32 end_addr,
+     return;
+   }
+ 
+-  if (addr & 1) {
+-    elprintf(EL_STATUS|EL_ANOMALY, "xmap_set: ptr is not aligned: %08lx", addr);
+-    return;
++  if (is_func) {
++    if (addr & ((1 << MAP_FUNCTION_SHIFT) - 1)) {
++      elprintf(EL_STATUS|EL_ANOMALY, "xmap_set: function ptr is not aligned: %08lx", addr);
++      return;
++    }
++  } else {
++    if (addr & 1) {
++      elprintf(EL_STATUS|EL_ANOMALY, "xmap_set: data ptr is not aligned: %08lx", addr);
++      return;
++    }
+   }
+ 
+   if (!is_func)
+     addr -= start_addr;
+ 
+   for (i = start_addr >> shift; i <= end_addr >> shift; i++) {
+-    map[i] = addr >> 1;
+     if (is_func)
+-      map[i] |= MAP_FLAG;
++      map[i] = (addr >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
++    else
++      map[i] = addr >> 1;
+   }
+ }
+ 
+@@ -168,8 +176,8 @@ void cpu68k_map_read_funcs(u32 start_addr, u32 end_addr, u32 (*r8)(u32), u32 (*r
+     r16map = s68k_read16_map;
+   }
+ 
+-  ar8 = (ar8 >> 1 ) | MAP_FLAG;
+-  ar16 = (ar16 >> 1 ) | MAP_FLAG;
++  ar8 = (ar8 >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
++  ar16 = (ar16 >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
+   for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+     r8map[i] = ar8, r16map[i] = ar16;
+ }
+@@ -194,10 +202,10 @@ void cpu68k_map_all_funcs(u32 start_addr, u32 end_addr, u32 (*r8)(u32), u32 (*r1
+     w16map = s68k_write16_map;
+   }
+ 
+-  ar8 = (ar8 >> 1 ) | MAP_FLAG;
+-  ar16 = (ar16 >> 1 ) | MAP_FLAG;
+-  aw8 = (aw8 >> 1 ) | MAP_FLAG;
+-  aw16 = (aw16 >> 1 ) | MAP_FLAG;
++  ar8 = (ar8 >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
++  ar16 = (ar16 >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
++  aw8 = (aw8 >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
++  aw16 = (aw16 >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
+   for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+     r8map[i] = ar8, r16map[i] = ar16, w8map[i] = aw8, w16map[i] = aw16;
+ }
+@@ -246,19 +254,19 @@ void m68k_map_unmap(u32 start_addr, u32 end_addr)
+ 
+   addr = (uptr)m68k_unmapped_read8;
+   for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+-    m68k_read8_map[i] = (addr >> 1) | MAP_FLAG;
++    m68k_read8_map[i] = (addr >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
+ 
+   addr = (uptr)m68k_unmapped_read16;
+   for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+-    m68k_read16_map[i] = (addr >> 1) | MAP_FLAG;
++    m68k_read16_map[i] = (addr >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
+ 
+   addr = (uptr)m68k_unmapped_write8;
+   for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+-    m68k_write8_map[i] = (addr >> 1) | MAP_FLAG;
++    m68k_write8_map[i] = (addr >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
+ 
+   addr = (uptr)m68k_unmapped_write16;
+   for (i = start_addr >> shift; i <= end_addr >> shift; i++)
+-    m68k_write16_map[i] = (addr >> 1) | MAP_FLAG;
++    m68k_write16_map[i] = (addr >> MAP_FUNCTION_SHIFT) | MAP_FLAG;
+ }
+ 
+ #ifndef _ASM_MEMORY_C
+diff --git a/pico/memory.h b/pico/memory.h
+index 27e2940..9b4abe7 100644
+--- a/pico/memory.h
++++ b/pico/memory.h
+@@ -57,6 +57,14 @@ void m68k_map_unmap(u32 start_addr, u32 end_addr);
+ #define MAP_FLAG ((uptr)1 << (sizeof(uptr) * 8 - 1))
+ #define map_flag_set(x) ((x) & MAP_FLAG)
+ 
++#ifdef __EMSCRIPTEN__
++#define MAP_FUNCTION_SHIFT 0
++#define map_to_function(x) ((x) & ~MAP_FLAG)
++#else
++#define MAP_FUNCTION_SHIFT 1
++#define map_to_function(x) ((x) << MAP_FUNCTION_SHIFT)
++#endif
++
+ #define MAKE_68K_READ8(name, map)               \
+ u32 name(u32 a)                                 \
+ {                                               \
+@@ -64,7 +72,7 @@ u32 name(u32 a)                                 \
+   a &= 0x00ffffff;                              \
+   v = map[a >> M68K_MEM_SHIFT];                 \
+   if (map_flag_set(v))                          \
+-    return ((cpu68k_read_f *)(v << 1))(a);      \
++    return ((cpu68k_read_f *)(map_to_function(v)))(a); \
+   else                                          \
+     return *(u8 *)((v << 1) + MEM_BE2(a));      \
+ }
+@@ -76,7 +84,7 @@ u32 name(u32 a)                                 \
+   a &= 0x00fffffe;                              \
+   v = map[a >> M68K_MEM_SHIFT];                 \
+   if (map_flag_set(v))                          \
+-    return ((cpu68k_read_f *)(v << 1))(a);      \
++    return ((cpu68k_read_f *)(map_to_function(v)))(a); \
+   else                                          \
+     return *(u16 *)((v << 1) + a);              \
+ }
+@@ -88,13 +96,13 @@ u32 name(u32 a)                                 \
+   u32 d;                                        \
+   a &= 0x00fffffe;                              \
+   v = map[a >> M68K_MEM_SHIFT];                 \
+-  vs = v << 1;                                  \
+   if (map_flag_set(v)) {                        \
++    vs = map_to_function(v);                    \
+     d  = ((cpu68k_read_f *)vs)(a) << 16;        \
+     d |= ((cpu68k_read_f *)vs)(a + 2);          \
+   }                                             \
+   else {                                        \
+-    u16 *m = (u16 *)(vs + a);                   \
++    u16 *m = (u16 *)((v << 1) + a);             \
+     d = (m[0] << 16) | m[1];                    \
+   }                                             \
+   return d;                                     \
+@@ -107,7 +115,7 @@ void name(u32 a, u8 d)                          \
+   a &= 0x00ffffff;                              \
+   v = map[a >> M68K_MEM_SHIFT];                 \
+   if (map_flag_set(v))                          \
+-    ((cpu68k_write_f *)(v << 1))(a, d);         \
++    ((cpu68k_write_f *)(map_to_function(v)))(a, d); \
+   else                                          \
+     *(u8 *)((v << 1) + MEM_BE2(a)) = d;         \
+ }
+@@ -119,7 +127,7 @@ void name(u32 a, u16 d)                         \
+   a &= 0x00fffffe;                              \
+   v = map[a >> M68K_MEM_SHIFT];                 \
+   if (map_flag_set(v))                          \
+-    ((cpu68k_write_f *)(v << 1))(a, d);         \
++    ((cpu68k_write_f *)(map_to_function(v)))(a, d); \
+   else                                          \
+     *(u16 *)((v << 1) + a) = d;                 \
+ }
+@@ -130,13 +138,13 @@ void name(u32 a, u32 d)                         \
+   uptr v, vs;                                   \
+   a &= 0x00fffffe;                              \
+   v = map[a >> M68K_MEM_SHIFT];                 \
+-  vs = v << 1;                                  \
+   if (map_flag_set(v)) {                        \
++    vs = map_to_function(v);                    \
+     ((cpu68k_write_f *)vs)(a, d >> 16);         \
+     ((cpu68k_write_f *)vs)(a + 2, d);           \
+   }                                             \
+   else {                                        \
+-    u16 *m = (u16 *)(vs + a);                   \
++    u16 *m = (u16 *)((v << 1) + a);             \
+     m[0] = d >> 16;                             \
+     m[1] = d;                                   \
+   }                                             \
+diff --git a/pico/z80if.c b/pico/z80if.c
+index b730bfa..8165569 100644
+--- a/pico/z80if.c
++++ b/pico/z80if.c
+@@ -19,7 +19,7 @@ u32 z80_read(u32 a)
+   a &= 0x00ffff;
+   v = z80_read_map[a >> Z80_MEM_SHIFT];
+   if (map_flag_set(v))
+-    return ((z80_read_f *)(v << 1))(a);
++    return ((z80_read_f *)(map_to_function(v)))(a);
+   else
+     return *(u8 *)((v << 1) + a);
+ }
+diff --git a/platform/libretro/libretro-common/include/memmap.h b/platform/libretro/libretro-common/include/memmap.h
+index 8897877..5c03816 100644
+--- a/platform/libretro/libretro-common/include/memmap.h
++++ b/platform/libretro/libretro-common/include/memmap.h
+@@ -26,7 +26,7 @@
+ #include <stdio.h>
+ #include <stdint.h>
+ 
+-#if defined(PSP) || defined(PS2) || defined(GEKKO) || defined(VITA) || defined(_XBOX) || defined(_3DS) || defined(WIIU) || defined(SWITCH) || defined(HAVE_LIBNX) || defined(__PS3__) || defined(__PSL1GHT__)
++#if defined(PSP) || defined(PS2) || defined(GEKKO) || defined(VITA) || defined(_XBOX) || defined(_3DS) || defined(WIIU) || defined(SWITCH) || defined(HAVE_LIBNX) || defined(__PS3__) || defined(__PSL1GHT__) || defined(__EMSCRIPTEN__)
+ /* No mman available */
+ #elif defined(_WIN32) && !defined(_XBOX)
+ #include <windows.h>
+-- 
+2.43.0
+

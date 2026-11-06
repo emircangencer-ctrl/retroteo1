@@ -1,0 +1,228 @@
+name: RetroPlay fast cores
+
+# The console and arcade cores RetroPlay serves instead of the EmulatorJS 4.2.3 packages: the same
+# sources (the commits the stock 4.2.3 cores carry) and the same toolchain (emsdk 3.1.74,
+# EmulatorJS/RetroArch 6dd4353), linked WITHOUT Asyncify. EmulatorJS links every core with full
+# Asyncify (needed because its OpenAL audio sleeps inside the frame); here RetroArch's own Web Audio
+# driver is used with its "fake block" (a full audio buffer makes the main loop wait through its
+# timing instead of sleeping), which RetroArch wires for exactly this case. Measurements (cores-speed.yml
+# rounds 5-9, interleaved A/B against the stock packages) are in TEST-REPORT.md.
+#
+# Each run publishes one release; scripts/emulatorjs-runtime.mjs pins the files by sha512 and
+# serves them under the stock names (with new build reports, so EmulatorJS's own core cache
+# notices the change).
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - ".github/workflows/cores-fast.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cores-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EMSDK_VERSION: "3.1.74"
+  RETROARCH_REPO: https://github.com/EmulatorJS/RetroArch.git
+  RETROARCH_COMMIT: 6dd4353937ef48b6ec0bfbdbb15d1c5992d86927
+
+jobs:
+  core:
+    name: ${{ matrix.core }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - core: fceumm
+            repo: https://github.com/EmulatorJS/libretro-fceumm.git
+            commit: d9d7e141274d07186b6a871ca2919b6f13cfb2f9
+            makefile: Makefile.libretro
+            license: Copying
+            corejson: '{"name":"fceumm","extensions":["fds","nes","unif","unf"],"options":{},"save":"srm","license":"Copying","repo":"https://github.com/EmulatorJS/libretro-fceumm"}'
+          - core: nestopia
+            repo: https://github.com/EmulatorJS/nestopia.git
+            commit: 6b08ec9148bd4cedc893ed0c97bc64061d044399
+            makefile: Makefile
+            buildpath: libretro
+            license: COPYING
+            corejson: '{"name":"nestopia","extensions":["fds","nes","unif","unf"],"options":{},"save":"srm","license":"COPYING","repo":"https://github.com/EmulatorJS/nestopia"}'
+          - core: snes9x
+            repo: https://github.com/EmulatorJS/snes9x.git
+            commit: 6ca2343e5f3b0acbea49ca958251e3a0af58a81d
+            makefile: Makefile
+            buildpath: libretro
+            license: LICENSE
+            corejson: '{"name":"snes9x","extensions":["smc","sfc","swc","fig","bs","st"],"options":{},"save":"srm","license":"LICENSE","repo":"https://github.com/EmulatorJS/snes9x"}'
+          # Snes9x 2005 with blargg's audio: a lighter Super Nintendo core (+60 % against the stock
+          # Snes9x), offered per game.
+          - core: snes9x2005_plus
+            repo: https://github.com/libretro/snes9x2005.git
+            commit: a79dfe9047e7fec58808aefe48ad2bf499c7af11
+            makefile: Makefile
+            make_args: USE_BLARGG_APU=1
+            license: copyright
+            corejson: '{"name":"snes9x2005_plus","extensions":["smc","sfc","swc","fig","bs","st"],"options":{},"save":"srm","license":"copyright","repo":"https://github.com/libretro/snes9x2005"}'
+          # PicoDrive 2.01 (the stock version) with EmulatorJS's own Emscripten fix (their fork,
+          # 51f7667): wasm function pointers are table indexes, often odd, which PicoDrive's memory
+          # map stored shifted by one bit; and libretro-common's mmap (Emscripten refuses address
+          # hints). Plus the YM2612 read handler's missing address parameter (wasm traps indirect
+          # calls whose signature differs). RetroArch keeps CHD; the core drops its own copy
+          # (cartridges never use it).
+          - core: picodrive
+            repo: https://github.com/EmulatorJS/picodrive.git
+            commit: 09d3cb634c337aa3a1ed6575267d37bc1fdf064e
+            makefile: Makefile.libretro
+            make_args: use_libchdr=0 NO_ALIGN_FUNCTIONS=1
+            keep_chd: true
+            patch: cores/picodrive/emscripten-function-pointers.patch cores/picodrive/z80-handler-signatures.patch
+            patch_exclude: Makefile.libretro
+            license: COPYING
+            corejson: '{"name":"picodrive","extensions":["bin","gen","smd","md","32x","cue","iso","sms","68k","chd"],"options":{},"save":"srm","license":"COPYING","repo":"https://github.com/EmulatorJS/picodrive"}'
+          - core: fbneo
+            repo: https://github.com/EmulatorJS/FBNeo.git
+            commit: dedd04f2de6423970e18a586991f87812034dc4f
+            makefile: Makefile
+            buildpath: src/burner/libretro
+            license: src/license.txt
+            corejson: '{"name":"fbneo","extensions":["zip","7z"],"options":{},"save":false,"license":"src/license.txt","repo":"https://github.com/EmulatorJS/FBNeo"}'
+          - core: fbalpha2012_cps2
+            repo: https://github.com/EmulatorJS/fbalpha2012_cps2.git
+            commit: 3fb5b89d2ab719e45e814e1ad0b5ff721bffdff2
+            makefile: makefile.libretro
+            license: README.md
+            corejson: '{"name":"fbalpha2012_cps2","extensions":["zip"],"options":{},"save":false,"license":"","repo":"https://github.com/EmulatorJS/fbalpha2012_cps2"}'
+          - core: mame2003_plus
+            repo: https://github.com/EmulatorJS/mame2003-plus-libretro.git
+            commit: 3a72dae33dfae65871158f03dbc1e849d74b4060
+            makefile: Makefile
+            license: LICENSE.md
+            corejson: '{"name":"mame2003_plus","extensions":["zip"],"options":{},"save":false,"license":"LICENSE.md","repo":"https://github.com/EmulatorJS/mame2003-plus-libretro"}'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: retroplay
+          sparse-checkout: cores
+      - name: Tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full ccache >/dev/null
+      - name: Cache compiler output
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: ccache-fast-${{ matrix.core }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-fast-${{ matrix.core }}-
+            ccache-speed-${{ matrix.core }}-
+      - name: Cache emsdk
+        uses: actions/cache@v5
+        with:
+          path: emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}
+      - name: emsdk ${{ env.EMSDK_VERSION }}
+        run: |
+          if [ ! -x emsdk/emsdk ]; then git clone -q --depth 1 https://github.com/emscripten-core/emsdk.git emsdk; fi
+          ./emsdk/emsdk install "$EMSDK_VERSION" >/dev/null
+          ./emsdk/emsdk activate "$EMSDK_VERSION" >/dev/null
+      - name: Sources
+        run: |
+          fetch() { mkdir -p "$1" && git -C "$1" init -q && git -C "$1" fetch -q --depth 1 "$2" "$3" && git -C "$1" checkout -q FETCH_HEAD; echo "$1 $(git -C "$1" rev-parse HEAD)"; }
+          fetch RetroArch "$RETROARCH_REPO" "$RETROARCH_COMMIT"
+          fetch core "${{ matrix.repo }}" "${{ matrix.commit }}"
+          git -C core submodule update -q --init --depth 1 || git -C core submodule update -q --init
+          for p in ${{ matrix.patch }}; do
+            git -C core apply ${{ matrix.patch_exclude && format('--exclude={0}', matrix.patch_exclude) || '' }} "$GITHUB_WORKSPACE/retroplay/$p"
+            echo "patched with $p"
+          done
+      - name: Build the core
+        working-directory: core/${{ matrix.buildpath || '.' }}
+        run: |
+          source "$GITHUB_WORKSPACE/emsdk/emsdk_env.sh" >/dev/null
+          export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
+          emmake make -f ${{ matrix.makefile }} -j"$(nproc)" platform=emscripten ${{ matrix.make_args }} > build.log 2>&1 || { grep -E "error" build.log | head -n 10 | sed 's/^/::error::/'; tail -n 40 build.log; exit 1; }
+          mkdir -p "$GITHUB_WORKSPACE/core.bc.d" && cp ${{ matrix.core }}_libretro_emscripten.bc "$GITHUB_WORKSPACE/core.bc.d/"
+          ls -la "$GITHUB_WORKSPACE/core.bc.d"
+      - name: Link without Asyncify (WebGL 2 and WebGL 1)
+        working-directory: RetroArch/emulatorjs
+        run: |
+          source ../../emsdk/emsdk_env.sh >/dev/null
+          export EM_COMPILER_WRAPPER=ccache CCACHE_DIR=~/.cache/ccache CCACHE_COMPILERCHECK=content
+          # No Asyncify, RetroArch's Web Audio driver instead of OpenAL (EmulatorJS's script fixes both).
+          sed -i 's/^  async=1$/  async=0/' build-emulatorjs.sh
+          sed -i 's/-f Makefile.emulatorjs HAVE_CHD=/-f Makefile.emulatorjs HAVE_AL=0 HAVE_RWEBAUDIO=1 HAVE_CHD=/' build-emulatorjs.sh
+          # The Web Audio driver is not in EmulatorJS's object list at this commit.
+          printf '\nifeq ($(EMULATORJS), 1)\nifeq ($(HAVE_RWEBAUDIO), 1)\nOBJ += audio/drivers/rwebaudio.o\nendif\nendif\n' >> ../Makefile.common
+          # Its "fake block" (wired in retroarch.c's main loop); the Makefile only turns it on for
+          # AudioWorklet builds.
+          printf '\nifeq ($(HAVE_RWEBAUDIO), 1)\nifneq ($(ASYNC), 1)\nDEFINES += -DEMSCRIPTEN_AUDIO_EXTERNAL_BLOCK -DEMSCRIPTEN_AUDIO_FAKE_BLOCK -DEMSCRIPTEN_AUDIO_EXTERNAL_WRITE_BLOCK\nendif\nendif\n' >> ../Makefile.emulatorjs
+          if [ "${{ matrix.keep_chd }}" != true ] && [ "${{ matrix.core }}" = picodrive ]; then sed -i 's/^noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed")$/noCHD=("mame2003" "mame2003_plus" "pcsx_rearmed" "picodrive")/' build-emulatorjs.sh; fi
+          # The Web Audio library asks platform_emscripten.c (not in EmulatorJS builds) for the
+          # browser; ask the browser. Its sources go through one gain node, so the player's volume
+          # reaches them (Module.RWA.gain).
+          python3 - <<'PY'
+          p = '../emscripten/library_rwebaudio.js'
+          s = open(p).read()
+          s = s.replace(', "platform_emscripten_get_browser"]', ']')
+          s = s.replace('(_platform_emscripten_get_browser() == RWA.PLATFORM_EMSCRIPTEN_BROWSER_CHROMIUM)', '(/Chrome\\//.test(navigator.userAgent))')
+          s = s.replace('RWA.context = new ac();', 'RWA.context = new ac(); RWA.gain = RWA.context.createGain(); RWA.gain.connect(RWA.context.destination); Module.RWA = RWA;')
+          s = s.replace('bufferSource.connect(RWA.context.destination);', 'bufferSource.connect(RWA.gain);')
+          assert 'platform_emscripten_get_browser' not in s and 'Module.RWA = RWA' in s and 'connect(RWA.gain)' in s, 'rwebaudio patch'
+          open(p, 'w').write(s)
+          PY
+          grep -n '^  async=\|HAVE_RWEBAUDIO=1' build-emulatorjs.sh | head -n 3
+          set -o pipefail
+          OUT="$GITHUB_WORKSPACE/out"; mkdir -p "$OUT"
+          for flags in "" "--legacy"; do
+            cp "$GITHUB_WORKSPACE"/core.bc.d/*_emscripten.bc .
+            emmake ./build-emulatorjs.sh --clean $flags > "link$flags.log" 2>&1 || { grep -iE "error|undefined" "link$flags.log" | head -n 20 | sed 's/^/::error::/'; tail -n 30 "link$flags.log"; exit 1; }
+            grep -E "^ASYNC|BUILD COMMAND" "link$flags.log" | head -n 2
+            legacy=""; [ "$flags" = --legacy ] && legacy="-legacy"
+            cp "../../EmulatorJS/data/cores/${{ matrix.core }}${legacy}-wasm.data" "$OUT/${{ matrix.core }}${legacy}-wasm.data"
+            rm -f *_emscripten.bc
+          done
+          ls -la "$OUT"
+      - name: Pack
+        run: |
+          cd out
+          mkdir pkg
+          # EmulatorJS reads core.json (extensions, save file type), build.json and license.txt from the package.
+          echo '${{ matrix.corejson }}' | python3 -c "import json,sys; d=json.load(sys.stdin); d['commit']='${{ matrix.commit }}'; d['retroplay']='no Asyncify, Web Audio fake block (RetroArch ${RETROARCH_COMMIT::9}, emsdk ${EMSDK_VERSION})'; json.dump(d, open('pkg/core.json','w'))"
+          printf '{\n    "minimumEJSVersion": "4.2.2",\n    "version": "2.0.2"\n}\n' > pkg/build.json
+          cp "../core/${{ matrix.license }}" pkg/license.txt 2>/dev/null || echo "See ${{ matrix.repo }} at ${{ matrix.commit }}" > pkg/license.txt
+          for f in *-wasm.data; do (cd pkg && 7z a -t7z "../$f" core.json license.txt build.json >/dev/null); done
+          rm -rf pkg
+          # A build report with this build's time: EmulatorJS caches cores by the report's buildStart.
+          now=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
+          printf '{ "core": "%s", "buildStart": "%s", "buildEnd": "%s", "options": {} }\n' "${{ matrix.core }}" "$now" "$now" > "${{ matrix.core }}.json"
+          sha256sum * | tee SHA256SUMS-${{ matrix.core }}
+      - uses: actions/upload-artifact@v6
+        with:
+          name: fast-${{ matrix.core }}
+          path: out
+
+  publish:
+    name: Publish
+    needs: core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: built
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # One release per run: files a build pins (by sha512) are never replaced.
+          TAG="cores-fast-r${GITHUB_RUN_NUMBER}"
+          mkdir assets; find built -type f -exec cp {} assets/ \;
+          ls -la assets
+          NOTES="RetroPlay's console and arcade cores without Asyncify (RetroArch's Web Audio driver with its fake block). EmulatorJS/RetroArch ${RETROARCH_COMMIT::9} · emsdk $EMSDK_VERSION · built ${GITHUB_SHA::7}. Sources: the commits the EmulatorJS 4.2.3 cores were built from (see .github/workflows/cores-fast.yml); PicoDrive with EmulatorJS's Emscripten fix (cores/picodrive). Licenses inside each .data (license.txt)."
+          gh release create "$TAG" --prerelease --title "RetroPlay fast cores · run ${GITHUB_RUN_NUMBER}" --notes "$NOTES" --target "$GITHUB_SHA" assets/*
+          echo "::notice title=core release::$TAG"

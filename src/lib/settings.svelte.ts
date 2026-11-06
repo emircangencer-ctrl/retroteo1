@@ -22,6 +22,10 @@ export interface AppPrefs {
   layout: 'grid' | 'list';
   sort: SortKey;
   volume: number;
+  /** TV picture height: 'auto' (this TV's measured best) or a fixed number of lines. */
+  tvPicture: 'auto' | '1080' | '720' | '480';
+  /** The best picture height the speed test measured on this TV (0: not measured yet). */
+  tvPictureMeasured: number;
 }
 
 export type TouchSettings = ReturnType<typeof normalizeTouchSettings>;
@@ -36,7 +40,9 @@ export function normalizePrefs(value: unknown): AppPrefs {
     covers: typeof raw.covers === 'boolean' ? raw.covers : true,
     layout: raw.layout === 'list' ? 'list' : 'grid',
     sort: normalizeSort(raw.sort),
-    volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.7
+    volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.7,
+    tvPicture: raw.tvPicture === '1080' || raw.tvPicture === '720' || raw.tvPicture === '480' ? raw.tvPicture : 'auto',
+    tvPictureMeasured: [1080, 720, 480].includes(Number(raw.tvPictureMeasured)) ? Number(raw.tvPictureMeasured) : 0
   };
 }
 

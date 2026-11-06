@@ -1,5 +1,5 @@
 // TV mode: on in the RetroPlay TV app (Android TV / Google TV) or with ?tv=1 in a browser.
-import { readBridge, detectTv, createGamepadSource, padKeys, parseJson, INBOX_URL, type TvBridge, type TvInfo, type InboxFile, type UploadInfo } from './tv.ts';
+import { readBridge, detectTv, createGamepadSource, padKeys, parseJson, previewNumber, INBOX_URL, type TvBridge, type TvInfo, type TvDisplay, type InboxFile, type UploadInfo, type TvKeyLog, type TvInputDevice } from './tv.ts';
 
 const INBOX_POLL_MS = 2000;
 
@@ -75,6 +75,60 @@ class TvMode {
     if (!this.bridge) return;
     for (const id of ids) { try { this.bridge.inboxDelete(id); } catch {} }
     this.refreshInbox();
+  }
+
+  /** The TV's display mode (refresh rate) from the app, or null (older app, browser). */
+  display(): TvDisplay | null {
+    if (typeof this.bridge?.display !== 'function') return null;
+    try { const value = parseJson<TvDisplay | null>(this.bridge.display(), null); return value && Number.isFinite(Number(value.refresh)) ? { ...value, refresh: Number(value.refresh) } : null; } catch { return null; }
+  }
+
+  /** The app can open deploy previews (app 1.2+ on the Netlify site). */
+  get canOpenPreviews(): boolean {
+    return typeof this.bridge?.openSite === 'function' && this.info?.sites === true;
+  }
+
+  /** The pull request whose deploy preview is shown (0: the live site). */
+  get preview(): number {
+    return Number(this.info?.preview) || 0;
+  }
+
+  /** Opens a pull request's deploy preview (number) or the live site ('live'); false if refused. */
+  openSite(which: string): boolean {
+    const target = which === 'live' ? 'live' : previewNumber(which);
+    if (!target || typeof this.bridge?.openSite !== 'function') return false;
+    try { return this.bridge.openSite(target) === true; } catch { return false; }
+  }
+
+  /** The app takes the remote's keys for the page's screens (app 1.3+; older apps send arrow keys). */
+  get handlesRemote(): boolean {
+    return typeof this.bridge?.setRemoteMode === 'function';
+  }
+
+  #remoteMode = '';
+  setRemoteMode(mode: 'ui' | 'game') {
+    if (mode === this.#remoteMode || typeof this.bridge?.setRemoteMode !== 'function') return;
+    this.#remoteMode = mode;
+    try { this.bridge.setRemoteMode(mode); } catch {}
+  }
+
+  showKeyboard() {
+    try { this.bridge?.showKeyboard?.(); } catch {}
+  }
+
+  hideKeyboard() {
+    try { this.bridge?.hideKeyboard?.(); } catch {}
+  }
+
+  /** The remote test in Settings: null with an app older than 1.3. */
+  keyLog(): TvKeyLog | null {
+    if (typeof this.bridge?.keyLog !== 'function') return null;
+    try { return parseJson<TvKeyLog | null>(this.bridge.keyLog(), null); } catch { return null; }
+  }
+
+  inputDevices(): TvInputDevice[] {
+    if (typeof this.bridge?.inputDevices !== 'function') return [];
+    try { return parseJson<TvInputDevice[]>(this.bridge.inputDevices(), []); } catch { return []; }
   }
 
   keepScreenOn(on: boolean) {

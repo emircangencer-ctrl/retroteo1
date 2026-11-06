@@ -2,29 +2,41 @@ RetroPlay third-party software notices
 ====================================
 
 RetroPlay serves the following third-party software from its own site, unmodified except where
-noted. Each emulator core is distributed as published in the EmulatorJS 4.2.3 npm packages; the
-full license text of each core is included inside its .data archive (license.txt) and is shown by
-EmulatorJS. RetroPlay is a personal, non-commercial project.
+noted. The full license text of each emulator core is included inside its .data archive
+(license.txt). RetroPlay is a personal, non-commercial project.
 
 1. EmulatorJS 4.2.3 — GNU General Public License v3.0
    Project: https://github.com/EmulatorJS/EmulatorJS
    Files: /emulatorjs/4.2.3/data/ (loader, runtime, compression helpers, localization).
    The runtime bundle emulator.min.<hash>.js is built by RetroPlay from the unmodified 4.2.3 sources
-   with a small appended addition (retroarch.cfg extras, files written next to the game, and
-   RetroPlay's own MAME 2003-Plus build registered as a MAME core).
+   with a small appended addition (retroarch.cfg extras, files written next to the game, a picture
+   size limit with software WebGL, and RetroPlay's own MAME 2003-Plus and Snes9x 2005 Plus builds
+   registered as MAME and SNES cores).
    Source of the addition: scripts/emulatorjs-runtime.mjs in the RetroPlay repository.
 
 2. RetroArch (built into every EmulatorJS core) — GNU General Public License v3.0
    Project: https://github.com/libretro/RetroArch
 
-3. Emulator cores (EmulatorJS 4.2.3 builds)
-   - Nestopia UE (NES) — GNU General Public License v2.0 — https://github.com/EmulatorJS/nestopia
-   - FCEUmm (NES) — GNU General Public License v2.0 — https://github.com/EmulatorJS/libretro-fceumm
-   - Snes9x (SNES) — Snes9x non-commercial license — https://github.com/EmulatorJS/snes9x
+3. Emulator cores
+   The cores below are built by RetroPlay (.github/workflows/cores-fast.yml in the RetroPlay
+   repository) from the same sources and with the same toolchain as the EmulatorJS 4.2.3 packages
+   (emsdk 3.1.74, EmulatorJS/RetroArch commit 6dd4353937ef48b6ec0bfbdbb15d1c5992d86927), linked
+   without Asyncify and with RetroArch's Web Audio driver; files /emulatorjs/4.2.3/data/cores/cores-fast-r*/.
+   The EmulatorJS 4.2.3 builds are also served at /emulatorjs/4.2.3/data/cores/ (Genesis Plus GX is
+   served only as that build).
+   - Nestopia UE (NES) — GNU General Public License v2.0 — https://github.com/EmulatorJS/nestopia (6b08ec91)
+   - FCEUmm (NES) — GNU General Public License v2.0 — https://github.com/EmulatorJS/libretro-fceumm (d9d7e141)
+   - Snes9x (SNES) — Snes9x non-commercial license — https://github.com/EmulatorJS/snes9x (6ca2343e)
+   - Snes9x 2005 Plus (SNES) — Snes9x non-commercial license with GPL v2 and MIT parts (see its
+     license.txt) — https://github.com/libretro/snes9x2005 (a79dfe90), built with blargg's audio
+   - PicoDrive (Mega Drive) — MAME-style non-commercial license — https://github.com/EmulatorJS/picodrive
+     (09d3cb63), with two changes for WebAssembly that fall under the same license: EmulatorJS's own
+     Emscripten fix (their commit 51f7667) and a corrected memory handler signature; both are the
+     files in cores/picodrive/ of the RetroPlay repository
    - Genesis Plus GX (Mega Drive) — Genesis Plus GX non-commercial license — https://github.com/EmulatorJS/Genesis-Plus-GX
-   - FinalBurn Neo (arcade) — FinalBurn Neo non-commercial license — https://github.com/EmulatorJS/FBNeo
-   - MAME 2003-Plus (arcade) — MAME non-commercial license — https://github.com/EmulatorJS/mame2003-plus-libretro
-   - FB Alpha 2012 CPS2 (arcade) — FB Alpha non-commercial license — https://github.com/EmulatorJS/fbalpha2012_cps2
+   - FinalBurn Neo (arcade) — FinalBurn Neo non-commercial license — https://github.com/EmulatorJS/FBNeo (dedd04f2)
+   - MAME 2003-Plus (arcade) — MAME non-commercial license — https://github.com/EmulatorJS/mame2003-plus-libretro (3a72dae3)
+   - FB Alpha 2012 CPS2 (arcade) — FB Alpha non-commercial license — https://github.com/EmulatorJS/fbalpha2012_cps2 (3fb5b89d)
    - MAME 2003-Plus, current sources (arcade, Namco System 12) — MAME non-commercial license (see the
      license.txt in its .data archive) — built by RetroPlay, not part of the EmulatorJS packages:
      source https://github.com/libretro/mame2003-plus-libretro at commit 64b3c38ac6dae0fb513e6b881fb3bfc31fca54c4,

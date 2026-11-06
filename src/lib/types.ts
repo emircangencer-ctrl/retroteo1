@@ -53,6 +53,8 @@ export interface Game {
   nesCore?: string;
   /** NES / Mega Drive: the core chosen for this game ("… ile dene"), when it is not the default. */
   consoleCore?: string;
+  /** A PAL (50 Hz) cartridge played at 60 Hz (the core's region set to NTSC). */
+  sixtyHz?: boolean;
   unverifiedDumpAccepted?: boolean;
   restoredMetadataOnly?: boolean;
   // Faz 2

@@ -27,7 +27,7 @@ function emulatorJsSelfHost() {
       manifest = await buildRuntime({ cacheDir, outDir: staging });
       return {
         define: {
-          __EJS_RUNTIME__: JSON.stringify({ dataPath: manifest.dataPath, script: manifest.script, style: manifest.style, buildId: manifest.buildId })
+          __EJS_RUNTIME__: JSON.stringify({ dataPath: manifest.dataPath, script: manifest.script, style: manifest.style, buildId: manifest.buildId, paths: manifest.paths })
         }
       };
     },

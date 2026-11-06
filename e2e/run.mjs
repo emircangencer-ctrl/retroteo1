@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { startServer, newPage, importFile, reviewItems, answerDialog, openGame, play, closeGame, playerState, waitForPlayer, appBatterySaves, deleteEmulatorSaveStore, deleteAppSaveStates, appSaveStates, appGames, liveSram, waitFor, DIST, cdnRequests, coverRequests, recordInputs, heldInputs, touchScreen, padGeometry, gameId } from './harness.mjs';
-import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom } from './fixtures/make-roms.mjs';
+import { batteryTestRom, megaDriveBinStub, unverifiedMmc3Rom, checkerboardRom, twoPlayerRom, colourCycleRom, withChecksum, megaDriveSramRom, megaDriveSoundRom } from './fixtures/make-roms.mjs';
 import { decodePng, rowRuns } from './png.mjs';
 import { placeholderSet } from './fixtures/zip-writer.mjs';
 
@@ -29,6 +29,10 @@ const colourRom = path.join(tmp, 'colour cycle.nes');
 fs.writeFileSync(colourRom, colourCycleRom());
 const mdSramRom = path.join(tmp, 'md battery.md');
 fs.writeFileSync(mdSramRom, megaDriveSramRom());
+const mdSound = path.join(tmp, 'md sound.md');
+fs.writeFileSync(mdSound, megaDriveSoundRom());
+const mdPal = path.join(tmp, 'pal test.md');
+fs.writeFileSync(mdPal, megaDriveSoundRom({ region: 'E' }));
 // Cover art: a self-made cartridge that carries the No-Intro checksum of Super Mario Bros. (World)
 // under a meaningless file name, one named like a No-Intro release, and one nothing matches.
 const coverDir = path.join(tmp, 'covers');
@@ -354,7 +358,7 @@ await scenario('after one online visit, a game starts with no network at all (se
   const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'emulatorjs', 'runtime-manifest.json'), 'utf8'));
   await page.evaluate(() => navigator.serviceWorker.ready);
   const cached = await waitFor(() => page.evaluate(async urls => {
-    const cache = await caches.open('retroplay-emulatorjs-4.2.3-v1');
+    const cache = await caches.open('retroplay-emulatorjs-4.2.3-v2');
     const hits = await Promise.all(urls.map(url => cache.match(url)));
     return hits.every(Boolean);
   }, manifest.precache), { timeout: 60000, interval: 500 });
@@ -928,6 +932,134 @@ await scenario('faster cores: a new Mega Drive game runs on PicoDrive, a new NES
   assert.equal(second, (first + 1) & 255, `Genesis Plus GX continued PicoDrive's save (${first} → ${second})`);
 }, { viewport: { width: 1060, height: 680 } });
 
+await scenario('the cores are RetroPlay\'s own builds from their release directory, with sound through Web Audio at the player\'s volume', async page => {
+  const requests = [];
+  page.on('request', request => { const url = request.url(); if (url.includes('/emulatorjs/4.2.3/data/cores/')) requests.push(new URL(url).pathname); });
+  const iframe = () => 'document.querySelector("#player-screen iframe").contentWindow';
+  await importFile(page, checkerRom);
+  const state = await play(page, 'checkerboard');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  assert.ok(requests.some(p => /\/cores\/cores-fast-r\d+\/fceumm-legacy-wasm\.data$/.test(p)), `core from the release directory: ${requests.join(' ')}`);
+  assert.ok(requests.some(p => /\/cores\/cores-fast-r\d+\/reports\/fceumm\.json$/.test(p)), 'its own build report');
+  assert.ok(!requests.some(p => /\/cores\/(reports\/)?fceumm[-.]/.test(p)), `the stock files are not used: ${requests.join(' ')}`);
+  const audio = () => page.evaluate(source => { const w = eval(source); const emu = w.EJS_emulator; const rwa = emu.Module.RWA; return { state: rwa?.context?.state, time: rwa?.context?.currentTime || 0, gain: rwa?.gain?.gain?.value, al: Boolean(emu.Module.AL?.currentCtx) }; }, iframe());
+  const first = await audio();
+  assert.equal(first.state, 'running', JSON.stringify(first));
+  assert.equal(first.al, false, 'no OpenAL context: the build uses Web Audio');
+  await page.waitForTimeout(500);
+  assert.ok((await audio()).time > first.time, 'the audio clock runs');
+  const frames = () => page.evaluate(source => eval(source).EJS_emulator.gameManager.getFrameNum(), iframe());
+  const f0 = await frames();
+  await page.waitForTimeout(1000);
+  const fps = (await frames()) - f0;
+  assert.ok(fps >= 40 && fps <= 70, `normal speed with the audio driver pacing the frames (${fps} frames in 1 s)`);
+  await click(page, '#play-menu');
+  await waitStatus(page, /^Duraklatıldı/);
+  await click(page, '#menu-display');
+  await page.waitForSelector('#volume');
+  await page.evaluate(() => { const range = document.querySelector('#volume'); range.value = '30'; range.dispatchEvent(new Event('input', { bubbles: true })); });
+  assert.equal(Math.round((await audio()).gain * 100), 30, 'the volume reaches the Web Audio gain');
+  await page.evaluate(() => { const range = document.querySelector('#volume'); range.value = '0'; range.dispatchEvent(new Event('input', { bubbles: true })); });
+  assert.equal((await audio()).gain, 0, 'muted');
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('Mega Drive sound: a sound driver that reads its music from the cartridge plays FM and PSG on PicoDrive', async page => {
+  await importFile(page, mdSound);
+  const state = await play(page, 'md sound');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · Mega Drive/, state.error);
+  assert.equal(await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.getCore()), 'picodrive');
+  await page.waitForTimeout(1500);
+  // The output of the core's Web Audio driver, before the player's volume: the 4.2.3 PicoDrive
+  // read garbage through the Z80's bank window, so only the PSG tone was heard (about a third).
+  const level = await page.evaluate(() => new Promise(resolve => {
+    const rwa = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.Module.RWA;
+    const tap = rwa.context.createScriptProcessor(4096, 2, 2);
+    let sum = 0, n = 0;
+    tap.onaudioprocess = event => { for (const x of event.inputBuffer.getChannelData(0)) { sum += x * x; n++; } };
+    rwa.gain.connect(tap); tap.connect(rwa.context.destination);
+    setTimeout(() => { rwa.gain.disconnect(tap); tap.disconnect(); resolve({ rms: Math.sqrt(sum / Math.max(1, n)), gain: rwa.gain.gain.value, n }); }, 2000);
+  }));
+  assert.ok(level.n > 44100, `audio flows (${level.n} samples in 2 s)`);
+  assert.ok(level.gain > 0, 'not muted');
+  assert.ok(level.rms / level.gain > 0.11, `FM and PSG are both heard: ${JSON.stringify(level)}`);
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('a European (PAL) cartridge runs at 50 Hz as on its console; "60 Hz" on its game page plays it at full speed', async page => {
+  const pace = async () => page.evaluate(async () => { const gm = document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager; const f0 = gm.getFrameNum(), t0 = performance.now(); await new Promise(r => setTimeout(r, 2000)); return Math.round((gm.getFrameNum() - f0) / ((performance.now() - t0) / 1000)); });
+  // A cartridge for every region has no choice to make.
+  await importFile(page, mdSound);
+  await openGame(page, 'md sound');
+  assert.equal(await page.evaluate(() => document.querySelector('#region-row')), null, 'JUE: no region choice');
+  await importFile(page, mdPal);
+  await openGame(page, 'pal test');
+  await page.waitForSelector('#region-row');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#sixty-hz button')].map(b => [b.dataset.hz, b.getAttribute('aria-pressed')])), [['50', 'true'], ['60', 'false']]);
+  let state = await play(page, 'pal test');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  await page.waitForTimeout(1000);
+  const fifty = await pace();
+  assert.ok(fifty >= 45 && fifty <= 53, `PAL: about 50 frames a second (${fifty})`);
+  await closeGame(page);
+  await openGame(page, 'pal test');
+  await click(page, '#sixty-hz [data-hz="60"]');
+  await page.waitForFunction(() => document.querySelector('#sixty-hz [data-hz="60"]').getAttribute('aria-pressed') === 'true');
+  state = await play(page, 'pal test');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  assert.deepEqual(await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.RETROPLAY_CORE_OPTIONS), { picodrive_region: 'US' });
+  await page.waitForTimeout(1000);
+  const sixty = await pace();
+  assert.ok(sixty >= 56 && sixty <= 64, `60 Hz: about 60 frames a second (${sixty}, was ${fifty})`);
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('Super Nintendo: the game page offers Snes9x and the lighter Snes9x 2005; the choice is remembered and starts the game with it', async page => {
+  const core = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.getCore());
+  const frames = () => page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.EJS_emulator.gameManager.getFrameNum());
+  await importFile(page, snesRom);
+  await openGame(page, 'snes pad');
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#core-choice button')].map(b => [b.dataset.core, b.textContent.trim(), b.getAttribute('aria-pressed')])), [['snes', 'Snes9x', 'true'], ['snes9x2005_plus', 'Snes9x 2005', 'false']]);
+  await click(page, '#core-choice [data-core="snes9x2005_plus"]');
+  await page.waitForFunction(() => document.querySelector('#core-choice [data-core="snes9x2005_plus"]').getAttribute('aria-pressed') === 'true');
+  assert.match(await page.evaluate(() => document.querySelector('#core-choice').parentElement.textContent), /Snes9x 2005: daha hafif/);
+  let state = await play(page, 'snes pad');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · SNES \/ Snes9x 2005/, state.error);
+  assert.equal(await core(), 'snes9x2005_plus');
+  let f0 = await frames();
+  await page.waitForTimeout(800);
+  assert.ok((await frames()) - f0 > 20, 'the game runs');
+  await closeGame(page);
+  await page.reload({ waitUntil: 'networkidle' });
+  await openGame(page, 'snes pad');
+  assert.equal(await page.evaluate(() => document.querySelector('#core-choice [aria-pressed="true"]').dataset.core), 'snes9x2005_plus', 'remembered for the game');
+  await click(page, '#core-choice [data-core="snes"]');
+  await page.waitForFunction(() => document.querySelector('#core-choice [data-core="snes"]').getAttribute('aria-pressed') === 'true');
+  state = await play(page, 'snes pad');
+  assert.match(state.status, /^Çalışıyor · EmulatorJS · SNES \/ Snes9x/, state.error);
+  assert.equal(await core(), 'snes9x');
+  f0 = await frames();
+  await page.waitForTimeout(800);
+  assert.ok((await frames()) - f0 > 20, 'the game runs');
+}, { viewport: { width: 1060, height: 680 } });
+
+await scenario('without a graphics card (software WebGL) a phone-sized picture is drawn at most 480 lines high, and the speed test says so', async page => {
+  await importFile(page, checkerRom);
+  const state = await play(page, 'checkerboard');
+  assert.match(state.status, /^Çalışıyor/, state.error);
+  await page.waitForTimeout(1500);
+  const info = await page.evaluate(() => { const w = document.querySelector('#player-screen iframe').contentWindow; const c = w.document.querySelector('canvas'); const r = c.getBoundingClientRect(); return { software: w.RETROPLAY_SOFTWARE_GL, cap: w.RETROPLAY_CANVAS_CAP, ready: w.RETROPLAY_CANVAS_CAP_READY, backing: [c.width, c.height], css: [r.width, r.height], ratio: w.devicePixelRatio }; });
+  assert.ok(info.software, `CI draws WebGL in software: ${JSON.stringify(info)}`);
+  assert.equal(info.cap, 480);
+  assert.equal(info.ready, true, 'the core glue was patched');
+  assert.ok(info.css[1] * info.ratio > 480, `the screen is taller than the limit: ${JSON.stringify(info)}`);
+  assert.equal(info.backing[1], 480, `picture drawn 480 lines high: ${JSON.stringify(info)}`);
+  assert.ok(Math.abs(info.backing[0] / info.backing[1] - info.css[0] / info.css[1]) < 0.02, `same shape: ${JSON.stringify(info)}`);
+  await click(page, '#perf-test');
+  const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 20000, interval: 300 });
+  assert.match(text || '', /ekran kartı olmadan çiziliyor/);
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
+  assert.equal(history[0].gpu, 'software');
+}, { mobile: true, render: 'auto' });
+
+
 await scenario('a blocked cover request (the old TV app) or a page instead of a picture is tried again later, not remembered as "no cover"', async page => {
   let answered = 0;
   const pictures = () => page.evaluate(() => document.querySelectorAll('#library-games [data-cover="picture"] img').length);
@@ -1009,8 +1141,12 @@ await scenario('fast forward and rewind on the real core: ⏩ and Space speed it
   assert.equal(await pressed('#play-rewind'), 'false');
   const order = forward.slice(1, -1);
   const steps = back.map(v => order.indexOf(v)).filter(i => i >= 0);
-  assert.ok(steps.length >= 3, `rewind went through ${steps.length} known colours (${back.join(',')} / forward ${forward.join(',')})`);
-  assert.ok(steps.every((v, i) => i === 0 || v < steps[i - 1]), `colours in reverse order: ${steps.join(',')}`);
+  // A fast machine can rewind past the start of the recorded window; the hues then repeat from the
+  // cycle before, so the order is checked up to that point (which must be the window's start).
+  const cut = steps.findIndex((v, i) => i > 0 && v >= steps[i - 1]);
+  const reversed = cut < 0 ? steps : steps.slice(0, cut);
+  assert.ok(reversed.length >= 3, `rewind went through ${reversed.length} known colours in reverse (${back.join(',')} / forward ${forward.join(',')})`);
+  assert.ok(cut < 0 || reversed.at(-1) <= 1, `colours in reverse order: ${steps.join(',')}`);
   // Backspace held does the same.
   at = await mark();
   await page.keyboard.down('Backspace');
@@ -1365,6 +1501,19 @@ const tvStub = () => {
     exit: () => { state.exited = true; }
   };
 };
+// The TV app 1.2+: the display mode (a box that outputs 50 Hz and offers no 60 Hz mode) and deploy previews.
+const tvStubWithScreen = () => {
+  if (window !== window.top) return;
+  const opened = [];
+  const base = window.RetroPlayTV;
+  const info = JSON.parse(base.info());
+  window.__opened = opened;
+  window.RetroPlayTV = { ...base,
+    info: () => JSON.stringify({ ...info, versionName: '1.2.0', sites: true, preview: Number(sessionStorage.getItem('tv-preview') || 0) }),
+    display: () => JSON.stringify({ mode: '3840x2160@50.00', refresh: 50, width: 3840, height: 2160, requested: '', modes: ['3840x2160@50.00', '1920x1080@50.00'] }),
+    openSite: which => { opened.push(which); return /^([1-9]\d{0,5}|live)$/.test(which); }
+  };
+};
 const tvPad = (pressed, index = 0, id = 'Test Pad') => ({ index, id, timestamp: Date.now(), axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, b) => [pressed.includes(b) ? 1 : 0, pressed.includes(b) ? 1 : 0]) });
 
 await scenario('TV app: files sent from a phone are imported, the remote moves the focus, Back goes back and opens the game menu, controllers come from the app', async (page, context) => {
@@ -1463,6 +1612,338 @@ await scenario('TV app: files sent from a phone are imported, the remote moves t
   await waitStatus(page, /^Çalışıyor/);
   await waitFor(async () => (await ff()) === 'true');
 }, { init: tvStub, viewport: { width: 960, height: 540 } });
+
+await scenario('TV app 1.2: the screen\'s refresh rate in Settings and in the speed test; a deploy preview opens by its PR number and says so', async page => {
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-display');
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-display').textContent.trim()), "3840×2160 · 50 Hz · oyunlar %17 yavaş oynar: TV'nin görüntü ayarlarından 60 Hz seç");
+  // A preview by its number, typed with digit buttons (no on-screen keyboard); 0 is refused before it reaches the app.
+  await click(page, '#tv-preview-digits [data-digit="0"]');
+  await click(page, '#tv-preview-open');
+  assert.deepEqual(await page.evaluate(() => window.__opened), [], 'no PR 0');
+  await click(page, '#tv-preview-erase');
+  await click(page, '#tv-preview-digits [data-digit="9"]');
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-preview-number').textContent), '#9');
+  await click(page, '#tv-preview-open');
+  assert.deepEqual(await page.evaluate(() => window.__opened), ['9']);
+  // In a preview: a badge on every screen and the way back.
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-preview-badge')), null, 'no badge on the live site');
+  await page.evaluate(() => sessionStorage.setItem('tv-preview', '9'));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('#tv-preview-badge');
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-preview-badge').textContent), 'ÖNİZLEME #9');
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-live');
+  await click(page, '#tv-live');
+  assert.deepEqual(await page.evaluate(() => window.__opened), ['live']);
+  // The speed test names the refresh rate; the picture is limited to 1080 lines on the TV.
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  const cap = await page.evaluate(() => { const frame = document.querySelector('#player-screen iframe'); return { asked: /RETROPLAY_CANVAS_CAP = (\d+);/.exec(frame.srcdoc)?.[1], used: frame.contentWindow.RETROPLAY_CANVAS_CAP }; });
+  assert.deepEqual(cap, { asked: '1080', used: 480 }, 'the TV asks for 1080 lines; software WebGL here lowers it to 480');
+  await page.waitForTimeout(800);
+  await page.evaluate(() => window.RetroPlayTVHost.menu());
+  await page.waitForSelector('#perf-test');
+  await click(page, '#perf-test');
+  const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 20000, interval: 300 });
+  assert.match(text || '', /TV ekranı 50 Hz: oyunlar %17 yavaş oynar/);
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
+  assert.equal(history[0].refresh, 50);
+  assert.match(history[0].picture, /^\d+×\d+$/);
+}, { init: `(${tvStub})();(${tvStubWithScreen})();`, viewport: { width: 960, height: 540 }, render: 'auto' });
+
+// The TV app 1.3+: it sends the remote's d-pad and OK to the page (RetroPlayTVHost.remote) instead
+// of arrow keys, opens the on-screen keyboard on request and keeps a log of the keys it saw.
+const tvStub13 = () => {
+  if (window !== window.top) return;
+  const base = window.RetroPlayTV;
+  const info = JSON.parse(base.info());
+  const state = window.__tv;
+  state.modes = [];
+  state.keyboard = [];
+  window.RetroPlayTV = { ...base,
+    info: () => JSON.stringify({ ...info, versionName: '1.3.0' }),
+    setRemoteMode: mode => state.modes.push(mode),
+    showKeyboard: () => state.keyboard.push('show'),
+    hideKeyboard: () => state.keyboard.push('hide'),
+    keyLog: () => JSON.stringify({ n: 2, keys: [
+      { n: 1, t: Date.now(), key: 'DPAD_DOWN', device: 'TCL RC902V', source: '0x701', gamepadSource: true, sticks: false, buttons: false, mode: 'ui', route: 'arayüz' },
+      { n: 2, t: Date.now(), key: 'DPAD_CENTER', device: 'TCL RC902V', source: '0x701', gamepadSource: true, sticks: false, buttons: false, mode: 'ui', route: 'arayüz (OK)' }
+    ] }),
+    inputDevices: () => JSON.stringify([{ name: 'TCL RC902V', kind: 'kumanda', source: '0x701', virtual: false, sticks: false }, { name: 'Xbox Wireless Controller', kind: 'kontrolcü', source: '0x1000511', virtual: false, sticks: true }])
+  };
+};
+const tvRemote = (page, key) => page.evaluate(k => window.RetroPlayTVHost.remote(k, 'down', 0), key);
+const focusedName = page => page.evaluate(() => { const el = document.activeElement; return !el || el === document.body ? 'body' : el.id || el.dataset.filter || el.dataset.layout || el.dataset.digit || el.textContent.trim().slice(0, 30); });
+
+/**
+ * Every item on the screen (or in `root`) is reached with the remote's arrows from where the screen
+ * starts, focus never leaves `root`, and every focused item shows the focus ring.
+ */
+async function remoteAudit(page, label, root = 'body') {
+  const report = await page.evaluate(rootSelector => {
+    const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]):not([type="file"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const visible = el => {
+      if (el.closest('[hidden], [inert], [aria-hidden="true"]') || !el.getClientRects().length) return false;
+      const style = getComputedStyle(el);
+      return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0.01;
+    };
+    const name = el => el.id ? `#${el.id}` : `${el.tagName.toLowerCase()}${typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).filter(c => !c.startsWith('svelte-')).slice(0, 2).join('.') : ''}[${(el.getAttribute('aria-label') || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 28)}]`;
+    const scope = document.querySelector(rootSelector);
+    const all = [...scope.querySelectorAll(FOCUSABLE)].filter(visible);
+    const remote = dir => window.RetroPlayTVHost.remote(dir, 'down', 0);
+    if (!scope.contains(document.activeElement) || document.activeElement === document.body) { document.activeElement?.blur?.(); remote('down'); }
+    const start = document.activeElement;
+    const seen = new Set([start]);
+    const queue = [start];
+    const noRing = [];
+    const selects = all.filter(el => el.tagName === 'SELECT').map(name);
+    while (queue.length) {
+      const el = queue.shift();
+      el.focus({ preventScroll: true });
+      const style = getComputedStyle(el);
+      const ring = (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 3) || (style.boxShadow && style.boxShadow !== 'none');
+      if (!ring) noRing.push(name(el));
+      for (const dir of ['up', 'down', 'left', 'right']) {
+        el.focus({ preventScroll: true });
+        remote(dir);
+        const next = document.activeElement;
+        if (next && next !== document.body && !seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+    }
+    return {
+      total: all.length,
+      start: name(start),
+      missing: all.filter(el => !seen.has(el)).map(name),
+      escaped: [...seen].filter(el => !scope.contains(el)).map(name),
+      noRing,
+      selects
+    };
+  }, root);
+  assert.ok(report.total > 0, `${label}: nothing to focus`);
+  assert.deepEqual(report.missing, [], `${label}: the remote cannot reach ${report.missing.join(', ')} (from ${report.start}, ${report.total} items)`);
+  assert.deepEqual(report.escaped, [], `${label}: the focus left ${root}`);
+  assert.deepEqual(report.noRing, [], `${label}: no focus ring on ${report.noRing.join(', ')}`);
+  assert.deepEqual(report.selects, [], `${label}: a drop-down list the remote cannot open`);
+  console.log(`     remote audit · ${label}: all ${report.total} items reached from ${report.start}`);
+  return report;
+}
+
+await scenario('TV app 1.3: the remote reaches every item of every screen, dialog and the game menu; OK presses once; search types only after OK; Kumanda testi', async page => {
+  await page.waitForFunction(() => window.__tv.modes.at(-1) === 'ui');
+  // The screen shows where the remote is from the start (nothing to press first).
+  await page.waitForFunction(() => document.activeElement && document.activeElement !== document.body, null, { timeout: 3000 });
+  assert.equal(await focusedName(page), 'Oyun ekle', 'the empty library starts on "Oyun ekle"');
+  // An empty library, then one with games.
+  await remoteAudit(page, 'empty library');
+  await importFile(page, checkerRom);
+  await importFile(page, batteryRom);
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForSelector('#library-games .game-card');
+  await page.evaluate(() => document.activeElement?.blur());
+  await remoteAudit(page, 'library');
+  // Search: passed over without the keyboard; OK opens it, typing filters, moving on closes it.
+  const search = () => page.evaluate(() => { const el = document.querySelector('#search-input'); return { focused: document.activeElement === el, readOnly: el.readOnly, editing: el.dataset.tvEditing === '1' }; });
+  await page.evaluate(() => document.querySelector('#library-games .game-card .card-main').focus());
+  for (let i = 0; i < 12 && await focusedName(page) !== 'search-input'; i++) await tvRemote(page, 'up');
+  assert.deepEqual(await search(), { focused: true, readOnly: true, editing: false }, 'the remote reached the search field, read-only');
+  assert.deepEqual(await page.evaluate(() => window.__tv.keyboard), [], 'no keyboard just for passing by');
+  await tvRemote(page, 'ok');
+  await page.waitForFunction(() => document.querySelector('#search-input').dataset.tvEditing === '1');
+  assert.deepEqual(await search(), { focused: true, readOnly: false, editing: true });
+  assert.deepEqual(await page.evaluate(() => window.__tv.keyboard), ['show'], 'OK opened the on-screen keyboard');
+  await page.keyboard.type('check');
+  await page.waitForFunction(() => document.querySelectorAll('#library-games .game-card').length === 1);
+  await tvRemote(page, 'left');
+  assert.equal(await page.evaluate(() => document.querySelector('#search-input').selectionStart), 4, 'left moves the caret while typing');
+  await tvRemote(page, 'down');
+  assert.notEqual(await focusedName(page), 'search-input');
+  assert.deepEqual(await page.evaluate(() => [document.querySelector('#search-input').readOnly, window.__tv.keyboard.at(-1)]), [true, 'hide'], 'leaving the field closes the keyboard');
+  // Back while typing (when the keyboard passes it on) ends typing: the search and the screen stay.
+  await tvRemote(page, 'up');
+  assert.equal(await focusedName(page), 'search-input');
+  await tvRemote(page, 'ok');
+  await page.waitForFunction(() => document.querySelector('#search-input').dataset.tvEditing === '1');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  assert.deepEqual(await search(), { focused: true, readOnly: true, editing: false });
+  assert.deepEqual(await page.evaluate(() => [window.__tv.keyboard.at(-1), document.querySelector('#search-input').value, document.querySelectorAll('#library-games .game-card').length, location.hash]), ['hide', 'check', 1, '#/']);
+  await page.evaluate(() => { const el = document.querySelector('#search-input'); el.readOnly = false; el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); el.readOnly = true; });
+  await page.waitForFunction(() => document.querySelectorAll('#library-games .game-card').length === 2);
+  // The sort order is a button on the TV (a remote cannot open a drop-down list).
+  assert.equal(await page.evaluate(() => Boolean(document.querySelector('#sort-select'))), false);
+  const sortLabel = () => page.evaluate(() => document.querySelector('#sort-cycle').textContent.trim());
+  await page.evaluate(() => document.querySelector('#sort-cycle').focus());
+  const order = [await sortLabel()];
+  // OK: the app's message alone (a TV whose WebView drops the key) presses once …
+  await tvRemote(page, 'ok');
+  await page.waitForTimeout(900);
+  order.push(await sortLabel());
+  // … the real key with the message presses once, whichever comes first …
+  await tvRemote(page, 'ok'); await page.keyboard.press('Enter');
+  await page.waitForTimeout(900);
+  order.push(await sortLabel());
+  await page.keyboard.press('Enter'); await tvRemote(page, 'ok');
+  await page.waitForTimeout(900);
+  order.push(await sortLabel());
+  // … and a real key arriving late after the page pressed is not a second press.
+  await tvRemote(page, 'ok'); await page.waitForTimeout(300); await page.keyboard.press('Enter');
+  await page.waitForTimeout(900);
+  order.push(await sortLabel());
+  assert.deepEqual(order.map(text => text.replace(/[›\s]+$/, '')), ['Son oynanan', 'Son eklenen', 'İsme göre', 'Sisteme göre', 'Son oynanan'], 'every OK moved the order exactly one step');
+  // A game's page, its ⋯ menu and the remove dialog.
+  await openGame(page, 'checkerboard');
+  await page.evaluate(() => document.activeElement?.blur());
+  await remoteAudit(page, 'game page');
+  // The ⋯ menu takes the focus like a dialog; Back closes it, the focus goes back to ⋯.
+  await page.evaluate(() => document.querySelector('#detail-more').focus());
+  await tvRemote(page, 'ok');
+  await page.waitForSelector('#detail-menu');
+  assert.equal(await page.evaluate(() => document.querySelector('#detail-menu').contains(document.activeElement)), true, 'the ⋯ menu took the focus');
+  await remoteAudit(page, '⋯ menu', '#detail-menu');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  await page.waitForFunction(() => !document.querySelector('#detail-menu'));
+  assert.deepEqual(await page.evaluate(() => [document.activeElement?.id, location.hash.startsWith('#/game')]), ['detail-more', true], 'Back closed the menu, not the page');
+  await page.evaluate(() => document.querySelector('.detail [data-remove]').focus());
+  await tvRemote(page, 'ok');
+  await page.waitForSelector('.dialog');
+  assert.equal(await focusedName(page), 'dialog-confirm');
+  await remoteAudit(page, 'remove dialog', '.dialog');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true, 'Back closes the dialog');
+  await page.waitForFunction(() => !document.querySelector('.dialog'));
+  // Oyun ekle (the upload page), Settings with the TV section, Help.
+  for (const [hash, label, ready] of [['#/import', 'Oyun ekle', '#tv-upload'], ['#/settings', 'Ayarlar', '#tv-remote-test'], ['#/help', 'Nasıl çalışır', '.app-content h1, .app-content h2']]) {
+    await page.evaluate(h => { location.hash = h; }, hash);
+    await page.waitForSelector(ready);
+    await page.evaluate(() => document.activeElement?.blur());
+    await remoteAudit(page, label);
+  }
+  // Kumanda testi: the TV's devices and the last keys with where they went.
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-remote-test-toggle');
+  await page.evaluate(() => document.querySelector('#tv-remote-test-toggle').focus());
+  await tvRemote(page, 'ok');
+  await page.waitForSelector('#tv-key-log');
+  assert.match(await page.evaluate(() => document.querySelector('#tv-input-devices').textContent), /kumanda · TCL RC902V · 0x701[\s\S]*kontrolcü · Xbox Wireless Controller/);
+  assert.match(await page.evaluate(() => document.querySelector('#tv-key-log').textContent), /DPAD_CENTER → arayüz \(OK\) · TCL RC902V · 0x701 · gamepad kaynağı[\s\S]*DPAD_DOWN → arayüz/);
+  await remoteAudit(page, 'Ayarlar with Kumanda testi open');
+  // The PR number with the remote's digit buttons.
+  await page.evaluate(() => document.querySelector('#tv-preview-digits [data-digit="1"]').focus());
+  await tvRemote(page, 'ok');
+  await tvRemote(page, 'right');
+  await page.waitForTimeout(250);
+  await tvRemote(page, 'ok');
+  await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-preview-number').textContent), '#12');
+  await page.keyboard.press('3');
+  assert.equal(await page.evaluate(() => document.querySelector('#tv-preview-number').textContent), '#123', "the remote's own digit keys type too");
+  // The game: the keys go to the game while it runs, back to the screens in its menu.
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForSelector('#library-games .game-card');
+  await play(page, 'checkerboard');
+  await page.waitForFunction(() => window.__tv.modes.at(-1) === 'game');
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+  await waitStatus(page, /^Duraklatıldı/);
+  await page.waitForFunction(() => window.__tv.modes.at(-1) === 'ui');
+  await remoteAudit(page, 'game menu', '#player-menu');
+  // Its panels: OK opens each, every item in it is reached, Back returns to the menu.
+  for (const [opener, label] of [['#menu-display', 'Ekran ve ses'], ['#touch-settings-open', 'Kontroller ve oyuncular'], ['#menu-slots', 'Kayıt yuvaları']]) {
+    if (await page.evaluate(selector => document.querySelector(selector)?.disabled !== false, opener)) continue;
+    await page.evaluate(selector => document.querySelector(selector).focus(), opener);
+    await tvRemote(page, 'ok');
+    await page.waitForFunction(() => !document.querySelector('#play-menu-close'));
+    await page.evaluate(() => document.activeElement?.blur());
+    await remoteAudit(page, `game menu → ${label}`, '#player-menu');
+    assert.equal(await page.evaluate(() => window.RetroPlayTVHost.back()), true);
+    await page.waitForSelector('#play-menu-close');
+  }
+  await page.evaluate(() => document.querySelector('#player-menu [data-nav-default], #player-menu button').focus());
+  assert.equal(await page.evaluate(() => window.RetroPlayTVHost.menu()), true);
+  await waitStatus(page, /^Çalışıyor/);
+  await page.waitForFunction(() => window.__tv.modes.at(-1) === 'game');
+}, { init: `(${tvStub})();(${tvStub13})();(${tvStubWithScreen})();`, viewport: { width: 960, height: 540 } });
+
+await scenario('TV: an update found right after the app opens loads at once; later the banner takes the focus, the remote reaches it, "Sonra" gives the focus back', async (page, context) => {
+  const sw = path.join(DIST, 'service-worker.js');
+  const original = fs.readFileSync(sw, 'utf8');
+  try {
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    if (!(await page.evaluate(() => Boolean(navigator.serviceWorker.controller)))) await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null, { timeout: 20000 });
+    // A new version is published while the app is on "Oyun ekle" (where it never reloads by itself).
+    await page.evaluate(() => { location.hash = '#/import'; });
+    await page.waitForSelector('#tv-upload');
+    await page.evaluate(() => document.querySelector('#modal-close').focus());
+    const before = await focusedName(page);
+    assert.equal(before, 'modal-close');
+    fs.writeFileSync(sw, `${original}\n// e2e update ${Date.now()}\n`);
+    await page.evaluate(async () => { await (await navigator.serviceWorker.getRegistration()).update(); });
+    await page.waitForSelector('#update-banner', { timeout: 20000 });
+    assert.equal(await focusedName(page), 'update-reload', 'the banner took the focus: OK reloads');
+    assert.ok(await page.evaluate(() => { const r = document.querySelector('#update-banner').getBoundingClientRect(); return r.bottom <= innerHeight - 27 && r.top >= 0; }), 'inside the TV safe area');
+    // The remote reaches it from the page too.
+    await page.evaluate(() => document.querySelector('.app-content button, .app-content a[href]').focus());
+    for (let i = 0; i < 25 && !/^update-/.test(await focusedName(page)); i++) await tvRemote(page, 'down');
+    assert.match(await focusedName(page), /^update-(reload|later)$/, 'down from the page reaches the banner');
+    await tvRemote(page, 'right');
+    if (await focusedName(page) === 'update-reload') await tvRemote(page, 'right');
+    assert.equal(await focusedName(page), 'update-later');
+    await page.evaluate(() => document.querySelector('#update-later').focus());
+    await tvRemote(page, 'ok');
+    await page.waitForFunction(() => !document.querySelector('#update-banner'));
+    assert.equal(await focusedName(page), before, '"Sonra" gives the focus back');
+    // The app opens again: the waiting version loads at once, before anything is under way.
+    assert.ok(await page.evaluate(async () => Boolean((await navigator.serviceWorker.getRegistration()).waiting)), 'the new version waits');
+    await page.evaluate(() => { location.hash = '#/'; });
+    await page.reload({ waitUntil: 'networkidle' });
+    // The page reloads itself once more on the way (the context goes away meanwhile).
+    await waitFor(() => page.evaluate(async () => !(await navigator.serviceWorker.getRegistration())?.waiting).catch(() => false), { timeout: 20000, interval: 250 });
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(500);
+    assert.equal(await page.evaluate(async () => Boolean((await navigator.serviceWorker.getRegistration()).waiting) || Boolean(document.querySelector('#update-banner'))), false, 'the new version runs, no banner');
+  } finally {
+    fs.writeFileSync(sw, original);
+  }
+}, { init: `(${tvStub})();(${tvStub13})();`, viewport: { width: 960, height: 540 }, serviceWorkers: 'allow' });
+
+// A TV box's GPU as WebGL names it (the page here draws with SwiftShader, which RetroPlay would otherwise cap at 480 lines).
+const tvGpu = () => {
+  for (const proto of [window.WebGLRenderingContext?.prototype, window.WebGL2RenderingContext?.prototype].filter(Boolean)) {
+    const base = proto.getParameter;
+    proto.getParameter = function (name) { return name === 0x9246 ? 'Mali-450 MP' : base.call(this, name); };
+  }
+};
+
+await scenario('TV: the speed test measures the game at 1080, 720 and 480 lines and keeps the best picture for this TV', async page => {
+  await importFile(page, checkerRom);
+  await play(page, 'checkerboard');
+  assert.equal(await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.RETROPLAY_SOFTWARE_GL), '', 'the GPU is not software');
+  await page.waitForTimeout(800);
+  await page.evaluate(() => window.RetroPlayTVHost.menu());
+  await page.waitForSelector('#perf-test');
+  await click(page, '#perf-test');
+  const text = await waitFor(() => page.evaluate(() => { const value = document.querySelector('#player-notice-text')?.textContent || ''; return /Hız payı/.test(value) ? value : null; }), { timeout: 40000, interval: 300 });
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-performance-history') || '[]'));
+  const entry = history[0];
+  assert.deepEqual(entry.pictures.map(p => p.lines), [1080, 720, 480]);
+  assert.ok(entry.pictures.every(p => p.fps > 0), JSON.stringify(entry.pictures));
+  assert.ok(Number(entry.pictures[2].picture.split('×')[1]) <= 480, `480 lines drawn at most 480 high: ${entry.pictures[2].picture}`);
+  assert.ok([1080, 720, 480].includes(entry.chosen), String(entry.chosen));
+  // (more than 999 frames a second are written with a thousands dot)
+  assert.match(text || '', new RegExp(`görüntü ${entry.chosen} satır \\(1080: [\\d.]+ · 720: [\\d.]+ · 480: [\\d.]+ kare/sn\\)`));
+  assert.ok(Number.isFinite(entry.startMs) && entry.startMs > 0, 'start time recorded');
+  const prefs = await page.evaluate(() => JSON.parse(localStorage.getItem('retroplay-app-settings') || '{}'));
+  assert.equal(prefs.tvPictureMeasured, entry.chosen, 'kept for this TV');
+  const cap = await page.evaluate(() => document.querySelector('#player-screen iframe').contentWindow.RETROPLAY_CANVAS_CAP);
+  assert.equal(cap, entry.chosen, 'the game goes on at the chosen height');
+  await closeGame(page);
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await page.waitForSelector('#tv-picture-hint');
+  assert.match(await page.evaluate(() => document.querySelector('#tv-picture-hint').textContent), new RegExp(`bu TV için ${entry.chosen} satır seçti`));
+  // A fixed choice wins over the measurement.
+  await click(page, '#tv-picture [data-value="480"]');
+  await play(page, 'checkerboard');
+  assert.ok(await page.evaluate(() => /RETROPLAY_CANVAS_CAP = 480;/.test(document.querySelector('#player-screen iframe').srcdoc)));
+}, { init: `(${tvStub})();(${tvStubWithScreen})();(${tvGpu})();`, viewport: { width: 960, height: 540 }, render: 'auto' });
 
 await scenario('no request ever reaches cdn.emulatorjs.org', async () => {
   assert.deepEqual(cdnRequests, []);
